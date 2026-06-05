@@ -1,4 +1,4 @@
-import firstReportFixture from "../../../fixtures/contracts/first_report_fixture.json"
+import firstReportFixture from "../../../../fixtures/contracts/first_report_fixture.json"
 
 type EvidenceReference = {
   path: string
@@ -207,3 +207,5 @@ export function buildFirstReportViewModel(report: FirstReportFixture) {
     })),
   }
 }
+
+export type FirstReportViewModel = ReturnType<typeof buildFirstReportViewModel>

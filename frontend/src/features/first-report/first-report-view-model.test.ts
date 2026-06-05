@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest"
 
-import firstReportFixture from "../../../fixtures/contracts/first_report_fixture.json"
+import firstReportFixture from "../../../../fixtures/contracts/first_report_fixture.json"
 import {
   buildFirstReportViewModel,
   formatConfidence,
   formatDuration,
   formatEntropyDelta,
   type FirstReportFixture,
-} from "@/lib/first-report"
+} from "./first-report-view-model"
 
 describe("first report view model", () => {
   it("formats report-level metrics and empty states from the fixture", () => {
