@@ -108,6 +108,10 @@ Primary docs:
 - `docs/09-autonomy-and-automation-rules.md`
 - `docs/19-shared-json-contracts.md`
 
+## Branch workflow
+
+Lanes are ownership boundaries, not long-lived implementation branches. Feature work should use short atomic branches from latest `main`, following `docs/20-team-working-agreement.md`.
+
 ## Parallelization rule
 
 The three lanes must depend on shared JSON contracts before depending on each other's implementation. When a lane needs another lane's output, it should consume a fixture JSON contract first, then switch to the real service later.
