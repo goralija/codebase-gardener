@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codebase-gardener.dev/schemas/gardening_session_result.schema.json",
+  "type": "object",
+  "required": ["schema_version", "gardening_session_id", "repository_id", "trigger", "status", "started_at", "finished_at", "phase_results", "opportunities_selected", "opportunities_deferred", "maintenance_pr_plans", "errors"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "gardening_session_id": { "type": "string" },
+    "repository_id": { "type": "string" },
+    "trigger": { "type": "object" },
+    "status": { "type": "string" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "phase_results": { "type": "array" },
+    "opportunities_selected": { "type": "array", "items": { "type": "string" } },
+    "opportunities_deferred": { "type": "array" },
+    "maintenance_pr_plans": { "type": "array", "items": { "type": "string" } },
+    "errors": { "type": "array" }
+  },
+  "additionalProperties": false
+}
+

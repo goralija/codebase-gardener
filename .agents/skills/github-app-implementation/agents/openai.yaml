@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub App Implementation"
+  short_description: "Implement GitHub App workflows"
+  default_prompt: "Use $github-app-implementation to design or implement GitHub App behavior."

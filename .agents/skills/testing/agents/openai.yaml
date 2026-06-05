@@ -1,0 +1,4 @@
+interface:
+  display_name: "Testing"
+  short_description: "Verify Gardener implementation work"
+  default_prompt: "Use $testing to choose and run the right verification."

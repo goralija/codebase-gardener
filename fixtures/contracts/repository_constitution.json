@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "repository_id": "repo_demo",
+  "commit_sha": "abc123foundation",
+  "completeness_score": 0.78,
+  "protected_modules": [
+    {
+      "name": "billing",
+      "paths": ["backend/apps/billing/**"],
+      "reason": "Billing and pricing are advisory-only in v1."
+    }
+  ],
+  "never_touch": [
+    {
+      "path": "backend/apps/accounts/auth/**",
+      "reason": "Authentication changes require human-owned review."
+    }
+  ],
+  "allowed_fixes": {
+    "autonomous": ["docs", "lint_format", "generated_refresh", "dependency_patch"],
+    "assisted": ["tests", "refactoring", "module_extraction", "layer_violation_repair", "complexity_reduction", "dependency_minor_major_upgrade"],
+    "advisory": ["auth", "payments", "pricing", "permissions", "business_workflows", "migrations", "security_sensitive_code"]
+  },
+  "architecture_boundaries": [
+    {
+      "rule_id": "arch_001",
+      "description": "Frontend consumes API or fixtures and must not import backend persistence modules.",
+      "forbidden_from": ["frontend/src/**"],
+      "forbidden_to": ["backend/apps/**/models.py"],
+      "evidence": [
+        {
+          "source_type": "file",
+          "path": "docs/18-technical-architecture.md",
+          "section": "Parallelization rule",
+          "line_start": 104,
+          "line_end": 112,
+          "summary": "Lanes depend on shared JSON contracts before implementation dependencies."
+        }
+      ]
+    }
+  ],
+  "ignored_paths": ["generated/**", "migrations/**", "node_modules/**", "dist/**", ".venv/**"],
+  "open_questions": []
+}
+

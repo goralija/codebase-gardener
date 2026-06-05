@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "maintenance_pr_plan_id": "pr_plan_demo_docs",
+  "repository_id": "repo_demo",
+  "gardening_session_id": "session_demo",
+  "maintenance_opportunity_ids": ["opp_demo_docs"],
+  "branch_name": "gardener/docs-archive-seed-spec",
+  "title": "Archive stale seed specification",
+  "risk_tier": "tier_1_autonomous",
+  "confidence": 0.94,
+  "changed_paths": ["README.md", "docs/archive/original-seed-spec.md"],
+  "pr_body_sections": {
+    "goal": "Point contributors to current product truth.",
+    "evidence": "README contained superseded seed material.",
+    "entropy_impact": "Expected -2.1 entropy from clearer source truth.",
+    "verification": "Run fixture validation and docs review."
+  },
+  "required_checks": ["fixtures_validate", "docs_review"],
+  "blocked": false,
+  "block_reason": null
+}
+

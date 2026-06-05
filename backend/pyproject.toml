@@ -1,0 +1,27 @@
+[project]
+name = "codebase-gardener-backend"
+version = "0.1.0"
+description = "Django API foundation for Codebase Gardener."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "celery>=5.5,<5.6",
+  "django>=5.2,<5.3",
+  "django-environ>=0.12,<0.13",
+  "djangorestframework>=3.16,<3.17",
+  "psycopg[binary]>=3.2,<3.3",
+  "redis>=6,<7",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4.2,<9",
+  "pytest-django>=4.11,<5",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["test_*.py", "*_tests.py"]
+

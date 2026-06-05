@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gardening Session Planner"
+  short_description: "Plan deterministic gardening sessions"
+  default_prompt: "Use $gardening-session-planner to plan a Gardener run."

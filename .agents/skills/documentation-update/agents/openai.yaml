@@ -1,0 +1,4 @@
+interface:
+  display_name: "Documentation Update"
+  short_description: "Keep Gardener docs current"
+  default_prompt: "Use $documentation-update to update Codebase Gardener product docs."

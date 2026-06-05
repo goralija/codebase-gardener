@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "entropy_report_id": "entropy_demo",
+  "repository_id": "repo_demo",
+  "analysis_snapshot_id": "snap_demo",
+  "commit_sha": "abc123foundation",
+  "score": {
+    "overall": 34.0,
+    "classification": "warning",
+    "components": {
+      "architecture": 8.0,
+      "maintainability": 8.0,
+      "knowledge": 5.0,
+      "testing": 7.0,
+      "dependency": 3.0,
+      "operational": 3.0
+    }
+  },
+  "scopes": [
+    {
+      "scope_type": "logical_system",
+      "scope_id": "sys_frontend",
+      "name": "Frontend",
+      "overall": 28.0,
+      "classification": "healthy"
+    },
+    {
+      "scope_type": "logical_system",
+      "scope_id": "sys_backend",
+      "name": "Backend",
+      "overall": 36.0,
+      "classification": "warning"
+    }
+  ],
+  "top_contributors": [
+    {
+      "kind": "testing_gap",
+      "summary": "Product behavior tests are not expected until lane tasks add product models.",
+      "impact": 5.0,
+      "evidence": [
+        {
+          "source_type": "file",
+          "path": "docs/15-epics-and-tasks.md",
+          "section": "E00 Shared Foundation and Contracts",
+          "line_start": 52,
+          "line_end": 83,
+          "summary": "Foundation tasks focus on runnable scaffold, fixtures, and command setup."
+        }
+      ]
+    }
+  ],
+  "forecast": {
+    "horizon_days": 90,
+    "predicted_overall": 31.0,
+    "confidence": 0.62,
+    "summary": "Shared fixtures and root checks reduce cross-lane integration risk."
+  }
+}
+

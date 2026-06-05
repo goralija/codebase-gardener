@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codebase-gardener.dev/schemas/maintenance_pr_plan.schema.json",
+  "type": "object",
+  "required": ["schema_version", "maintenance_pr_plan_id", "repository_id", "gardening_session_id", "maintenance_opportunity_ids", "branch_name", "title", "risk_tier", "confidence", "changed_paths", "pr_body_sections", "required_checks", "blocked", "block_reason"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "maintenance_pr_plan_id": { "type": "string" },
+    "repository_id": { "type": "string" },
+    "gardening_session_id": { "type": "string" },
+    "maintenance_opportunity_ids": { "type": "array", "items": { "type": "string" } },
+    "branch_name": { "type": "string" },
+    "title": { "type": "string" },
+    "risk_tier": { "type": "string" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "changed_paths": { "type": "array", "items": { "type": "string" } },
+    "pr_body_sections": { "type": "object" },
+    "required_checks": { "type": "array", "items": { "type": "string" } },
+    "blocked": { "type": "boolean" },
+    "block_reason": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}
+

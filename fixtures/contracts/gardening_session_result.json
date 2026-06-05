@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "gardening_session_id": "session_demo",
+  "repository_id": "repo_demo",
+  "trigger": {
+    "type": "manual",
+    "actor": "user_demo"
+  },
+  "status": "completed",
+  "started_at": "2026-06-05T12:00:00Z",
+  "finished_at": "2026-06-05T12:08:00Z",
+  "phase_results": [
+    {
+      "phase": "observe",
+      "status": "completed",
+      "summary": "Loaded source truth and shared fixture contracts."
+    },
+    {
+      "phase": "plan",
+      "status": "completed",
+      "summary": "Selected one documentation maintenance opportunity."
+    }
+  ],
+  "opportunities_selected": ["opp_demo_docs"],
+  "opportunities_deferred": [],
+  "maintenance_pr_plans": ["pr_plan_demo_docs"],
+  "errors": []
+}
+

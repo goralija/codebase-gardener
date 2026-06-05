@@ -1,0 +1,158 @@
+{
+  "repository_constitution": {
+    "schema_version": "1.0",
+    "repository_id": "repo_demo",
+    "commit_sha": "abc123foundation",
+    "completeness_score": 0.78,
+    "protected_modules": [
+      {
+        "name": "billing",
+        "paths": ["backend/apps/billing/**"],
+        "reason": "Billing and pricing are advisory-only in v1."
+      }
+    ],
+    "never_touch": [
+      {
+        "path": "backend/apps/accounts/auth/**",
+        "reason": "Authentication changes require human-owned review."
+      }
+    ],
+    "allowed_fixes": {
+      "autonomous": ["docs", "lint_format", "generated_refresh", "dependency_patch"],
+      "assisted": ["tests", "refactoring", "module_extraction", "layer_violation_repair", "complexity_reduction", "dependency_minor_major_upgrade"],
+      "advisory": ["auth", "payments", "pricing", "permissions", "business_workflows", "migrations", "security_sensitive_code"]
+    },
+    "architecture_boundaries": [],
+    "ignored_paths": ["generated/**", "migrations/**", "node_modules/**", "dist/**", ".venv/**"],
+    "open_questions": []
+  },
+  "analysis_snapshot": {
+    "schema_version": "1.0",
+    "analysis_snapshot_id": "snap_demo",
+    "repository_id": "repo_demo",
+    "commit_sha": "abc123foundation",
+    "created_at": "2026-06-05T12:00:00Z",
+    "logical_systems": [
+      {
+        "logical_system_id": "sys_backend",
+        "name": "Backend",
+        "paths": ["backend/**"]
+      },
+      {
+        "logical_system_id": "sys_frontend",
+        "name": "Frontend",
+        "paths": ["frontend/**"]
+      }
+    ],
+    "signals": {
+      "dependency_cycles": [],
+      "hotspots": [],
+      "dead_code_candidates": [],
+      "ownership_risks": [],
+      "test_gaps": [],
+      "dependency_risks": [],
+      "ci_failures": []
+    },
+    "constitution_id": "constitution_demo"
+  },
+  "entropy_report": {
+    "schema_version": "1.0",
+    "entropy_report_id": "entropy_demo",
+    "repository_id": "repo_demo",
+    "analysis_snapshot_id": "snap_demo",
+    "commit_sha": "abc123foundation",
+    "score": {
+      "overall": 34.0,
+      "classification": "warning",
+      "components": {
+        "architecture": 8.0,
+        "maintainability": 8.0,
+        "knowledge": 5.0,
+        "testing": 7.0,
+        "dependency": 3.0,
+        "operational": 3.0
+      }
+    },
+    "scopes": [
+      {
+        "scope_type": "logical_system",
+        "scope_id": "sys_frontend",
+        "name": "Frontend",
+        "overall": 28.0,
+        "classification": "healthy"
+      }
+    ],
+    "top_contributors": [],
+    "forecast": {
+      "horizon_days": 90,
+      "predicted_overall": 31.0,
+      "confidence": 0.62,
+      "summary": "Shared fixtures and root checks reduce cross-lane integration risk."
+    }
+  },
+  "gardening_session_result": {
+    "schema_version": "1.0",
+    "gardening_session_id": "session_demo",
+    "repository_id": "repo_demo",
+    "trigger": {
+      "type": "manual",
+      "actor": "user_demo"
+    },
+    "status": "completed",
+    "started_at": "2026-06-05T12:00:00Z",
+    "finished_at": "2026-06-05T12:08:00Z",
+    "phase_results": [
+      {
+        "phase": "observe",
+        "status": "completed",
+        "summary": "Loaded source truth and shared fixture contracts."
+      }
+    ],
+    "opportunities_selected": ["opp_demo_docs"],
+    "opportunities_deferred": [],
+    "maintenance_pr_plans": ["pr_plan_demo_docs"],
+    "errors": []
+  },
+  "maintenance_opportunities": [
+    {
+      "schema_version": "1.0",
+      "maintenance_opportunity_id": "opp_demo_docs",
+      "repository_id": "repo_demo",
+      "analysis_snapshot_id": "snap_demo",
+      "category": "docs",
+      "risk_tier": "tier_1_autonomous",
+      "confidence": 0.94,
+      "title": "Archive stale seed specification",
+      "summary": "README should point contributors to current product truth instead of the original seed spec.",
+      "affected_paths": ["README.md", "docs/archive/original-seed-spec.md"],
+      "blocked_by": [],
+      "expected_entropy_delta": -2.1,
+      "required_checks": ["fixtures_validate", "docs_review"],
+      "evidence": []
+    }
+  ],
+  "maintenance_pr_plans": [
+    {
+      "schema_version": "1.0",
+      "maintenance_pr_plan_id": "pr_plan_demo_docs",
+      "repository_id": "repo_demo",
+      "gardening_session_id": "session_demo",
+      "maintenance_opportunity_ids": ["opp_demo_docs"],
+      "branch_name": "gardener/docs-archive-seed-spec",
+      "title": "Archive stale seed specification",
+      "risk_tier": "tier_1_autonomous",
+      "confidence": 0.94,
+      "changed_paths": ["README.md", "docs/archive/original-seed-spec.md"],
+      "pr_body_sections": {
+        "goal": "Point contributors to current product truth.",
+        "evidence": "README contained superseded seed material.",
+        "entropy_impact": "Expected -2.1 entropy.",
+        "verification": "Run fixture validation and docs review."
+      },
+      "required_checks": ["fixtures_validate", "docs_review"],
+      "blocked": false,
+      "block_reason": null
+    }
+  ]
+}
+

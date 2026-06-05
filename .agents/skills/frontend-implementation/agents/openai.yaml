@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frontend Implementation"
+  short_description: "Build React dashboard work"
+  default_prompt: "Use $frontend-implementation to implement Codebase Gardener frontend behavior."
