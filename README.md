@@ -11,6 +11,8 @@ Current product truth lives in `docs/`, `GARDENER.md`, and `open-questions-and-c
 - `uv` for Python workspaces and `pnpm` for frontend/workspace packages
 - JSON Schema-backed shared fixtures in `fixtures/`
 
+Use Node 24 for frontend work. The root `package.json` declares the supported range, and local version managers can use `.nvmrc` or `.node-version`.
+
 ## Start Here
 
 ```bash
@@ -45,3 +47,5 @@ make dev
 - Lane C: Sessions, PR Automation, Learning
 
 Shared JSON contracts and fixtures are the boundary between lanes. Read `docs/18-technical-architecture.md` and `docs/19-shared-json-contracts.md` before cross-lane work.
+
+Lanes are ownership areas, not long-lived working branches. Read `docs/20-team-working-agreement.md` before starting feature work.

@@ -1,4 +1,4 @@
-.PHONY: setup services dev backend-dev frontend-dev check backend-check backend-test analysis-test fixtures-validate frontend-lint frontend-test frontend-build frontend-e2e
+.PHONY: setup services dev backend-dev frontend-dev check backend-check backend-test analysis-test fixtures-validate docs-skills-validate frontend-lint frontend-test frontend-build frontend-e2e
 .PHONY: services-check runtime-check backend-migrate
 
 PYTHON_VERSION ?= 3.12
@@ -26,7 +26,7 @@ backend-dev:
 frontend-dev:
 	pnpm --dir frontend dev --host 0.0.0.0
 
-check: services-check fixtures-validate backend-check backend-test analysis-test frontend-lint frontend-test frontend-build frontend-e2e
+check: services-check fixtures-validate docs-skills-validate backend-check backend-test analysis-test frontend-lint frontend-test frontend-build frontend-e2e
 
 backend-check:
 	cd backend && uv run python manage.py check
@@ -42,6 +42,9 @@ analysis-test:
 
 fixtures-validate:
 	uv run python scripts/validate_fixtures.py
+
+docs-skills-validate:
+	uv run python scripts/validate_docs_and_skills.py
 
 frontend-test:
 	pnpm --dir frontend test:run
