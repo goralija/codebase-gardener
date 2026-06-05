@@ -21,13 +21,39 @@ function renderApp() {
 }
 
 describe("App", () => {
-  it("renders first-report fixture data", async () => {
+  it("renders the required first-report dashboard sections", async () => {
     renderApp()
 
     expect(
-      await screen.findByRole("heading", { name: "Codebase Gardener" })
+      await screen.findByRole("heading", { name: "First report" })
     ).toBeInTheDocument()
-    expect(screen.getByText("34")).toBeInTheDocument()
-    expect(screen.getAllByText("Archive stale seed specification")).toHaveLength(2)
+    expect(screen.getByText("Repository Entropy Score")).toBeInTheDocument()
+    expect(screen.getByText("Constitution Coverage")).toBeInTheDocument()
+    expect(screen.getAllByText("Session Status")).toHaveLength(1)
+    expect(
+      screen.getByRole("heading", { name: "Architecture violations" })
+    ).toBeInTheDocument()
+    expect(screen.getByText(/No architecture violations/)).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Constitution questions" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("No open constitution questions in this report.")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Session status" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Maintenance opportunities" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "Focused PR plans" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getAllByText("Archive stale seed specification")
+    ).toHaveLength(2)
+    expect(
+      screen.getByText("gardener/docs-archive-seed-spec")
+    ).toBeInTheDocument()
   })
 })
