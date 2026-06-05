@@ -36,6 +36,10 @@ The chosen stack must support:
 - hosted dashboard/API
 - logs, metrics, and error tracking
 
+## Local development services
+
+The default Docker Compose host ports are `15432` for PostgreSQL and `16379` for Redis to avoid collisions with common local services. Developers may override `POSTGRES_PORT`, `REDIS_PORT`, `DATABASE_URL`, and `REDIS_URL` per worktree or machine.
+
 ## Worker requirements
 
 - Isolate customer sessions.

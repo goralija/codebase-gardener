@@ -1,6 +1,8 @@
 .PHONY: setup services dev backend-dev frontend-dev check backend-check backend-test analysis-test fixtures-validate frontend-lint frontend-test frontend-build frontend-e2e
+.PHONY: services-check runtime-check backend-migrate
 
 PYTHON_VERSION ?= 3.12
+DOCKER ?= docker
 
 setup:
 	uv sync --python $(PYTHON_VERSION) --all-packages --all-groups
@@ -8,7 +10,12 @@ setup:
 	pnpm --dir frontend exec playwright install chromium
 
 services:
-	docker compose up -d postgres redis
+	$(DOCKER) compose up -d --wait postgres redis
+
+services-check:
+	$(DOCKER) compose config --quiet
+
+runtime-check: services backend-migrate backend-check
 
 dev: services
 	$(MAKE) -j2 backend-dev frontend-dev
@@ -19,10 +26,13 @@ backend-dev:
 frontend-dev:
 	pnpm --dir frontend dev --host 0.0.0.0
 
-check: fixtures-validate backend-check backend-test analysis-test frontend-lint frontend-test frontend-build frontend-e2e
+check: services-check fixtures-validate backend-check backend-test analysis-test frontend-lint frontend-test frontend-build frontend-e2e
 
 backend-check:
 	cd backend && uv run python manage.py check
+
+backend-migrate:
+	cd backend && uv run python manage.py migrate --noinput
 
 backend-test:
 	cd backend && uv run pytest

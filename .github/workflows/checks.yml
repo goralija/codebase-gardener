@@ -49,4 +49,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --dir frontend exec playwright install --with-deps chromium
       - run: make check
-
+        env:
+          DATABASE_URL: postgres://gardener:gardener@localhost:5432/gardener
+          REDIS_URL: redis://localhost:6379/0
