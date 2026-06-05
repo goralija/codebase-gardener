@@ -80,7 +80,7 @@ The team has agreed stack, repo scaffold, fixtures, and shared JSON contracts so
 - Intent: Define local and CI commands for pytest, Vitest, Playwright, linting, and docs/skill validation.
 - Dependencies: E00-T02
 - Acceptance criteria: A single documented command set verifies backend, frontend, analysis, docs, and skills.
-- Verification: Root `make check` and `.github/workflows/checks.yml` run fixture validation, backend checks/tests, analysis tests, frontend lint/Vitest/build, and Playwright smoke.
+- Verification: Root `make check` and `.github/workflows/checks.yml` run fixture validation, backend checks/tests, analysis tests, frontend lint/Vitest/build, and Playwright smoke. `make runtime-check` verifies local services and migrations.
 
 ## E01 Product Foundation and Safety Decisions
 

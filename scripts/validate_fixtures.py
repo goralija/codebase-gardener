@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,10 +28,22 @@ def load_json(path: Path) -> object:
         return json.load(handle)
 
 
+def load_schema_registry() -> Registry:
+    resources = []
+    for schema_path in SCHEMA_DIR.glob("*.schema.json"):
+        schema = load_json(schema_path)
+        if isinstance(schema, dict) and "$id" in schema:
+            resources.append((schema["$id"], Resource.from_contents(schema)))
+    return Registry().with_resources(resources)
+
+
+SCHEMA_REGISTRY = load_schema_registry()
+
+
 def validate_fixture(fixture_name: str, schema_name: str) -> None:
     schema = load_json(SCHEMA_DIR / schema_name)
     fixture = load_json(CONTRACT_DIR / fixture_name)
-    validator = Draft202012Validator(schema)
+    validator = Draft202012Validator(schema, registry=SCHEMA_REGISTRY)
     errors = sorted(validator.iter_errors(fixture), key=lambda error: error.json_path)
     if errors:
         details = "\n".join(f"{error.json_path}: {error.message}" for error in errors)
@@ -45,4 +58,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

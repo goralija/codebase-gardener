@@ -4,13 +4,18 @@
   "type": "object",
   "required": ["repository_constitution", "analysis_snapshot", "entropy_report", "gardening_session_result", "maintenance_opportunities", "maintenance_pr_plans"],
   "properties": {
-    "repository_constitution": { "type": "object" },
-    "analysis_snapshot": { "type": "object" },
-    "entropy_report": { "type": "object" },
-    "gardening_session_result": { "type": "object" },
-    "maintenance_opportunities": { "type": "array" },
-    "maintenance_pr_plans": { "type": "array" }
+    "repository_constitution": { "$ref": "https://codebase-gardener.dev/schemas/repository_constitution.schema.json" },
+    "analysis_snapshot": { "$ref": "https://codebase-gardener.dev/schemas/analysis_snapshot.schema.json" },
+    "entropy_report": { "$ref": "https://codebase-gardener.dev/schemas/entropy_report.schema.json" },
+    "gardening_session_result": { "$ref": "https://codebase-gardener.dev/schemas/gardening_session_result.schema.json" },
+    "maintenance_opportunities": {
+      "type": "array",
+      "items": { "$ref": "https://codebase-gardener.dev/schemas/maintenance_opportunity.schema.json" }
+    },
+    "maintenance_pr_plans": {
+      "type": "array",
+      "items": { "$ref": "https://codebase-gardener.dev/schemas/maintenance_pr_plan.schema.json" }
+    }
   },
   "additionalProperties": false
 }
-

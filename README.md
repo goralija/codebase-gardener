@@ -19,6 +19,19 @@ make services
 make check
 ```
 
+If Docker is running under a non-default context, pass it through `DOCKER`:
+
+```bash
+DOCKER="docker --context desktop-linux" make services
+```
+
+The default service ports avoid common local PostgreSQL and Redis conflicts:
+
+- PostgreSQL: host `15432` -> container `5432`
+- Redis: host `16379` -> container `6379`
+
+Override `POSTGRES_PORT`, `REDIS_PORT`, `DATABASE_URL`, and `REDIS_URL` in `.env` when a worktree or machine needs different ports.
+
 For active development:
 
 ```bash
@@ -32,4 +45,3 @@ make dev
 - Lane C: Sessions, PR Automation, Learning
 
 Shared JSON contracts and fixtures are the boundary between lanes. Read `docs/18-technical-architecture.md` and `docs/19-shared-json-contracts.md` before cross-lane work.
-

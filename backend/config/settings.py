@@ -66,7 +66,7 @@ ASGI_APPLICATION = "config.asgi.application"
 DATABASES = {
     "default": env.db(
         "DATABASE_URL",
-        default="postgres://gardener:gardener@localhost:5432/gardener",
+        default="postgres://gardener:gardener@localhost:15432/gardener",
     )
 }
 
@@ -82,6 +82,5 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
 }
 
-CELERY_BROKER_URL = env("REDIS_URL", default="redis://localhost:6379/0")
+CELERY_BROKER_URL = env("REDIS_URL", default="redis://localhost:16379/0")
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
-
