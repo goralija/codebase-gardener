@@ -1,0 +1,4 @@
+interface:
+  display_name: "Entropy Modeler"
+  short_description: "Model entropy scores and signals"
+  default_prompt: "Use $entropy-modeler to design entropy scoring behavior."

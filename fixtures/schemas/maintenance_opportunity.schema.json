@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codebase-gardener.dev/schemas/maintenance_opportunity.schema.json",
+  "type": "object",
+  "required": ["schema_version", "maintenance_opportunity_id", "repository_id", "analysis_snapshot_id", "category", "risk_tier", "confidence", "title", "summary", "affected_paths", "blocked_by", "expected_entropy_delta", "required_checks", "evidence"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "maintenance_opportunity_id": { "type": "string" },
+    "repository_id": { "type": "string" },
+    "analysis_snapshot_id": { "type": "string" },
+    "category": { "type": "string" },
+    "risk_tier": { "type": "string" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "title": { "type": "string" },
+    "summary": { "type": "string" },
+    "affected_paths": { "type": "array", "items": { "type": "string" } },
+    "blocked_by": { "type": "array" },
+    "expected_entropy_delta": { "type": "number" },
+    "required_checks": { "type": "array", "items": { "type": "string" } },
+    "evidence": { "type": "array" }
+  },
+  "additionalProperties": false
+}
+

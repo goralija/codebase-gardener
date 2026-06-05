@@ -1,0 +1,4 @@
+interface:
+  display_name: "Analysis Engine Implementation"
+  short_description: "Build Repowise analysis work"
+  default_prompt: "Use $analysis-engine-implementation to implement repository analysis behavior."

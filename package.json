@@ -1,0 +1,15 @@
+{
+  "name": "codebase-gardener",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.26.2",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "frontend:dev": "pnpm --dir frontend dev",
+    "frontend:build": "pnpm --dir frontend build",
+    "frontend:test": "pnpm --dir frontend test:run",
+    "frontend:e2e": "pnpm --dir frontend exec playwright test"
+  }
+}

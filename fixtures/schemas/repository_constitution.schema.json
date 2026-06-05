@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codebase-gardener.dev/schemas/repository_constitution.schema.json",
+  "type": "object",
+  "required": ["schema_version", "repository_id", "commit_sha", "completeness_score", "protected_modules", "never_touch", "allowed_fixes", "architecture_boundaries", "ignored_paths", "open_questions"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "repository_id": { "type": "string" },
+    "commit_sha": { "type": "string" },
+    "completeness_score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "protected_modules": { "type": "array" },
+    "never_touch": { "type": "array" },
+    "allowed_fixes": {
+      "type": "object",
+      "required": ["autonomous", "assisted", "advisory"],
+      "properties": {
+        "autonomous": { "type": "array", "items": { "type": "string" } },
+        "assisted": { "type": "array", "items": { "type": "string" } },
+        "advisory": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "architecture_boundaries": { "type": "array" },
+    "ignored_paths": { "type": "array", "items": { "type": "string" } },
+    "open_questions": { "type": "array" }
+  },
+  "additionalProperties": false
+}
+

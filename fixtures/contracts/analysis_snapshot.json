@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "analysis_snapshot_id": "snap_demo",
+  "repository_id": "repo_demo",
+  "commit_sha": "abc123foundation",
+  "created_at": "2026-06-05T12:00:00Z",
+  "logical_systems": [
+    {
+      "logical_system_id": "sys_backend",
+      "name": "Backend",
+      "paths": ["backend/**"]
+    },
+    {
+      "logical_system_id": "sys_analysis",
+      "name": "Analysis Engine",
+      "paths": ["analysis_engine/**", "fixtures/**"]
+    },
+    {
+      "logical_system_id": "sys_frontend",
+      "name": "Frontend",
+      "paths": ["frontend/**"]
+    }
+  ],
+  "signals": {
+    "dependency_cycles": [],
+    "hotspots": [
+      {
+        "path": "README.md",
+        "churn": 8,
+        "complexity": 1,
+        "summary": "Seed spec was replaced by current foundation instructions."
+      }
+    ],
+    "dead_code_candidates": [],
+    "ownership_risks": [],
+    "test_gaps": [
+      {
+        "path": "backend/apps/**",
+        "summary": "Product models are intentionally deferred until lane work starts."
+      }
+    ],
+    "dependency_risks": [],
+    "ci_failures": []
+  },
+  "constitution_id": "constitution_demo"
+}
+

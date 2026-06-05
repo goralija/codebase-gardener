@@ -1,0 +1,4 @@
+interface:
+  display_name: "Backend Implementation"
+  short_description: "Build Django/DRF backend work"
+  default_prompt: "Use $backend-implementation to implement Codebase Gardener backend behavior."

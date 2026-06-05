@@ -1,0 +1,4 @@
+interface:
+  display_name: "Safe PR Author"
+  short_description: "Author safe maintenance PRs"
+  default_prompt: "Use $safe-pr-author to prepare a safe maintenance PR."

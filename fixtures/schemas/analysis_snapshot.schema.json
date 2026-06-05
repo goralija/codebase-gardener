@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codebase-gardener.dev/schemas/analysis_snapshot.schema.json",
+  "type": "object",
+  "required": ["schema_version", "analysis_snapshot_id", "repository_id", "commit_sha", "created_at", "logical_systems", "signals", "constitution_id"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "analysis_snapshot_id": { "type": "string" },
+    "repository_id": { "type": "string" },
+    "commit_sha": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "logical_systems": { "type": "array" },
+    "signals": {
+      "type": "object",
+      "required": ["dependency_cycles", "hotspots", "dead_code_candidates", "ownership_risks", "test_gaps", "dependency_risks", "ci_failures"],
+      "properties": {
+        "dependency_cycles": { "type": "array" },
+        "hotspots": { "type": "array" },
+        "dead_code_candidates": { "type": "array" },
+        "ownership_risks": { "type": "array" },
+        "test_gaps": { "type": "array" },
+        "dependency_risks": { "type": "array" },
+        "ci_failures": { "type": "array" }
+      }
+    },
+    "constitution_id": { "type": "string" }
+  },
+  "additionalProperties": false
+}
+

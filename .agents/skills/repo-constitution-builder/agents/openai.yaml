@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo Constitution Builder"
+  short_description: "Build deterministic repo constitutions"
+  default_prompt: "Use $repo-constitution-builder to derive or update a Repository Constitution."

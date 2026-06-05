@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "repository_id": "repo_demo",
+  "preferred_pr_size": "small",
+  "accepted_categories": ["docs", "dependency_patch"],
+  "rejected_categories": ["large_refactor"],
+  "reverted_categories": [],
+  "learned_protected_patterns": [],
+  "review_preferences": ["Prefer one maintenance category per PR"],
+  "updated_from_pr_outcomes": [
+    {
+      "maintenance_pr_id": "mpr_demo_001",
+      "outcome": "merged",
+      "category": "docs"
+    }
+  ]
+}
+

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codebase-gardener.dev/schemas/entropy_report.schema.json",
+  "type": "object",
+  "required": ["schema_version", "entropy_report_id", "repository_id", "analysis_snapshot_id", "commit_sha", "score", "scopes", "top_contributors", "forecast"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "entropy_report_id": { "type": "string" },
+    "repository_id": { "type": "string" },
+    "analysis_snapshot_id": { "type": "string" },
+    "commit_sha": { "type": "string" },
+    "score": {
+      "type": "object",
+      "required": ["overall", "classification", "components"],
+      "properties": {
+        "overall": { "type": "number" },
+        "classification": { "type": "string" },
+        "components": { "type": "object" }
+      }
+    },
+    "scopes": { "type": "array" },
+    "top_contributors": { "type": "array" },
+    "forecast": { "type": "object" }
+  },
+  "additionalProperties": false
+}
+

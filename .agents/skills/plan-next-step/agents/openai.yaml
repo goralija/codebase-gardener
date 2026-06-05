@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plan Next Step"
+  short_description: "Choose the next backlog task"
+  default_prompt: "Use $plan-next-step to pick the next Codebase Gardener task."

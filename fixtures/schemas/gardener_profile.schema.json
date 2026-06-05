@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codebase-gardener.dev/schemas/gardener_profile.schema.json",
+  "type": "object",
+  "required": ["schema_version", "repository_id", "preferred_pr_size", "accepted_categories", "rejected_categories", "reverted_categories", "learned_protected_patterns", "review_preferences", "updated_from_pr_outcomes"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "repository_id": { "type": "string" },
+    "preferred_pr_size": { "type": "string" },
+    "accepted_categories": { "type": "array", "items": { "type": "string" } },
+    "rejected_categories": { "type": "array", "items": { "type": "string" } },
+    "reverted_categories": { "type": "array", "items": { "type": "string" } },
+    "learned_protected_patterns": { "type": "array" },
+    "review_preferences": { "type": "array", "items": { "type": "string" } },
+    "updated_from_pr_outcomes": { "type": "array" }
+  },
+  "additionalProperties": false
+}
+

@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "maintenance_opportunity_id": "opp_demo_docs",
+  "repository_id": "repo_demo",
+  "analysis_snapshot_id": "snap_demo",
+  "category": "docs",
+  "risk_tier": "tier_1_autonomous",
+  "confidence": 0.94,
+  "title": "Archive stale seed specification",
+  "summary": "README should point contributors to current product truth instead of the original seed spec.",
+  "affected_paths": ["README.md", "docs/archive/original-seed-spec.md"],
+  "blocked_by": [],
+  "expected_entropy_delta": -2.1,
+  "required_checks": ["fixtures_validate", "docs_review"],
+  "evidence": [
+    {
+      "source_type": "file",
+      "path": "README.md",
+      "section": "Foundation Stack",
+      "line_start": 1,
+      "line_end": 16,
+      "summary": "README now names current foundation stack and source truth."
+    }
+  ]
+}
+
