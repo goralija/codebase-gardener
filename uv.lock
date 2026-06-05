@@ -144,8 +144,10 @@ dependencies = [
     { name = "django" },
     { name = "django-environ" },
     { name = "djangorestframework" },
+    { name = "jsonschema" },
     { name = "psycopg", extra = ["binary"] },
     { name = "redis" },
+    { name = "referencing" },
 ]
 
 [package.dev-dependencies]
@@ -160,8 +162,10 @@ requires-dist = [
     { name = "django", specifier = ">=5.2,<5.3" },
     { name = "django-environ", specifier = ">=0.12,<0.13" },
     { name = "djangorestframework", specifier = ">=3.16,<3.17" },
+    { name = "jsonschema", specifier = ">=4.25.1,<5" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<3.3" },
     { name = "redis", specifier = ">=6,<7" },
+    { name = "referencing", specifier = ">=0.37,<0.38" },
 ]
 
 [package.metadata.requires-dev]
