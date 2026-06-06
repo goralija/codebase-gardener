@@ -9,6 +9,10 @@ from apps.billing.services import (
 )
 from apps.common.api import api_error_response
 from apps.common.models import AuditEvent
+from apps.maintenance_prs.manual_plans import (
+    ManualPlanPayloadError,
+    normalize_manual_plan_payload,
+)
 from apps.maintenance_prs.models import MaintenancePRPlan
 from apps.maintenance_prs.policy import DEFAULT_CONFIDENCE_THRESHOLD
 from apps.repositories.models import ManagedRepository
@@ -86,11 +90,18 @@ def repository_automation_trigger(request, organization_id, repository_id):
             status_code=status.HTTP_403_FORBIDDEN,
         )
 
+    extra = {"source_view": "repository_automation"}
+    manual_plan = _manual_plan_from_request(request.data)
+    if isinstance(manual_plan, Response):
+        return manual_plan
+    if manual_plan is not None:
+        extra["manual_plan"] = manual_plan
+
     try:
         result = trigger_manual_session(
             repository=repository,
             actor=request.user,
-            extra={"source_view": "repository_automation"},
+            extra=extra,
         )
     except TriggerNotPermittedError as exc:
         return api_error_response(
@@ -106,6 +117,22 @@ def repository_automation_trigger(request, organization_id, repository_id):
         )
 
     return Response({"trigger": result}, status=status.HTTP_202_ACCEPTED)
+
+
+def _manual_plan_from_request(data):
+    if not isinstance(data, dict):
+        return None
+    raw = data.get("manual_plan")
+    if raw is None:
+        return None
+    try:
+        return normalize_manual_plan_payload(raw)
+    except ManualPlanPayloadError as exc:
+        return api_error_response(
+            "validation_error",
+            str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
 
 
 def _automation_payload(repository, user):

@@ -7,6 +7,10 @@ from apps.analysis.runner import AnalysisRunError, run_repository_analysis
 from apps.common.models import AuditEvent
 from apps.github_app.client import RETRYABLE_STATUS_CODES, GitHubAPIError
 from apps.maintenance_prs.docs_fixes import has_implemented_file_fix
+from apps.maintenance_prs.manual_plans import (
+    ManualPlanPayloadError,
+    create_manual_session_pr_plan,
+)
 from apps.maintenance_prs.models import MaintenancePRPlan
 from apps.maintenance_prs.planner import plan_maintenance_prs
 from apps.profiles.models import GardenerProfile
@@ -210,7 +214,7 @@ def _plan_session_prs(
 
     opportunities = artifact_opportunities or first_report.get("maintenance_opportunities") or []
     if not opportunities:
-        return []
+        return _manual_session_pr_plans(session)
     constitution = (
         artifacts.get("constitution")
         if artifact_opportunities
@@ -224,7 +228,17 @@ def _plan_session_prs(
         opportunities=opportunities,
         constitution=constitution,
         profile=profile,
-    )
+    ) + _manual_session_pr_plans(session)
+
+
+def _manual_session_pr_plans(session: GardeningSession) -> list[MaintenancePRPlan]:
+    payload = session.trigger.get("manual_plan")
+    if not isinstance(payload, dict):
+        return []
+    try:
+        return [create_manual_session_pr_plan(session, payload)]
+    except ManualPlanPayloadError:
+        return []
 
 
 def _is_fixture_report(session: GardeningSession, first_report: dict) -> bool:

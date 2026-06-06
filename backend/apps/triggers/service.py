@@ -22,7 +22,7 @@ from apps.sessions.models import GardeningSession
 from apps.sessions.tasks import run_gardening_session
 from apps.triggers import registry
 from apps.triggers.models import RepositoryAutomationPolicy, RepositoryCommitTracker
-from apps.triggers.policy import ensure_trigger_permitted, trigger_enabled_for_repository
+from apps.triggers.policy import ensure_trigger_permitted
 from apps.triggers.thresholds import (
     changed_paths_hit_protected,
     commit_threshold,

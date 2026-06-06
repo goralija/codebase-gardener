@@ -45,22 +45,9 @@ def test_apply_ai_fix_applies_search_replace_block(monkeypatch):
     assert "def used()" in result
 
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 def test_apply_ai_fix_chunks_large_file_and_applies_edits(monkeypatch):
     from apps.maintenance_prs import ai_fixes
 
-    # Build a >40k-char file so it is processed in multiple chunk passes.
-=======
-def test_apply_ai_fix_chunks_large_file_and_applies_edits(monkeypatch):
-    from apps.maintenance_prs import ai_fixes
-
-<<<<<<< HEAD
-    # Build a >40k-char file so it is processed in multiple chunks.
->>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
-=======
-    # Build a >40k-char file so it is processed in multiple chunk passes.
->>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
     kept = "".join(f"def used_{i}():\n    return {i}\n\n\n" for i in range(4000))
     big = kept + "def dead():\n    return 0\n"
     assert len(big) > 40_000
@@ -69,40 +56,18 @@ def test_apply_ai_fix_chunks_large_file_and_applies_edits(monkeypatch):
 
     def fake_complete(*a, **k):
         calls["n"] += 1
-        return (
-            "<<<<<<< SEARCH\ndef dead():\n    return 0\n=======\n>>>>>>> REPLACE\n"
-        )
+        return "<<<<<<< SEARCH\ndef dead():\n    return 0\n=======\n>>>>>>> REPLACE\n"
 
-<<<<<<< HEAD
-<<<<<<< HEAD
     monkeypatch.setenv("GARDENER_AI_FIX_CHUNK_WORKERS", "4")
-=======
->>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
-=======
-    monkeypatch.setenv("GARDENER_AI_FIX_CHUNK_WORKERS", "4")
->>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
     monkeypatch.setattr(ai_fixes, "complete", fake_complete)
 
     result = apply_ai_fix("core/big.py", big, _Plan(changed_paths=["core/big.py"]), {})
 
-<<<<<<< HEAD
-<<<<<<< HEAD
     assert calls["n"] > 1
-=======
-    assert calls["n"] > 1          # multiple chunk passes
->>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
-=======
-    assert calls["n"] > 1
->>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
     assert "def dead()" not in result
     assert "def used_0()" in result
 
 
-<<<<<<< HEAD
-=======
->>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
-=======
->>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
 def test_apply_ai_fix_rejects_unmatched_search_block(monkeypatch):
     block = (
         "<<<<<<< SEARCH\n"
@@ -117,11 +82,6 @@ def test_apply_ai_fix_rejects_unmatched_search_block(monkeypatch):
         apply_ai_fix("core/util.py", ORIGINAL, _Plan(), {})
 
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
 def test_apply_ai_fix_skips_invalid_python_block_but_keeps_valid_edit(monkeypatch):
     bad_block = (
         "<<<<<<< SEARCH\n"
@@ -145,33 +105,26 @@ def test_apply_ai_fix_skips_invalid_python_block_but_keeps_valid_edit(monkeypatc
     assert "def used()" in result
 
 
-<<<<<<< HEAD
-=======
->>>>>>> 9e7c4e4 (feat(ai-fixes): progress logging + percentage callback for AI authoring)
-=======
->>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
 def test_apply_ai_fix_reports_progress(monkeypatch):
     fixed = "import os\n\n\ndef used():\n    return 1\n"
     _patch_llm(monkeypatch, f"```python\n{fixed}```")
 
     events = []
     apply_ai_fix(
-        "core/util.py", ORIGINAL, _Plan(), {},
+        "core/util.py",
+        ORIGINAL,
+        _Plan(),
+        {},
         progress=lambda pct, phase, msg: events.append((pct, phase)),
     )
 
     percents = [p for p, _ in events]
     phases = [ph for _, ph in events]
     assert percents[0] == 0 and percents[-1] == 100
-    assert percents == sorted(percents)        # monotonic
+    assert percents == sorted(percents)
     assert "done" in phases
 
 
-<<<<<<< HEAD
-=======
->>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
-=======
->>>>>>> 9e7c4e4 (feat(ai-fixes): progress logging + percentage callback for AI authoring)
 def test_apply_ai_fix_rejects_invalid_python(monkeypatch):
     _patch_llm(monkeypatch, "```python\ndef broken(:\n    pass\n```")
 

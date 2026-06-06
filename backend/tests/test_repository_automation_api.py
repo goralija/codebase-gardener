@@ -146,6 +146,53 @@ def test_manual_trigger_endpoint_enqueues_session(monkeypatch):
 
 
 @pytest.mark.django_db
+def test_manual_trigger_endpoint_accepts_manual_plan_payload(monkeypatch):
+    maintainer = User.objects.create_user("maintainer@example.com", password="secret")
+    repository = create_repo_with_member(maintainer, Membership.Role.MAINTAINER)
+
+    class FakeResult:
+        id = "task-1"
+
+    monkeypatch.setattr(
+        "apps.triggers.service.run_gardening_session.delay",
+        lambda _session_id: FakeResult(),
+    )
+    client = APIClient()
+    client.force_authenticate(user=maintainer)
+
+    response = client.post(
+        f"{automation_url(repository)}trigger/",
+        {
+            "manual_plan": {
+                "title": "AI maintenance multi-file verify",
+                "category": "complexity_reduction",
+                "risk_tier": "tier_1_autonomous",
+                "confidence": 0.95,
+                "confidence_threshold": 0.90,
+                "changed_paths": ["core/views.py", "core/serializers.py"],
+                "pr_body_sections": {
+                    "goal": "Reduce complexity.",
+                    "evidence": "Repowise hotspots.",
+                    "entropy_impact": "Lower entropy.",
+                    "verification": "Review; do not merge.",
+                },
+                "required_checks": ["pytest"],
+            }
+        },
+        format="json",
+    )
+
+    assert response.status_code == 202
+    session = GardeningSession.objects.get(repository=repository)
+    assert session.trigger["manual_plan"]["category"] == "complexity_reduction"
+    assert session.trigger["manual_plan"]["changed_paths"] == [
+        "core/views.py",
+        "core/serializers.py",
+    ]
+    assert session.trigger["manual_plan"]["approve"] is True
+
+
+@pytest.mark.django_db
 def test_manual_trigger_endpoint_respects_disabled_policy(monkeypatch):
     maintainer = User.objects.create_user("maintainer@example.com", password="secret")
     repository = create_repo_with_member(maintainer, Membership.Role.MAINTAINER)
