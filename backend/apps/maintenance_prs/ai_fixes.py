@@ -58,6 +58,13 @@ _CATEGORY_GUIDANCE = {
 # Reject whole-file rewrites: fraction of lines allowed to change (except tests).
 _MAX_CHANGE_RATIO = 0.6
 
+# Largest file we attempt whole-file editing on (chars). Bigger files are skipped
+# cleanly; they need the diff-based author (follow-up) to be handled safely.
+_MAX_FILE_CHARS = 48_000
+
+# Upper bound on requested completion tokens (model output ceiling headroom).
+_MODEL_OUTPUT_TOKEN_CAP = 16_000
+
 _FENCE_RE = re.compile(r"```[a-zA-Z0-9_+-]*\n(.*?)```", re.DOTALL)
 
 
@@ -86,9 +93,18 @@ def apply_ai_fix(
     opportunity: dict | None = None,
 ) -> str:
     """Return the LLM-edited file content, validated. Raises AIFixError on failure."""
+    if len(content) > _MAX_FILE_CHARS:
+        raise AIFixError(
+            f"{path} is too large ({len(content)} chars) for whole-file AI editing; "
+            "skipped."
+        )
+
     prompt = _build_prompt(path, content, plan, opportunity or {})
+    # Allow the full file back: budget output tokens from the file size
+    # (~4 chars/token) plus headroom, capped at the model's output ceiling.
+    max_tokens = min(_MODEL_OUTPUT_TOKEN_CAP, len(content) // 3 + 1024)
     try:
-        raw = complete(prompt, system=_SYSTEM_PROMPT)
+        raw = complete(prompt, system=_SYSTEM_PROMPT, max_tokens=max_tokens)
     except LLMError as exc:
         raise AIFixError(f"LLM fix failed for {path}: {exc}") from exc
 

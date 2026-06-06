@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -5,12 +7,9 @@ from apps.common.llm import LLMError, complete
 
 
 class _Resp:
-    def __init__(self, status_code, payload=None):
+    def __init__(self, status_code, payload=None, text=None):
         self.status_code = status_code
-        self._payload = payload or {}
-
-    def json(self):
-        return self._payload
+        self.text = text if text is not None else json.dumps(payload or {})
 
 
 def test_complete_builds_request_and_returns_content(monkeypatch, settings):
@@ -36,6 +35,15 @@ def test_complete_builds_request_and_returns_content(monkeypatch, settings):
     assert captured["headers"]["Authorization"] == "Bearer sk-test"
     roles = [m["role"] for m in captured["json"]["messages"]]
     assert roles == ["system", "user"]
+
+
+def test_complete_tolerates_openrouter_keepalive_prefix(monkeypatch, settings):
+    settings.OPENROUTER_API_KEY = "sk-test"
+    body = ": OPENROUTER PROCESSING\n\n: OPENROUTER PROCESSING\n\n" + json.dumps(
+        {"choices": [{"message": {"content": "fixed"}}]}
+    )
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _Resp(200, text=body))
+    assert complete("x") == "fixed"
 
 
 def test_complete_requires_api_key(monkeypatch, settings):

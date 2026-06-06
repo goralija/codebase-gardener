@@ -6,6 +6,8 @@ or full prompts/responses.
 
 from __future__ import annotations
 
+import json
+
 import httpx
 from django.conf import settings
 
@@ -14,7 +16,13 @@ class LLMError(RuntimeError):
     """Raised when the LLM request fails or returns an unusable response."""
 
 
-def complete(prompt: str, *, system: str | None = None, temperature: float = 0.0) -> str:
+def complete(
+    prompt: str,
+    *,
+    system: str | None = None,
+    temperature: float = 0.0,
+    max_tokens: int | None = None,
+) -> str:
     """Return the assistant message text for a single prompt.
 
     Raises LLMError on missing config, transport failure, non-200, or empty body.
@@ -28,6 +36,14 @@ def complete(prompt: str, *, system: str | None = None, temperature: float = 0.0
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
+    body: dict = {
+        "model": settings.OPENROUTER_MODEL,
+        "messages": messages,
+        "temperature": temperature,
+    }
+    if max_tokens is not None:
+        body["max_tokens"] = max_tokens
+
     url = f"{settings.OPENROUTER_BASE_URL.rstrip('/')}/chat/completions"
     try:
         response = httpx.post(
@@ -36,11 +52,7 @@ def complete(prompt: str, *, system: str | None = None, temperature: float = 0.0
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
-            json={
-                "model": settings.OPENROUTER_MODEL,
-                "messages": messages,
-                "temperature": temperature,
-            },
+            json=body,
             timeout=settings.OPENROUTER_TIMEOUT_SECONDS,
         )
     except httpx.HTTPError as exc:
@@ -50,7 +62,7 @@ def complete(prompt: str, *, system: str | None = None, temperature: float = 0.0
         raise LLMError(f"LLM returned status {response.status_code}.")
 
     try:
-        payload = response.json()
+        payload = _parse_payload(response.text)
         content = payload["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError) as exc:
         raise LLMError("LLM response was malformed.") from exc
@@ -58,3 +70,18 @@ def complete(prompt: str, *, system: str | None = None, temperature: float = 0.0
     if not isinstance(content, str) or not content.strip():
         raise LLMError("LLM returned an empty completion.")
     return content
+
+
+def _parse_payload(text: str) -> dict:
+    """Parse the JSON body, tolerating OpenRouter keepalive comment lines.
+
+    On slow/large completions OpenRouter prefixes the body with SSE-style
+    comment lines (e.g. ``: OPENROUTER PROCESSING``) before the JSON object.
+    """
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        if start == -1:
+            raise
+        return json.loads(text[start:])
