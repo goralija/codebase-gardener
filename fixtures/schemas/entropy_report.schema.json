@@ -3,6 +3,21 @@
   "$id": "https://codebase-gardener.dev/schemas/entropy_report.schema.json",
   "type": "object",
   "required": ["schema_version", "entropy_report_id", "repository_id", "analysis_snapshot_id", "commit_sha", "score", "scopes", "top_contributors", "forecast"],
+  "$defs": {
+    "evidence_reference": {
+      "type": "object",
+      "required": ["source_type", "path", "summary"],
+      "properties": {
+        "source_type": { "type": "string" },
+        "path": { "type": "string" },
+        "section": { "type": "string" },
+        "line_start": { "type": "integer", "minimum": 1 },
+        "line_end": { "type": "integer", "minimum": 1 },
+        "summary": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
   "properties": {
     "schema_version": { "const": "1.0" },
     "entropy_report_id": { "type": "string" },
@@ -15,13 +30,62 @@
       "properties": {
         "overall": { "type": "number" },
         "classification": { "type": "string" },
-        "components": { "type": "object" }
+        "components": {
+          "type": "object",
+          "required": ["architecture", "maintainability", "knowledge", "testing", "dependency", "operational"],
+          "properties": {
+            "architecture": { "type": "number" },
+            "maintainability": { "type": "number" },
+            "knowledge": { "type": "number" },
+            "testing": { "type": "number" },
+            "dependency": { "type": "number" },
+            "operational": { "type": "number" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "scopes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["scope_type", "scope_id", "name", "overall", "classification"],
+        "properties": {
+          "scope_type": { "type": "string" },
+          "scope_id": { "type": "string" },
+          "name": { "type": "string" },
+          "overall": { "type": "number" },
+          "classification": { "type": "string" }
+        },
+        "additionalProperties": false
       }
     },
-    "scopes": { "type": "array" },
-    "top_contributors": { "type": "array" },
-    "forecast": { "type": "object" }
+    "top_contributors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "summary", "impact", "evidence"],
+        "properties": {
+          "kind": { "type": "string" },
+          "summary": { "type": "string" },
+          "impact": { "type": "number" },
+          "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence_reference" } }
+        },
+        "additionalProperties": false
+      }
+    },
+    "forecast": {
+      "type": "object",
+      "required": ["horizon_days", "predicted_overall", "confidence", "summary"],
+      "properties": {
+        "horizon_days": { "type": "integer", "minimum": 1 },
+        "predicted_overall": { "type": "number" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "summary": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
   },
   "additionalProperties": false
 }
-

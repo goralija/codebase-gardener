@@ -9,22 +9,34 @@
     "repository_id": { "type": "string" },
     "commit_sha": { "type": "string" },
     "created_at": { "type": "string", "format": "date-time" },
-    "logical_systems": { "type": "array" },
+    "logical_systems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["logical_system_id", "name", "paths"],
+        "properties": {
+          "logical_system_id": { "type": "string" },
+          "name": { "type": "string" },
+          "paths": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    },
     "signals": {
       "type": "object",
       "required": ["dependency_cycles", "hotspots", "dead_code_candidates", "ownership_risks", "test_gaps", "dependency_risks", "ci_failures"],
       "properties": {
-        "dependency_cycles": { "type": "array" },
-        "hotspots": { "type": "array" },
-        "dead_code_candidates": { "type": "array" },
-        "ownership_risks": { "type": "array" },
-        "test_gaps": { "type": "array" },
-        "dependency_risks": { "type": "array" },
-        "ci_failures": { "type": "array" }
-      }
+        "dependency_cycles": { "type": "array", "items": { "type": "object" } },
+        "hotspots": { "type": "array", "items": { "type": "object" } },
+        "dead_code_candidates": { "type": "array", "items": { "type": "object" } },
+        "ownership_risks": { "type": "array", "items": { "type": "object" } },
+        "test_gaps": { "type": "array", "items": { "type": "object" } },
+        "dependency_risks": { "type": "array", "items": { "type": "object" } },
+        "ci_failures": { "type": "array", "items": { "type": "object" } }
+      },
+      "additionalProperties": false
     },
     "constitution_id": { "type": "string" }
   },
   "additionalProperties": false
 }
-

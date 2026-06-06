@@ -3,13 +3,70 @@
   "$id": "https://codebase-gardener.dev/schemas/repository_constitution.schema.json",
   "type": "object",
   "required": ["schema_version", "repository_id", "commit_sha", "completeness_score", "protected_modules", "never_touch", "allowed_fixes", "architecture_boundaries", "ignored_paths", "open_questions"],
+  "$defs": {
+    "evidence_reference": {
+      "type": "object",
+      "required": ["source_type", "path", "summary"],
+      "properties": {
+        "source_type": { "type": "string" },
+        "path": { "type": "string" },
+        "section": { "type": "string" },
+        "line_start": { "type": "integer", "minimum": 1 },
+        "line_end": { "type": "integer", "minimum": 1 },
+        "summary": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "protected_module": {
+      "type": "object",
+      "required": ["name", "paths", "reason"],
+      "properties": {
+        "name": { "type": "string" },
+        "paths": { "type": "array", "items": { "type": "string" } },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "never_touch_rule": {
+      "type": "object",
+      "required": ["path", "reason"],
+      "properties": {
+        "path": { "type": "string" },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "architecture_boundary": {
+      "type": "object",
+      "required": ["rule_id", "description", "forbidden_from", "forbidden_to", "evidence"],
+      "properties": {
+        "rule_id": { "type": "string" },
+        "description": { "type": "string" },
+        "forbidden_from": { "type": "array", "items": { "type": "string" } },
+        "forbidden_to": { "type": "array", "items": { "type": "string" } },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence_reference" } }
+      },
+      "additionalProperties": false
+    },
+    "open_question": {
+      "type": "object",
+      "required": ["question_id", "severity", "question", "evidence"],
+      "properties": {
+        "question_id": { "type": "string" },
+        "severity": { "type": "string" },
+        "question": { "type": "string" },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence_reference" } }
+      },
+      "additionalProperties": false
+    }
+  },
   "properties": {
     "schema_version": { "const": "1.0" },
     "repository_id": { "type": "string" },
     "commit_sha": { "type": "string" },
     "completeness_score": { "type": "number", "minimum": 0, "maximum": 1 },
-    "protected_modules": { "type": "array" },
-    "never_touch": { "type": "array" },
+    "protected_modules": { "type": "array", "items": { "$ref": "#/$defs/protected_module" } },
+    "never_touch": { "type": "array", "items": { "$ref": "#/$defs/never_touch_rule" } },
     "allowed_fixes": {
       "type": "object",
       "required": ["autonomous", "assisted", "advisory"],
@@ -17,12 +74,12 @@
         "autonomous": { "type": "array", "items": { "type": "string" } },
         "assisted": { "type": "array", "items": { "type": "string" } },
         "advisory": { "type": "array", "items": { "type": "string" } }
-      }
+      },
+      "additionalProperties": false
     },
-    "architecture_boundaries": { "type": "array" },
+    "architecture_boundaries": { "type": "array", "items": { "$ref": "#/$defs/architecture_boundary" } },
     "ignored_paths": { "type": "array", "items": { "type": "string" } },
-    "open_questions": { "type": "array" }
+    "open_questions": { "type": "array", "items": { "$ref": "#/$defs/open_question" } }
   },
   "additionalProperties": false
 }
-

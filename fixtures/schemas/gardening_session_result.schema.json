@@ -7,13 +7,39 @@
     "schema_version": { "const": "1.0" },
     "gardening_session_id": { "type": "string" },
     "repository_id": { "type": "string" },
-    "trigger": { "type": "object" },
+    "trigger": {
+      "type": "object",
+      "required": ["type"]
+    },
     "status": { "type": "string" },
     "started_at": { "type": "string", "format": "date-time" },
     "finished_at": { "type": "string", "format": "date-time" },
-    "phase_results": { "type": "array" },
+    "phase_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["phase", "status", "summary"],
+        "properties": {
+          "phase": { "type": "string" },
+          "status": { "type": "string" },
+          "summary": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
     "opportunities_selected": { "type": "array", "items": { "type": "string" } },
-    "opportunities_deferred": { "type": "array" },
+    "opportunities_deferred": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["maintenance_opportunity_id", "reason"],
+        "properties": {
+          "maintenance_opportunity_id": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
     "maintenance_pr_plans": { "type": "array", "items": { "type": "string" } },
     "errors": {
       "type": "array",

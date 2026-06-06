@@ -21,7 +21,18 @@
       "description": "Optional in schema_version 1.0 for backward compatibility; omitted values use the default autonomous PR threshold."
     },
     "changed_paths": { "type": "array", "items": { "type": "string" } },
-    "pr_body_sections": { "type": "object" },
+    "pr_body_sections": {
+      "type": "object",
+      "required": ["goal", "evidence", "entropy_impact", "verification"],
+      "properties": {
+        "goal": { "type": "string" },
+        "evidence": { "type": "string" },
+        "entropy_impact": { "type": "string" },
+        "verification": { "type": "string" },
+        "roi_impact": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "required_checks": { "type": "array", "items": { "type": "string" } },
     "blocked": { "type": "boolean" },
     "block_reason": { "type": ["string", "null"] }
