@@ -24,6 +24,23 @@ const installationSchema = v.object({
   html_url: v.string(),
 })
 
+const repositoryComplexitySchema = v.object({
+  input_status: v.string(),
+  loc: v.nullable(v.number()),
+  module_count: v.nullable(v.number()),
+  contributor_count: v.nullable(v.number()),
+  loc_score: v.number(),
+  module_score: v.number(),
+  contributor_score: v.number(),
+  weighted_score: v.number(),
+  multiplier: v.number(),
+  calculation_version: v.string(),
+  source_analysis_id: v.nullable(v.string()),
+  source_commit_sha: v.nullable(v.string()),
+  missing_inputs: v.array(v.string()),
+  calculated_at: v.nullable(v.string()),
+})
+
 const managedRepositorySchema = v.object({
   id: v.string(),
   github_repository_id: v.number(),
@@ -34,6 +51,7 @@ const managedRepositorySchema = v.object({
   default_branch: v.string(),
   html_url: v.string(),
   selected_at: v.string(),
+  complexity: repositoryComplexitySchema,
 })
 
 const repositoriesResponseSchema = v.object({
@@ -158,6 +176,7 @@ async function requestJson<T>(
 
 export type InstallationStart = v.InferOutput<typeof installationStartSchema>
 export type Organization = v.InferOutput<typeof organizationSchema>
+export type ManagedRepository = v.InferOutput<typeof managedRepositorySchema>
 export type OrganizationsResponse = v.InferOutput<
   typeof organizationsResponseSchema
 >

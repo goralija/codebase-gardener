@@ -142,6 +142,19 @@ describe("GithubOnboardingPage", () => {
     ).toBeInTheDocument()
     expect(await screen.findByText("acme/api")).toBeInTheDocument()
     expect(screen.getByText("acme/web")).toBeInTheDocument()
+    expect(screen.getByText("2.10x")).toBeInTheDocument()
+    expect(
+      screen.getByText("120,000 LOC · 9 modules · 6 contributors")
+    ).toBeInTheDocument()
+    expect(screen.getByText("Partial / 1.0x")).toBeInTheDocument()
+    expect(
+      screen.getByText("42,000 LOC · 4 modules · Unknown contributors")
+    ).toBeInTheDocument()
+    expect(screen.getByText("Restricted")).toBeInTheDocument()
+    expect(
+      screen.getByText("Owner or admin can view billing inputs")
+    ).toBeInTheDocument()
+    expect(screen.getByText("Unknown / 1.0x")).toBeInTheDocument()
     expect(
       screen.getByRole("link", { name: /Edit repository access in GitHub/ })
     ).toHaveAttribute(
@@ -215,6 +228,7 @@ function repositoriesPayload() {
         default_branch: "main",
         html_url: "https://github.com/acme/api",
         selected_at: "2026-06-06T08:00:00Z",
+        complexity: completeComplexity(),
       },
       {
         id: "repo-2",
@@ -226,7 +240,108 @@ function repositoriesPayload() {
         default_branch: "main",
         html_url: "https://github.com/acme/web",
         selected_at: "2026-06-06T08:00:00Z",
+        complexity: partialComplexity(),
+      },
+      {
+        id: "repo-3",
+        github_repository_id: 3003,
+        name: "worker",
+        full_name: "acme/worker",
+        owner_login: "acme",
+        private: true,
+        default_branch: "main",
+        html_url: "https://github.com/acme/worker",
+        selected_at: "2026-06-06T08:00:00Z",
+        complexity: restrictedComplexity(),
+      },
+      {
+        id: "repo-4",
+        github_repository_id: 3004,
+        name: "docs",
+        full_name: "acme/docs",
+        owner_login: "acme",
+        private: false,
+        default_branch: "main",
+        html_url: "https://github.com/acme/docs",
+        selected_at: "2026-06-06T08:00:00Z",
+        complexity: pendingComplexity(),
       },
     ],
+  }
+}
+
+function completeComplexity() {
+  return {
+    input_status: "complete",
+    loc: 120000,
+    module_count: 9,
+    contributor_count: 6,
+    loc_score: 0.66,
+    module_score: 0.66,
+    contributor_score: 0.33,
+    weighted_score: 0.55,
+    multiplier: 2.1,
+    calculation_version: "complexity.v1.equal_thirds",
+    source_analysis_id: "analysis-1",
+    source_commit_sha: "abc123",
+    missing_inputs: [],
+    calculated_at: "2026-06-06T08:10:00Z",
+  }
+}
+
+function partialComplexity() {
+  return {
+    input_status: "partial",
+    loc: 42000,
+    module_count: 4,
+    contributor_count: null,
+    loc_score: 0.33,
+    module_score: 0.33,
+    contributor_score: 0,
+    weighted_score: 0,
+    multiplier: 1,
+    calculation_version: "complexity.v1.equal_thirds",
+    source_analysis_id: "analysis-2",
+    source_commit_sha: "def456",
+    missing_inputs: ["contributor_count"],
+    calculated_at: "2026-06-06T08:11:00Z",
+  }
+}
+
+function restrictedComplexity() {
+  return {
+    input_status: "restricted",
+    loc: null,
+    module_count: null,
+    contributor_count: null,
+    loc_score: 0,
+    module_score: 0,
+    contributor_score: 0,
+    weighted_score: 0,
+    multiplier: 1,
+    calculation_version: "complexity.v1.equal_thirds",
+    source_analysis_id: null,
+    source_commit_sha: null,
+    missing_inputs: [],
+    calculated_at: null,
+  }
+}
+
+function pendingComplexity() {
+  return {
+    input_status: "pending",
+    loc: null,
+    module_count: null,
+    contributor_count: null,
+    loc_score: 0,
+    module_score: 0,
+    contributor_score: 0,
+    weighted_score: 0,
+    multiplier: 1,
+    calculation_version: "complexity.v1.equal_thirds",
+    source_analysis_id: null,
+    source_commit_sha: null,
+    missing_inputs: ["loc", "module_count", "contributor_count"],
+    calculated_at: null,
   }
 }

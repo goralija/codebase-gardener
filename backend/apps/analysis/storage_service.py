@@ -76,6 +76,14 @@ def store_analysis(
         source="analysis_storage",
         metadata={"commit_sha": commit_sha, "analysis_id": str(analysis.id)},
     )
+    from apps.billing.services import refresh_repository_complexity
+
+    refresh_repository_complexity(
+        repository=repository,
+        analysis=analysis,
+        artifacts=artifacts,
+        actor=actor,
+    )
     return analysis
 
 

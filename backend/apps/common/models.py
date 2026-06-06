@@ -43,9 +43,21 @@ class AuditEvent(UUIDTimestampedModel):
             "gardener_profile_updated",
             "Gardener profile updated",
         )
+        GARDENER_PROFILE_PR_PROPOSED = (
+            "gardener_profile_pr_proposed",
+            "Gardener profile PR proposed",
+        )
+        GARDENER_PROFILE_PR_FAILED = (
+            "gardener_profile_pr_failed",
+            "Gardener profile PR failed",
+        )
         ANALYSIS_STORED = (
             "analysis_stored",
             "Repository analysis stored",
+        )
+        REPOSITORY_COMPLEXITY_UPDATED = (
+            "repository_complexity_updated",
+            "Repository complexity updated",
         )
         SESSION_TRIGGER_ENQUEUED = (
             "session_trigger_enqueued",

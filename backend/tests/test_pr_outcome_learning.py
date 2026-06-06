@@ -201,3 +201,36 @@ def test_find_plan_matches_by_pr_number_then_branch():
     assert by_number == plan
     assert by_branch == plan
     assert missing is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_profile_change_enqueues_profile_sync(monkeypatch):
+    repository = demo_repository()
+    plan = make_plan(repository, category="docs")
+
+    enqueued = []
+    monkeypatch.setattr(
+        "apps.profiles.tasks.sync_profile_pr.delay",
+        lambda repository_id: enqueued.append(repository_id),
+    )
+
+    record_pr_outcome(plan=plan, outcome=Outcome.MERGED)
+
+    assert enqueued == [str(repository.id)]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_log_only_outcome_does_not_enqueue_profile_sync(monkeypatch):
+    repository = demo_repository()
+    # No category => no ranking signal changes, so it is log-only.
+    plan = make_plan(repository, category="")
+
+    enqueued = []
+    monkeypatch.setattr(
+        "apps.profiles.tasks.sync_profile_pr.delay",
+        lambda repository_id: enqueued.append(repository_id),
+    )
+
+    record_pr_outcome(plan=plan, outcome=Outcome.FAILED)
+
+    assert enqueued == []

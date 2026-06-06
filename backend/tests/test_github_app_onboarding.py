@@ -361,6 +361,7 @@ def test_organization_and_repository_apis_scope_to_active_membership_installatio
             "default_branch": "main",
             "html_url": visible_repository.html_url,
             "selected_at": visible_repository.selected_at.isoformat().replace("+00:00", "Z"),
+            "complexity": restricted_complexity_payload(),
         }
     ]
 
@@ -454,6 +455,25 @@ def repository_payload(identifier: int, name: str):
         "private": True,
         "default_branch": "main",
         "html_url": f"https://github.com/acme/{name}",
+    }
+
+
+def restricted_complexity_payload():
+    return {
+        "input_status": "restricted",
+        "loc": None,
+        "module_count": None,
+        "contributor_count": None,
+        "loc_score": 0.0,
+        "module_score": 0.0,
+        "contributor_score": 0.0,
+        "weighted_score": 0.0,
+        "multiplier": 1.0,
+        "calculation_version": "complexity.v1.equal_thirds",
+        "source_analysis_id": None,
+        "source_commit_sha": None,
+        "missing_inputs": [],
+        "calculated_at": None,
     }
 
 
