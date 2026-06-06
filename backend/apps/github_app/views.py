@@ -7,6 +7,7 @@ from django.conf import settings
 from django.contrib.auth import login
 from django.core.exceptions import ImproperlyConfigured
 from django.shortcuts import redirect
+from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -24,6 +25,7 @@ from apps.github_app.state import load_install_state
 from apps.github_app.tasks import process_github_webhook_event
 
 
+@ensure_csrf_cookie
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def installation_start(_request):

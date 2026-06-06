@@ -32,6 +32,7 @@ def test_install_start_returns_signed_state_github_install_url():
     query = parse_qs(parsed_url.query)
 
     assert install_url.startswith("https://github.com/apps/codebase-gardener/installations/new?")
+    assert "csrftoken" in response.cookies
     assert (
         load_install_state(query["state"][0], session=client.session)["purpose"]
         == "github_app_install"

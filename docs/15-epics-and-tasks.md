@@ -384,7 +384,7 @@ The product can be sold by managed repository and complexity multiplier.
 
 #### E06-T01 Model complexity multiplier
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane A
 - Complexity: M
@@ -395,14 +395,14 @@ The product can be sold by managed repository and complexity multiplier.
 
 #### E06-T02 Add billing plan foundation
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane A
 - Complexity: M
 - Intent: Track subscription plan, managed repository count, complexity multiplier, and autonomous PR add-on flag.
 - Dependencies: E02-T02, E06-T01
-- Acceptance criteria: Admin can view plan inputs; no payment provider is required yet.
-- Verification: pytest covers model and API behavior.
+- Acceptance criteria: Owner/admin can view plan inputs and toggle the autonomous PR add-on; internal staff can edit plan and price inputs; no payment provider is required yet.
+- Verification: pytest covers model, API, billing math, permissions, and autonomous PR add-on gate behavior; Vitest covers dashboard billing inputs.
 
 ## E07 Future Expansion
 

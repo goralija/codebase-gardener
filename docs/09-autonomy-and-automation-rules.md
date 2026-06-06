@@ -68,6 +68,7 @@ Gardener must not directly modify these by default:
 
 ## PR rules
 
+- If an organization's autonomous PR add-on is disabled, sessions may still create visible blocked PR plans and recommendations, but workers must not create GitHub PRs.
 - Prefer multiple focused PRs that do not interfere with one another.
 - Do not mix unrelated maintenance categories in one PR.
 - Include evidence, risk tier, confidence, expected entropy impact, changed paths, and verification.

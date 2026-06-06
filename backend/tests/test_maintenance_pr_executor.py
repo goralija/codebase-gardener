@@ -3,6 +3,8 @@ import pytest
 from base64 import b64encode
 from django.utils import timezone
 
+from apps.billing.models import Subscription
+from apps.billing.services import AUTONOMOUS_PR_ADD_ON_DISABLED_REASON
 from apps.common.models import AuditEvent
 from apps.github_app.client import GitHubAPIError
 from apps.maintenance_prs.executor import (
@@ -108,6 +110,10 @@ def _names(client):
 
 def make_repository(identifier=1):
     organization = create_organization(identifier)
+    Subscription.objects.create(
+        organization=organization,
+        autonomous_pr_add_on_enabled=True,
+    )
     installation = create_installation(organization, identifier)
     return create_repository(organization, installation, identifier)
 
@@ -441,6 +447,46 @@ def test_inactive_repository_blocked():
     with pytest.raises(PlanNotExecutableError):
         execute_maintenance_pr_plan(plan, client=client)
 
+    assert client.calls == []
+
+
+@pytest.mark.django_db
+def test_disabled_autonomous_pr_add_on_blocks_existing_plan_execution():
+    plan = make_plan()
+    Subscription.objects.filter(
+        organization=plan.repository.organization,
+    ).update(
+        autonomous_pr_add_on_enabled=False,
+    )
+    client = FakeGitHubClient()
+
+    with pytest.raises(PlanNotExecutableError) as exc_info:
+        execute_maintenance_pr_plan(plan, client=client)
+
+    assert str(exc_info.value) == AUTONOMOUS_PR_ADD_ON_DISABLED_REASON
+    assert client.calls == []
+    plan.refresh_from_db()
+    assert plan.execution_status == MaintenancePRPlan.ExecutionStatus.PENDING
+
+
+@pytest.mark.django_db
+def test_claim_blocks_if_autonomous_pr_add_on_disabled_in_db(monkeypatch):
+    plan = make_plan()
+    Subscription.objects.filter(
+        organization=plan.repository.organization,
+    ).update(
+        autonomous_pr_add_on_enabled=False,
+    )
+    monkeypatch.setattr(
+        "apps.maintenance_prs.executor.autonomous_pr_add_on_enabled",
+        lambda _organization: True,
+    )
+    client = FakeGitHubClient()
+
+    with pytest.raises(PlanNotExecutableError) as exc_info:
+        execute_maintenance_pr_plan(plan, client=client)
+
+    assert str(exc_info.value) == "Plan could not be claimed for execution."
     assert client.calls == []
 
 

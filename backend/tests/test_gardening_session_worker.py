@@ -9,6 +9,7 @@ from referencing import Registry, Resource
 from apps.analysis.fixtures import load_first_report_fixture
 from apps.analysis.runner import AnalysisRunError
 from apps.accounts.models import CustomerOrganization
+from apps.billing.models import Subscription
 from apps.github_app.client import GitHubAPIError
 from apps.github_app.models import GitHubInstallation
 from apps.maintenance_prs.executor import PlanNotExecutableError
@@ -991,6 +992,10 @@ def create_repository(identifier: int) -> ManagedRepository:
         github_account_id=1000 + identifier,
         github_login=f"org-{identifier}",
         github_account_type=CustomerOrganization.GitHubAccountType.ORGANIZATION,
+    )
+    Subscription.objects.create(
+        organization=organization,
+        autonomous_pr_add_on_enabled=True,
     )
     installation = GitHubInstallation.objects.create(
         organization=organization,

@@ -6,6 +6,10 @@ from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
+from apps.billing.services import (
+    AUTONOMOUS_PR_ADD_ON_DISABLED_REASON,
+    autonomous_pr_add_on_enabled,
+)
 from apps.common.models import AuditEvent
 from apps.github_app.client import GitHubAPIError, GitHubAppClient
 from apps.maintenance_prs.docs_fixes import (
@@ -337,6 +341,8 @@ def _guard_executable(plan: MaintenancePRPlan) -> None:
         raise PlanNotExecutableError(
             "Plan repository is not active (unselected, suspended, or deactivated)."
         )
+    if not autonomous_pr_add_on_enabled(plan.repository.organization):
+        raise PlanNotExecutableError(AUTONOMOUS_PR_ADD_ON_DISABLED_REASON)
     if not has_implemented_file_fix(plan):
         raise PlanNotExecutableError(
             "Plan has no implemented autonomous file fix."
@@ -357,6 +363,7 @@ def _claim_plan_for_execution(plan: MaintenancePRPlan) -> None:
         repository__github_installation__suspended_at__isnull=True,
         repository__github_installation__deleted_at__isnull=True,
         repository__github_installation__organization_id=F("repository__organization_id"),
+        repository__organization__subscription__autonomous_pr_add_on_enabled=True,
     ).filter(
         Q(
             execution_status__in=[

@@ -1,22 +1,27 @@
 import { useMemo, useState } from "react"
 import type { ReactNode } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
   CheckCircle2,
   CircleDashed,
+  CircleDollarSign,
   ExternalLink,
   GitBranch,
   RefreshCw,
   Settings,
+  Zap,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
   fetchInstallationStart,
+  fetchOrganizationBilling,
   fetchOrganizationRepositories,
   fetchOrganizations,
   GithubOnboardingRequestError,
+  updateOrganizationBilling,
+  type BillingResponse,
   type ManagedRepository,
   type Organization,
 } from "./github-onboarding-api"
@@ -25,6 +30,7 @@ type CallbackStatus = "installed" | "pending" | "error" | null
 const EMPTY_ORGANIZATIONS: Organization[] = []
 
 export function GithubOnboardingPage() {
+  const queryClient = useQueryClient()
   const searchParams = new URLSearchParams(window.location.search)
   const callbackStatus = normalizeCallbackStatus(searchParams.get("status"))
   const callbackOrganizationId = searchParams.get("organization_id")
@@ -61,6 +67,30 @@ export function GithubOnboardingPage() {
     queryFn: () => fetchOrganizationRepositories(selectedOrganizationId ?? ""),
     enabled: Boolean(selectedOrganizationId),
     retry: false,
+  })
+  const billingQuery = useQuery({
+    queryKey: ["github-onboarding", "billing", selectedOrganizationId],
+    queryFn: () => fetchOrganizationBilling(selectedOrganizationId ?? ""),
+    enabled: Boolean(selectedOrganizationId),
+    retry: false,
+  })
+  const billingMutation = useMutation({
+    mutationFn: ({
+      enabled,
+      organizationId,
+    }: {
+      enabled: boolean
+      organizationId: string
+    }) =>
+      updateOrganizationBilling(organizationId, {
+        autonomous_pr_add_on_enabled: enabled,
+      }),
+    onSuccess: (billing, variables) => {
+      queryClient.setQueryData(
+        ["github-onboarding", "billing", variables.organizationId],
+        billing
+      )
+    },
   })
 
   const installUrl = installationStartQuery.data?.install_url
@@ -148,11 +178,30 @@ export function GithubOnboardingPage() {
         {organizations.length === 0 ? (
           <EmptyOnboardingPanel installUrl={installUrl} />
         ) : (
-          <RepositorySelectionPanel
-            isLoading={repositoriesQuery.isLoading}
-            repositories={repositories}
-            settingsUrl={installation?.html_url}
-          />
+          <>
+            <RepositorySelectionPanel
+              isLoading={repositoriesQuery.isLoading}
+              repositories={repositories}
+              settingsUrl={installation?.html_url}
+            />
+            {selectedOrganizationId ? (
+              <BillingPlanPanel
+                billing={billingQuery.data}
+                error={billingQuery.error}
+                isLoading={billingQuery.isLoading}
+                isUpdating={billingMutation.isPending}
+                mutationError={billingMutation.error}
+                onToggleAddOn={(enabled) =>
+                  selectedOrganizationId
+                    ? billingMutation.mutate({
+                        enabled,
+                        organizationId: selectedOrganizationId,
+                      })
+                    : undefined
+                }
+              />
+            ) : null}
+          </>
         )}
       </div>
     </main>
@@ -392,8 +441,164 @@ function RepositoryComplexity({
   )
 }
 
+function BillingPlanPanel({
+  billing,
+  error,
+  isLoading,
+  isUpdating,
+  mutationError,
+  onToggleAddOn,
+}: {
+  billing?: BillingResponse
+  error: Error | null
+  isLoading: boolean
+  isUpdating: boolean
+  mutationError: Error | null
+  onToggleAddOn: (enabled: boolean) => void
+}) {
+  const isPermissionDenied =
+    error instanceof GithubOnboardingRequestError && error.status === 403
+
+  return (
+    <section className="rounded-md border bg-card p-5 text-card-foreground">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <CircleDollarSign className="size-4 text-primary" />
+            <h2>Billing plan</h2>
+          </div>
+          {billing ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              {formatPlanCode(billing.subscription.plan_code)}
+            </p>
+          ) : null}
+        </div>
+        {billing ? (
+          <label className="flex items-center gap-3 text-sm font-medium">
+            <input
+              checked={billing.subscription.autonomous_pr_add_on_enabled}
+              className="size-4 accent-primary"
+              disabled={!billing.permissions.can_edit_add_on || isUpdating}
+              onChange={(event) => onToggleAddOn(event.target.checked)}
+              type="checkbox"
+            />
+            <span className="flex items-center gap-2">
+              <Zap className="size-4 text-primary" />
+              Autonomous PR add-on
+            </span>
+          </label>
+        ) : null}
+      </div>
+
+      <div className="mt-5">
+        {isLoading && !billing ? (
+          <div className="flex items-center gap-2 rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+            <CircleDashed className="size-4 animate-spin" />
+            Loading billing inputs
+          </div>
+        ) : error ? (
+          <div className="rounded-md border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+            {isPermissionDenied
+              ? "Billing inputs are available to organization owners and admins."
+              : "Could not load billing inputs."}
+          </div>
+        ) : billing ? (
+          <div className="flex flex-col gap-5">
+            <dl className="grid gap-4 sm:grid-cols-4">
+              <BillingMetric
+                label="Managed repositories"
+                value={formatNumber(
+                  billing.billing.active_managed_repository_count
+                )}
+              />
+              <BillingMetric
+                label="Billable units"
+                value={billing.billing.billable_repository_units.toFixed(2)}
+              />
+              <BillingMetric
+                label="Base subtotal"
+                value={formatCurrency(
+                  billing.billing.base_subtotal_cents,
+                  billing.subscription.currency
+                )}
+              />
+              <BillingMetric
+                label="Monthly estimate"
+                value={formatCurrency(
+                  billing.billing.monthly_estimate_cents,
+                  billing.subscription.currency
+                )}
+              />
+            </dl>
+
+            <div className="grid gap-3 text-sm text-muted-foreground sm:grid-cols-3">
+              <span>
+                Base:{" "}
+                {formatCurrency(
+                  billing.subscription.base_price_cents,
+                  billing.subscription.currency
+                )}
+                /repo
+              </span>
+              <span>
+                Add-on:{" "}
+                {formatCurrency(
+                  billing.subscription.autonomous_pr_add_on_price_cents,
+                  billing.subscription.currency
+                )}
+                /org
+              </span>
+              <span>
+                Add-on subtotal:{" "}
+                {formatCurrency(
+                  billing.billing.autonomous_pr_add_on_subtotal_cents,
+                  billing.subscription.currency
+                )}
+              </span>
+            </div>
+
+            {mutationError ? (
+              <StatusBand
+                icon={<AlertTriangle className="size-4" />}
+                tone="danger"
+              >
+                Could not update billing plan
+              </StatusBand>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
+function BillingMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs font-medium text-muted-foreground uppercase">
+        {label}
+      </dt>
+      <dd className="mt-1 text-xl font-semibold tracking-normal">{value}</dd>
+    </div>
+  )
+}
+
 function formatMultiplier(multiplier: number) {
   return multiplier === 1 ? "1.0x" : `${multiplier.toFixed(2)}x`
+}
+
+function formatCurrency(cents: number, currency: string) {
+  return new Intl.NumberFormat("en-US", {
+    currency,
+    style: "currency",
+  }).format(cents / 100)
+}
+
+function formatPlanCode(planCode: string) {
+  return planCode
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
 }
 
 function formatComplexityInputs(complexity: ManagedRepository["complexity"]) {

@@ -86,3 +86,43 @@ class RepositoryComplexity(UUIDTimestampedModel):
 
     def __str__(self) -> str:
         return f"{self.repository} complexity {self.multiplier:.2f}x"
+
+
+class Subscription(UUIDTimestampedModel):
+    PLAN_CODE = "managed_repository_base"
+    CURRENCY = "USD"
+    DEFAULT_BASE_PRICE_CENTS = 2_000
+    DEFAULT_AUTONOMOUS_PR_ADD_ON_PRICE_CENTS = 200
+
+    organization = models.OneToOneField(
+        "accounts.CustomerOrganization",
+        on_delete=models.CASCADE,
+        related_name="subscription",
+    )
+    plan_code = models.CharField(max_length=64, default=PLAN_CODE)
+    currency = models.CharField(max_length=3, default=CURRENCY)
+    base_price_cents = models.PositiveIntegerField(default=DEFAULT_BASE_PRICE_CENTS)
+    autonomous_pr_add_on_enabled = models.BooleanField(default=False)
+    autonomous_pr_add_on_price_cents = models.PositiveIntegerField(
+        default=DEFAULT_AUTONOMOUS_PR_ADD_ON_PRICE_CENTS,
+    )
+
+    class Meta:
+        ordering = ["organization__github_login"]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if not self.plan_code.strip():
+            errors["plan_code"] = "Plan code must not be blank."
+        if self.currency != self.CURRENCY:
+            errors["currency"] = "Subscription currency must be USD for v1."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.organization} {self.plan_code}"

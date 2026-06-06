@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { GithubOnboardingPage } from "./GithubOnboardingPage"
@@ -34,16 +35,19 @@ function renderPage(search = "") {
 
 function mockOnboardingFetch({
   installStart = installStartPayload(),
+  billing = billingPayload(),
   organizations = organizationsPayload(),
   repositories = repositoriesPayload(),
 }: {
   installStart?: Response | unknown
+  billing?: Response | ReturnType<typeof billingPayload>
   organizations?: Response | unknown
   repositories?: Response | unknown
 } = {}) {
+  let billingState = billing
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), "http://localhost")
       if (url.pathname === "/api/v1/github-app/installations/start/") {
         return installStart instanceof Response
@@ -59,6 +63,34 @@ function mockOnboardingFetch({
         return repositories instanceof Response
           ? repositories
           : jsonResponse(repositories)
+      }
+      if (url.pathname === "/api/v1/organizations/org-1/billing/") {
+        if (billingState instanceof Response) {
+          return billingState
+        }
+        if (init?.method === "PATCH" && init.body) {
+          const patch = JSON.parse(String(init.body))
+          billingState = {
+            ...billingState,
+            subscription: {
+              ...billingState.subscription,
+              ...patch,
+            },
+            billing: {
+              ...billingState.billing,
+              autonomous_pr_add_on_subtotal_cents:
+                patch.autonomous_pr_add_on_enabled === false
+                  ? 0
+                  : billingState.subscription.autonomous_pr_add_on_price_cents,
+              monthly_estimate_cents:
+                billingState.billing.base_subtotal_cents +
+                (patch.autonomous_pr_add_on_enabled === false
+                  ? 0
+                  : billingState.subscription.autonomous_pr_add_on_price_cents),
+            },
+          }
+        }
+        return jsonResponse(billingState)
       }
       return new Response(null, { status: 404 })
     })
@@ -161,6 +193,37 @@ describe("GithubOnboardingPage", () => {
       "href",
       "https://github.com/organizations/acme/settings/installations/2001"
     )
+    expect(
+      screen.getByRole("heading", { name: "Billing plan" })
+    ).toBeInTheDocument()
+    expect(screen.getByText("Managed Repository Base")).toBeInTheDocument()
+    expect(screen.getByText("4")).toBeInTheDocument()
+    expect(screen.getByText("5.10")).toBeInTheDocument()
+    expect(screen.getByText("$104.00")).toBeInTheDocument()
+    expect(screen.getByText("$106.00")).toBeInTheDocument()
+    expect(screen.getByLabelText("Autonomous PR add-on")).toBeChecked()
+  })
+
+  it("toggles the autonomous PR add-on from billing inputs", async () => {
+    const user = userEvent.setup()
+    mockOnboardingFetch()
+
+    renderPage("?status=installed&organization_id=org-1")
+
+    const toggle = await screen.findByLabelText("Autonomous PR add-on")
+    await user.click(toggle)
+
+    await waitFor(() => {
+      expect(toggle).not.toBeChecked()
+    })
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/organizations/org-1/billing/",
+      expect.objectContaining({
+        body: JSON.stringify({ autonomous_pr_add_on_enabled: false }),
+        method: "PATCH",
+      })
+    )
+    expect(screen.getAllByText("$104.00")).toHaveLength(2)
   })
 
   it("renders an empty selected-repositories state", async () => {
@@ -267,6 +330,47 @@ function repositoriesPayload() {
         complexity: pendingComplexity(),
       },
     ],
+  }
+}
+
+function billingPayload() {
+  return {
+    organization: {
+      id: "org-1",
+      name: "Acme",
+      github_login: "acme",
+      github_account_type: "organization",
+    },
+    subscription: {
+      id: "subscription-1",
+      plan_code: "managed_repository_base",
+      currency: "USD",
+      base_price_cents: 2000,
+      autonomous_pr_add_on_enabled: true,
+      autonomous_pr_add_on_price_cents: 200,
+      created_at: "2026-06-06T08:00:00Z",
+      updated_at: "2026-06-06T08:00:00Z",
+    },
+    billing: {
+      active_managed_repository_count: 4,
+      billable_repository_units: 5.1,
+      base_subtotal_cents: 10400,
+      autonomous_pr_add_on_subtotal_cents: 200,
+      monthly_estimate_cents: 10600,
+    },
+    repositories: [
+      {
+        id: "repo-1",
+        full_name: "acme/api",
+        billable_units: 2.1,
+        base_monthly_cents: 4200,
+        complexity: completeComplexity(),
+      },
+    ],
+    permissions: {
+      can_edit_add_on: true,
+      can_edit_plan_and_prices: false,
+    },
   }
 }
 

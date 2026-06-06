@@ -39,6 +39,7 @@ V1 should handle:
 - Enforce role permissions on the backend.
 - Return predictable errors with code, message, and details.
 - Expose reports, sessions, opportunities, constitution questions, settings, and billing data.
+- Billing APIs expose organization-scoped subscription inputs, active managed repository count, complexity-adjusted billable units, prices, and monthly estimate. Organization owners/admins may toggle the autonomous PR add-on; internal staff may edit plan code and price fields.
 - Never expose repository secrets or raw code content unless there is a specific user-facing need and permission.
 - Keep response shapes aligned with `docs/19-shared-json-contracts.md`.
 

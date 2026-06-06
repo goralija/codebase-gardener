@@ -6,6 +6,8 @@ from django.core.exceptions import ValidationError
 from jsonschema import Draft202012Validator
 
 from apps.analysis.fixtures import _schema_registry, _schema_path, _load_json
+from apps.billing.models import Subscription
+from apps.billing.services import AUTONOMOUS_PR_ADD_ON_DISABLED_REASON
 from apps.maintenance_prs.models import MaintenancePRPlanOpportunity
 from apps.maintenance_prs.planner import (
     plan_maintenance_prs,
@@ -417,8 +419,35 @@ def test_constitution_block_reason_wins_over_profile_rejection():
     assert plans[0].block_reason == "Repository constitution has unresolved open questions."
 
 
-def demo_repository():
+@pytest.mark.django_db
+def test_autonomous_pr_add_on_disabled_blocks_otherwise_allowed_plans():
+    repository = demo_repository(autonomous_pr_add_on_enabled=False)
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_billing_gate",
+        opportunities=[
+            opportunity("opp_docs_a", "Refresh docs A", ["docs/a.md"]),
+            opportunity("opp_docs_b", "Refresh docs B", ["docs/b.md"]),
+        ],
+        constitution=constitution(),
+    )
+
+    assert len(plans) == 1
+    assert plans[0].blocked
+    assert plans[0].block_reason == AUTONOMOUS_PR_ADD_ON_DISABLED_REASON
+    assert sorted(plans[0].opportunity_links.values_list("maintenance_opportunity_id", flat=True)) == [
+        "opp_docs_a",
+        "opp_docs_b",
+    ]
+
+
+def demo_repository(*, autonomous_pr_add_on_enabled=True):
     organization = create_organization(900)
+    Subscription.objects.create(
+        organization=organization,
+        autonomous_pr_add_on_enabled=autonomous_pr_add_on_enabled,
+    )
     installation = create_installation(organization, 900)
     return create_repository(organization, installation, 900)
 

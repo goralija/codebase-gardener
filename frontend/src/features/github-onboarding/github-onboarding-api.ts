@@ -60,10 +60,59 @@ const repositoriesResponseSchema = v.object({
   repositories: v.array(managedRepositorySchema),
 })
 
+const subscriptionSchema = v.object({
+  id: v.string(),
+  plan_code: v.string(),
+  currency: v.string(),
+  base_price_cents: v.number(),
+  autonomous_pr_add_on_enabled: v.boolean(),
+  autonomous_pr_add_on_price_cents: v.number(),
+  created_at: v.string(),
+  updated_at: v.string(),
+})
+
+const billingTotalsSchema = v.object({
+  active_managed_repository_count: v.number(),
+  billable_repository_units: v.number(),
+  base_subtotal_cents: v.number(),
+  autonomous_pr_add_on_subtotal_cents: v.number(),
+  monthly_estimate_cents: v.number(),
+})
+
+const billingRepositorySchema = v.object({
+  id: v.string(),
+  full_name: v.string(),
+  billable_units: v.number(),
+  base_monthly_cents: v.number(),
+  complexity: repositoryComplexitySchema,
+})
+
+const billingPermissionsSchema = v.object({
+  can_edit_add_on: v.boolean(),
+  can_edit_plan_and_prices: v.boolean(),
+})
+
+const billingResponseSchema = v.object({
+  organization: organizationSchema,
+  subscription: subscriptionSchema,
+  billing: billingTotalsSchema,
+  repositories: v.array(billingRepositorySchema),
+  permissions: billingPermissionsSchema,
+})
+
 type FetchOptions = {
   apiBaseUrl?: string
   fetcher?: typeof fetch
 }
+
+type BillingUpdatePayload = {
+  autonomous_pr_add_on_enabled?: boolean
+  plan_code?: string
+  base_price_cents?: number
+  autonomous_pr_add_on_price_cents?: number
+}
+
+const CSRF_COOKIE_NAME = "csrftoken"
 
 export class GithubOnboardingRequestError extends Error {
   readonly status: number
@@ -108,6 +157,10 @@ export function parseRepositoriesResponse(input: unknown) {
   return v.parse(repositoriesResponseSchema, input)
 }
 
+export function parseBillingResponse(input: unknown) {
+  return v.parse(billingResponseSchema, input)
+}
+
 export async function fetchInstallationStart({
   apiBaseUrl,
   fetcher = fetch,
@@ -140,18 +193,55 @@ export async function fetchOrganizationRepositories(
   )
 }
 
+export async function fetchOrganizationBilling(
+  organizationId: string,
+  { apiBaseUrl, fetcher = fetch }: FetchOptions = {}
+) {
+  return requestJson(
+    `/organizations/${organizationId}/billing/`,
+    parseBillingResponse,
+    { apiBaseUrl, fetcher }
+  )
+}
+
+export async function updateOrganizationBilling(
+  organizationId: string,
+  payload: BillingUpdatePayload,
+  { apiBaseUrl, fetcher = fetch }: FetchOptions = {}
+) {
+  return requestJson(
+    `/organizations/${organizationId}/billing/`,
+    parseBillingResponse,
+    {
+      apiBaseUrl,
+      body: payload,
+      fetcher,
+      method: "PATCH",
+    }
+  )
+}
+
 async function requestJson<T>(
   path: string,
   parsePayload: (input: unknown) => T,
-  { apiBaseUrl, fetcher = fetch }: FetchOptions = {}
+  {
+    apiBaseUrl,
+    body,
+    fetcher = fetch,
+    method = "GET",
+  }: FetchOptions & {
+    body?: unknown
+    method?: "GET" | "PATCH"
+  } = {}
 ): Promise<T> {
+  const headers = requestHeaders(body)
   const response = await fetcher(
     buildGithubOnboardingApiUrl(path, apiBaseUrl),
     {
+      body: body == null ? undefined : JSON.stringify(body),
       credentials: "include",
-      headers: {
-        Accept: "application/json",
-      },
+      headers,
+      method,
     }
   )
 
@@ -174,9 +264,36 @@ async function requestJson<T>(
   }
 }
 
+function requestHeaders(body: unknown) {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+  }
+  if (body != null) {
+    headers["Content-Type"] = "application/json"
+    const csrfToken = readCookie(CSRF_COOKIE_NAME)
+    if (csrfToken) {
+      headers["X-CSRFToken"] = csrfToken
+    }
+  }
+  return headers
+}
+
+function readCookie(name: string) {
+  if (typeof document === "undefined") {
+    return undefined
+  }
+  const cookiePrefix = `${name}=`
+  return document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(cookiePrefix))
+    ?.slice(cookiePrefix.length)
+}
+
 export type InstallationStart = v.InferOutput<typeof installationStartSchema>
 export type Organization = v.InferOutput<typeof organizationSchema>
 export type ManagedRepository = v.InferOutput<typeof managedRepositorySchema>
+export type BillingResponse = v.InferOutput<typeof billingResponseSchema>
 export type OrganizationsResponse = v.InferOutput<
   typeof organizationsResponseSchema
 >
