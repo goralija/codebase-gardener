@@ -65,7 +65,6 @@ def build_entropy_report(
     classification = (
         "no_autonomy" if no_autonomy else _classify(overall, thresholds)
     )
-    counts = _component_counts(signals)
 
     scopes = _scopes(
         snapshot.get("logical_systems", []) or [],
@@ -75,7 +74,9 @@ def build_entropy_report(
         top_n,
     )
     top_contributors = _top_contributors(signals, top_n)
-    forecast = _forecast(overall, contributions, forecast_horizon_days)
+    forecast = _forecast(
+        overall, contributions, classification, no_autonomy, forecast_horizon_days
+    )
 
     return {
         "schema_version": "1.0",
@@ -87,15 +88,6 @@ def build_entropy_report(
             "overall": overall,
             "classification": classification,
             "components": contributions,
-            "explanation": _explain_score(
-                overall, classification, contributions, no_autonomy
-            ),
-            "component_explanations": {
-                component: _explain_component(
-                    component, contributions[component], counts[component]
-                )
-                for component in COMPONENT_WEIGHTS
-            },
         },
         "scopes": scopes,
         "top_contributors": top_contributors,
@@ -130,44 +122,34 @@ def _score(
     return raw, contributions, overall
 
 
-def _component_counts(signals: JsonObject) -> dict[str, int]:
-    counts = {component: 0 for component in COMPONENT_WEIGHTS}
-    for bucket, component in _SIGNAL_COMPONENTS.items():
-        counts[component] += len(_as_list(signals.get(bucket)))
-    return counts
-
-
-def _explain_score(
+def _score_explanation(
     overall: float,
     classification: str,
     contributions: dict[str, float],
     no_autonomy: bool,
 ) -> str:
+    """Human-readable explanation of the overall score.
+
+    The hardened EntropyReport schema only exposes a free-text channel via
+    ``forecast.summary`` (score/forecast objects are closed), so the explanation
+    is surfaced there rather than as extra fields.
+    """
     if no_autonomy:
         return (
             "No-autonomy: a blocking source-truth / constitution question prevents "
             "safe autonomous PRs regardless of the numeric score."
         )
-    drivers = [name for name, value in
-               sorted(contributions.items(), key=lambda kv: (-kv[1], kv[0])) if value > 0][:2]
+    drivers = [
+        name
+        for name, value in sorted(contributions.items(), key=lambda kv: (-kv[1], kv[0]))
+        if value > 0
+    ][:2]
     label = classification.capitalize()
     if not drivers:
         return f"{label}: no significant entropy signals (overall {overall})."
     joined = " and ".join(drivers)
-    return f"{label}: {joined} entropy {'are' if len(drivers) > 1 else 'is'} the main driver(s); overall {overall}."
-
-
-def _explain_component(component: str, contribution: float, count: int) -> str:
-    cap = round(COMPONENT_WEIGHTS[component] * 100)
-    if contribution <= 0:
-        return f"{component.capitalize()}: no signals (0/{cap})."
-    if count == 0:
-        # Knowledge can rise from an incomplete constitution rather than signals.
-        return (
-            f"{component.capitalize()}: {contribution}/{cap} from incomplete source truth."
-        )
-    plural = "s" if count != 1 else ""
-    return f"{component.capitalize()}: {contribution}/{cap} from {count} signal{plural}."
+    verb = "are" if len(drivers) > 1 else "is"
+    return f"{label}: {joined} entropy {verb} the main driver(s); overall {overall}."
 
 
 def _classify(overall: float, thresholds: EntropyThresholds) -> str:
@@ -194,18 +176,13 @@ def _scopes(
         globs = system.get("paths", []) or []
         subset = _filter_signals(signals, globs)
         _, _, overall = _score(subset, constitution=None)
-        classification = _classify(overall, thresholds)
-        name = system.get("name", "")
         scopes.append(
             {
                 "scope_type": "logical_system",
                 "scope_id": system.get("logical_system_id", ""),
-                "name": name,
+                "name": system.get("name", ""),
                 "overall": overall,
-                "classification": classification,
-                "explanation": _explain_scope(
-                    "logical_system", name, overall, classification
-                ),
+                "classification": _classify(overall, thresholds),
             }
         )
 
@@ -236,35 +213,16 @@ def _ranked_scopes(
     scopes: list[JsonObject] = []
     for scope_id, count in ranked:
         overall = round(min(_MAX_RAW, count * _PER_SIGNAL_RAW), 1)
-        classification = _classify(overall, thresholds)
         scopes.append(
             {
                 "scope_type": scope_type,
                 "scope_id": scope_id,
                 "name": scope_id,
                 "overall": overall,
-                "classification": classification,
-                "explanation": _explain_scope(
-                    scope_type, scope_id, overall, classification, count
-                ),
+                "classification": _classify(overall, thresholds),
             }
         )
     return scopes
-
-
-def _explain_scope(
-    scope_type: str,
-    name: str,
-    overall: float,
-    classification: str,
-    count: int | None = None,
-) -> str:
-    label = scope_type.replace("_", " ")
-    base = f"{name or label}: {label} entropy {overall} ({classification})"
-    if count is not None:
-        plural = "s" if count != 1 else ""
-        return f"{base} from {count} signal{plural}."
-    return f"{base}."
 
 
 def _top_contributors(signals: JsonObject, top_n: int) -> list[JsonObject]:
@@ -286,32 +244,28 @@ def _top_contributors(signals: JsonObject, top_n: int) -> list[JsonObject]:
 
 
 def _forecast(
-    overall: float, components: dict[str, float], horizon_days: int
+    overall: float,
+    components: dict[str, float],
+    classification: str,
+    no_autonomy: bool,
+    horizon_days: int,
 ) -> JsonObject:
     # Single snapshot => no trend history. Degrade to a low-confidence,
-    # current-state projection per docs/17 forecast rules.
-    dominant = max(components, key=lambda key: components[key]) if components else None
+    # current-state projection per docs/17 forecast rules. The schema's
+    # forecast/score objects are closed, so the explanation and the
+    # (no-history) trend note are folded into `summary`.
     drift = 5.0 if overall >= 60.0 else 0.0
     predicted = round(_clamp(overall + drift, 0.0, 100.0), 1)
-    if dominant and components[dominant] > 0:
-        summary = (
-            f"{dominant.title()} entropy is the largest contributor; "
-            "projection is low-confidence without historical trend data."
-        )
-    else:
-        summary = "No significant entropy signals; stable outlook (low confidence, no trend history)."
+    explanation = _score_explanation(overall, classification, components, no_autonomy)
+    summary = (
+        f"{explanation} Trend: unknown — single snapshot, no history; "
+        "low-confidence current-state projection."
+    )
     return {
         "horizon_days": horizon_days,
         "predicted_overall": predicted,
         "confidence": 0.5,
         "summary": summary,
-        # No stored history yet => direction unknown. Forward-compatible for when
-        # multiple snapshots over time enable rising/falling/stable detection.
-        "trend": {
-            "direction": "unknown",
-            "basis": "single_snapshot",
-            "history_points": 0,
-        },
     }
 
 

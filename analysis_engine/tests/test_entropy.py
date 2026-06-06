@@ -230,16 +230,15 @@ def test_top_contributors_sorted_by_impact_desc():
     assert contributors[0]["summary"] == "big"
 
 
-def test_forecast_trend_degrades_without_history():
-    forecast = build_entropy_report(_snapshot(), _constitution())["forecast"]
+def test_forecast_summary_degrades_without_history():
+    # Schema-closed forecast/score => trend + explanation live in forecast.summary.
+    summary = build_entropy_report(_snapshot(), _constitution())["forecast"]["summary"]
 
-    trend = forecast["trend"]
-    assert trend["direction"] == "unknown"
-    assert trend["basis"] == "single_snapshot"
-    assert trend["history_points"] == 0
+    assert "trend: unknown" in summary.lower()
+    assert "no history" in summary.lower()
 
 
-def test_score_explanation_names_dominant_component():
+def test_forecast_summary_names_dominant_component():
     snapshot = _snapshot(
         signals={
             "dependency_cycles": [],
@@ -251,87 +250,32 @@ def test_score_explanation_names_dominant_component():
             "ci_failures": [],
         }
     )
-    explanation = build_entropy_report(snapshot, _constitution())["score"]["explanation"]
+    summary = build_entropy_report(snapshot, _constitution())["forecast"]["summary"]
 
-    assert "maintainability" in explanation.lower()
+    assert "maintainability" in summary.lower()
 
 
-def test_no_autonomy_explanation_references_source_truth():
+def test_no_autonomy_summary_references_source_truth():
     blocking = [{"question_id": "q_001", "severity": "blocking", "question": "?", "evidence": []}]
-    explanation = build_entropy_report(
+    summary = build_entropy_report(
         _snapshot(), _constitution(open_questions=blocking)
-    )["score"]["explanation"]
+    )["forecast"]["summary"]
 
-    assert "no-autonomy" in explanation.lower()
-    assert "constitution" in explanation.lower() or "source-truth" in explanation.lower()
-
-
-def test_component_explanations_cover_all_components():
-    snapshot = _snapshot(
-        signals={
-            "dependency_cycles": [],
-            "hotspots": [{"path": "a.py"}],
-            "dead_code_candidates": [],
-            "ownership_risks": [],
-            "test_gaps": [],
-            "dependency_risks": [],
-            "ci_failures": [],
-        }
-    )
-    report = build_entropy_report(snapshot, _constitution())
-    explanations = report["score"]["component_explanations"]
-
-    assert set(explanations) == {
-        "architecture",
-        "maintainability",
-        "knowledge",
-        "testing",
-        "dependency",
-        "operational",
-    }
-    assert "no signals" in explanations["architecture"].lower()
-    assert "signal" in explanations["maintainability"].lower()
+    assert "no-autonomy" in summary.lower()
+    assert "constitution" in summary.lower() or "source-truth" in summary.lower()
 
 
-def test_incomplete_constitution_component_explanation_mentions_source_truth():
-    explanation = build_entropy_report(_snapshot(), _constitution(completeness=0.0))[
-        "score"
-    ]["component_explanations"]["knowledge"]
-
-    assert "source truth" in explanation.lower()
-
-
-def test_every_scope_has_nonempty_explanation():
-    snapshot = _snapshot(
-        logical_systems=[
-            {"logical_system_id": "sys_api", "name": "API", "paths": ["apps/api/**"]}
-        ],
-        signals={
-            "dependency_cycles": [],
-            "hotspots": [{"path": "apps/api/models.py"}],
-            "dead_code_candidates": [],
-            "ownership_risks": [],
-            "test_gaps": [],
-            "dependency_risks": [],
-            "ci_failures": [],
-        },
-    )
-    report = build_entropy_report(snapshot, _constitution())
-
-    assert report["scopes"]
-    for scope in report["scopes"]:
-        assert scope["explanation"].strip()
-        assert scope["classification"] in scope["explanation"]
-
-
-def test_additions_keep_report_schema_valid():
+def test_report_conforms_to_hardened_schema():
     snapshot = json.loads((CONTRACTS / "analysis_snapshot.json").read_text())
     constitution = json.loads((CONTRACTS / "repository_constitution.json").read_text())
 
     report = build_entropy_report(snapshot, constitution)
     _validate(report)
-    assert report["forecast"]["trend"]["direction"] == "unknown"
-    assert report["score"]["explanation"]
+    # score/scopes/forecast carry only contract keys (additionalProperties: false).
+    assert set(report["score"]) == {"overall", "classification", "components"}
+    for scope in report["scopes"]:
+        assert set(scope) == {"scope_type", "scope_id", "name", "overall", "classification"}
+    assert report["forecast"]["summary"]
 
 
 def test_build_is_deterministic():
