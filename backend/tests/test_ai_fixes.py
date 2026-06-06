@@ -84,6 +84,23 @@ def test_apply_ai_fix_rejects_unmatched_search_block(monkeypatch):
         apply_ai_fix("core/util.py", ORIGINAL, _Plan(), {})
 
 
+def test_apply_ai_fix_reports_progress(monkeypatch):
+    fixed = "import os\n\n\ndef used():\n    return 1\n"
+    _patch_llm(monkeypatch, f"```python\n{fixed}```")
+
+    events = []
+    apply_ai_fix(
+        "core/util.py", ORIGINAL, _Plan(), {},
+        progress=lambda pct, phase, msg: events.append((pct, phase)),
+    )
+
+    percents = [p for p, _ in events]
+    phases = [ph for _, ph in events]
+    assert percents[0] == 0 and percents[-1] == 100
+    assert percents == sorted(percents)        # monotonic
+    assert "done" in phases
+
+
 def test_apply_ai_fix_rejects_invalid_python(monkeypatch):
     _patch_llm(monkeypatch, "```python\ndef broken(:\n    pass\n```")
 

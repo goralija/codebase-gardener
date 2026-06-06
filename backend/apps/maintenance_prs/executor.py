@@ -57,7 +57,14 @@ def execute_maintenance_pr_plan(
     plan: MaintenancePRPlan,
     *,
     client: GitHubAppClient | None = None,
+    progress=None,
 ) -> dict[str, Any]:
+    # ``progress(percent, phase, message)`` is forwarded to the AI author so
+    # callers can surface how far along a fix is.
+    # TODO(frontend/backend): pass a progress callback from run_gardening_session
+    # that calls self.update_state(state="PROGRESS", meta={"percent", "phase",
+    # "message", "plan_id"}) so the dashboard can render a live progress bar
+    # (poll the Celery task id), or persist it on the plan for the API to expose.
     _guard_executable(plan)
     _claim_plan_for_execution(plan)
 
@@ -109,6 +116,7 @@ def execute_maintenance_pr_plan(
             branch=branch,
             token=token,
             plan=plan,
+            progress=progress,
         )
         if not actual_fix_paths:
             raise PlanNotExecutableError(
@@ -218,6 +226,7 @@ def _apply_actual_file_fixes(
     branch: str,
     token: str,
     plan: MaintenancePRPlan,
+    progress=None,
 ) -> list[str]:
     if plan.category == "docs":
         paths = docs_actual_fix_paths(plan)
@@ -245,7 +254,7 @@ def _apply_actual_file_fixes(
         if plan.category == "docs":
             updated = apply_docs_maintenance_note(content, plan)
         else:
-            updated = apply_ai_fix(path, content, plan, opportunity)
+            updated = apply_ai_fix(path, content, plan, opportunity, progress=progress)
         if updated == content:
             continue
 

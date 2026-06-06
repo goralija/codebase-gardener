@@ -10,10 +10,26 @@ from __future__ import annotations
 
 import ast
 import difflib
+import logging
 import re
+from collections.abc import Callable
 
 from apps.common.llm import LLMError, complete
 from apps.maintenance_prs.models import MaintenancePRPlan
+
+logger = logging.getLogger("gardener.ai_fixes")
+
+# Progress callback: (percent: int 0-100, phase: str, message: str).
+ProgressCallback = Callable[[int, str, str], None]
+
+
+def _report(progress: ProgressCallback | None, percent: int, phase: str, message: str) -> None:
+    logger.info("ai_fix %3d%% [%s] %s", percent, phase, message)
+    if progress is not None:
+        try:
+            progress(percent, phase, message)
+        except Exception:  # noqa: BLE001 - progress reporting must never break the fix
+            logger.warning("ai_fix.progress_callback_failed", exc_info=True)
 
 
 # Categories an AI author can attempt (docs has its own deterministic author).
@@ -101,6 +117,7 @@ def apply_ai_fix(
     content: str,
     plan: MaintenancePRPlan,
     opportunity: dict | None = None,
+    progress: ProgressCallback | None = None,
 ) -> str:
     """Return the LLM-edited file content, validated. Raises AIFixError on failure.
 
@@ -108,6 +125,9 @@ def apply_ai_fix(
     so output stays small. Files larger than a single context window are read in
     chunks that together cover the whole file; edit blocks from every chunk are
     collected and applied to the full content.
+
+    ``progress(percent, phase, message)`` is invoked as the work advances so the
+    worker/UI can show how far along the AI fix is.
     """
     opportunity = opportunity or {}
     if len(content) > _MAX_FILE_CHARS:
@@ -120,11 +140,14 @@ def apply_ai_fix(
     else:
         chunks = _chunk_content(path, content)
 
+    total = len(chunks)
+    _report(progress, 0, "reading", f"{path}: reading in {total} part(s)")
+
     blocks: list[tuple[str, str]] = []
     whole_file_fallback: str | None = None
     for index, chunk in enumerate(chunks):
         prompt = _build_prompt(
-            path, chunk, plan, opportunity, part=(index + 1, len(chunks))
+            path, chunk, plan, opportunity, part=(index + 1, total)
         )
         try:
             raw = complete(
@@ -136,12 +159,22 @@ def apply_ai_fix(
         chunk_blocks = _parse_edit_blocks(raw)
         if chunk_blocks:
             blocks.extend(chunk_blocks)
-        elif len(chunks) == 1:
+        elif total == 1:
             # Single-pass fallback: model returned the whole file in a fence.
             fenced = _FENCE_RE.search(raw)
             if fenced:
                 whole_file_fallback = fenced.group(1).strip("\n") + "\n"
 
+        # Reserve the last 10% for apply + validate.
+        percent = int((index + 1) / total * 90)
+        _report(
+            progress,
+            percent,
+            "analyzing",
+            f"{path}: part {index + 1}/{total}, {len(blocks)} edit(s) so far",
+        )
+
+    _report(progress, 90, "applying", f"{path}: applying {len(blocks)} edit(s)")
     if blocks:
         blocks = list(dict.fromkeys(blocks))  # dedupe identical edits across chunks
         updated = _apply_edit_blocks(path, content, blocks)
@@ -151,6 +184,7 @@ def apply_ai_fix(
         raise AIFixError(f"AI fix for {path} produced no applicable edits.")
 
     _validate(path, content, updated, plan.category)
+    _report(progress, 100, "done", f"{path}: fix ready")
     return updated
 
 
