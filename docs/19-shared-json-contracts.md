@@ -262,7 +262,8 @@ Produced by Lane C. Executed through Lane A's GitHub integration.
     "goal": "Refresh stale architecture docs.",
     "evidence": "Detected stale source truth.",
     "entropy_impact": "Expected -2.1 entropy.",
-    "verification": "Docs review required."
+    "verification": "Docs review required.",
+    "roi_impact": "Estimated 0.2–0.5 engineering hours saved. Assumptions: 0.5 hrs/file for docs; confidence 0.94; conservative scale 0.5–1.0×. Estimates are conservative and indicative only."
   },
   "required_checks": ["docs_review"],
   "blocked": false,

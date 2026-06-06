@@ -13,7 +13,8 @@
     "goal": "Point contributors to current product truth.",
     "evidence": "README contained superseded seed material.",
     "entropy_impact": "Expected -2.1 entropy from clearer source truth.",
-    "verification": "Run fixture validation and docs review."
+    "verification": "Run fixture validation and docs review.",
+    "roi_impact": "Estimated 0.5–0.9 engineering hours saved. 1 high-entropy-delta path addressed. Assumptions: 0.5 hrs/file for docs; confidence 0.94; conservative scale 0.5–1.0×. Estimates are conservative and indicative only."
   },
   "required_checks": ["fixtures_validate", "docs_review"],
   "blocked": false,
