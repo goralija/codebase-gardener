@@ -58,6 +58,33 @@ uv --project RepoWise run repowise init . --index-only --mode fast --yes --no-ag
 uv --project RepoWise run repowise health . --format json
 ```
 
+To test Repowise against a Lane B fixture repository without dirtying tracked fixture files, copy the fixture into a temporary Git repository and scan the temporary checkout:
+
+```bash
+PROJECT=/Users/bloomteq/codebase-gardener
+FIXTURE=normal_repo
+tmpdir=$(mktemp -d /tmp/gardener-fixture-${FIXTURE}.XXXXXX)
+
+cp -R "$PROJECT/fixtures/repos/$FIXTURE/." "$tmpdir"
+
+git -C "$tmpdir" init
+git -C "$tmpdir" add .
+git -C "$tmpdir" -c user.name="Fixture Test" -c user.email="fixture@example.com" commit -m "Initial fixture repo"
+
+uv --project "$PROJECT/RepoWise" run repowise init "$tmpdir" \
+  --index-only \
+  --mode fast \
+  --yes \
+  --no-agents \
+  --no-codex \
+  --no-claude-md \
+  --no-distill-hook
+
+uv --project "$PROJECT/RepoWise" run repowise status "$tmpdir" --no-workspace
+```
+
+Supported fixture names are `normal_repo`, `monorepo_repo`, `missing_docs_repo`, `conflicting_docs_repo`, and `protected_modules_repo`.
+
 Repowise's own dashboard can be started for debugging raw scan output:
 
 ```bash
