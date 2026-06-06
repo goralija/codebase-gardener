@@ -109,6 +109,40 @@ def test_planner_keeps_groups_focused_by_size_category_and_path_conflict():
 
 
 @pytest.mark.django_db
+def test_planner_does_not_bundle_into_force_blocked_group():
+    # opp_b is force-blocked because it conflicts with opp_a's path. opp_c shares
+    # opp_b's category but has no real path conflict, so it must get its own
+    # unblocked plan instead of being merged into (and blocked with) opp_b.
+    repository = demo_repository()
+    opportunities = [
+        opportunity("opp_a", "Docs A", ["docs/a.md"]),
+        opportunity("opp_b", "Lint conflict", ["docs/a.md"], category="lint_format"),
+        opportunity("opp_c", "Lint clean", ["src/other.py"], category="lint_format"),
+    ]
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_force_block",
+        opportunities=opportunities,
+        constitution=constitution(),
+    )
+
+    by_opportunity = {
+        plan.opportunity_links.first().maintenance_opportunity_id: plan
+        for plan in plans
+        if plan.opportunity_links.count() == 1
+    }
+    assert not by_opportunity["opp_a"].blocked
+    assert by_opportunity["opp_b"].blocked
+    assert by_opportunity["opp_b"].block_reason == (
+        "Opportunity conflicts with another selected PR plan in this session."
+    )
+    # The clean opportunity is not bundled into the force-blocked plan.
+    assert not by_opportunity["opp_c"].blocked
+    assert by_opportunity["opp_c"].opportunity_links.count() == 1
+
+
+@pytest.mark.django_db
 def test_planner_blocks_low_confidence_protected_and_assisted_work():
     repository = demo_repository()
     opportunities = [
