@@ -5,7 +5,10 @@ from apps.analysis import storage_service
 from apps.analysis.constitution_pr import maybe_open_constitution_pr
 from apps.analysis.runner import AnalysisRunError, run_repository_analysis
 from apps.github_app.client import RETRYABLE_STATUS_CODES, GitHubAPIError
+from apps.maintenance_prs.docs_fixes import has_implemented_file_fix
+from apps.maintenance_prs.models import MaintenancePRPlan
 from apps.maintenance_prs.planner import plan_maintenance_prs
+from apps.profiles.models import GardenerProfile
 from apps.sessions.lifecycle import (
     SessionLifecycleError,
     build_failed_gardening_session_result,
@@ -13,6 +16,8 @@ from apps.sessions.lifecycle import (
     execute_session_pr_plans,
 )
 from apps.sessions.models import GardeningSession
+
+MAX_AUTO_APPROVED_SESSION_PLANS = 3
 
 
 class RetryableSessionError(Exception):
@@ -48,7 +53,12 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
             artifacts=analysis_result.artifacts,
         )
         first_report = storage_service.load_first_report(analysis_result.analysis)
-        _plan_session_prs(session, first_report)
+        planned_pr_plans = _plan_session_prs(
+            session=session,
+            artifacts=analysis_result.artifacts,
+            first_report=first_report,
+        )
+        _approve_auto_executable_pr_plans(planned_pr_plans)
         current_phase = "execute"
         executed_plan_ids, execution_errors = execute_session_pr_plans(session)
         session.result = build_gardening_session_result(
@@ -179,7 +189,12 @@ def _run_foundation_placeholder(session: GardeningSession) -> None:
         raise RetryableSessionError("Simulated retryable session error.")
 
 
-def _plan_session_prs(session: GardeningSession, first_report: dict) -> None:
+def _plan_session_prs(
+    *,
+    session: GardeningSession,
+    artifacts: dict,
+    first_report: dict,
+) -> list[MaintenancePRPlan]:
     """Persist real PR plans for stored analysis opportunities.
 
     Fixture reports carry fixture PR plans and a non-UUID demo repository ID,
@@ -187,18 +202,26 @@ def _plan_session_prs(session: GardeningSession, first_report: dict) -> None:
     prior session plan contracts for report serving; those must not suppress
     planning for the current session.
     """
-    if _is_fixture_report(session, first_report):
-        return
+    artifact_opportunities = artifacts.get("opportunities") or []
+    if not artifact_opportunities and _is_fixture_report(session, first_report):
+        return []
 
-    opportunities = first_report.get("maintenance_opportunities") or []
+    opportunities = artifact_opportunities or first_report.get("maintenance_opportunities") or []
     if not opportunities:
-        return
+        return []
+    constitution = (
+        artifacts.get("constitution")
+        if artifact_opportunities
+        else first_report.get("repository_constitution")
+    ) or {}
 
-    plan_maintenance_prs(
+    profile = GardenerProfile.get_or_create_for_repository(session.repository).to_contract()
+    return plan_maintenance_prs(
         repository=session.repository,
         gardening_session_id=str(session.id),
         opportunities=opportunities,
-        constitution=first_report.get("repository_constitution") or {},
+        constitution=constitution,
+        profile=profile,
     )
 
 
@@ -206,4 +229,30 @@ def _is_fixture_report(session: GardeningSession, first_report: dict) -> bool:
     repository_id = first_report.get("repository_constitution", {}).get("repository_id")
     return repository_id != str(session.repository_id) and bool(
         first_report.get("maintenance_pr_plans")
+    )
+
+
+def _approve_auto_executable_pr_plans(plans: list[MaintenancePRPlan]) -> list[MaintenancePRPlan]:
+    approved: list[MaintenancePRPlan] = []
+    for _index, plan in sorted(
+        enumerate(plans),
+        key=lambda item: (0 if has_implemented_file_fix(item[1]) else 1, item[0]),
+    ):
+        if len(approved) >= MAX_AUTO_APPROVED_SESSION_PLANS:
+            break
+        if not _safe_for_auto_execution(plan):
+            continue
+        plan.approval_status = MaintenancePRPlan.ApprovalStatus.APPROVED
+        plan.save(update_fields=["approval_status", "updated_at"])
+        approved.append(plan)
+    return approved
+
+
+def _safe_for_auto_execution(plan: MaintenancePRPlan) -> bool:
+    return (
+        not plan.blocked
+        and plan.risk_tier == "tier_1_autonomous"
+        and plan.confidence >= plan.confidence_threshold
+        and plan.repository.is_active
+        and has_implemented_file_fix(plan)
     )

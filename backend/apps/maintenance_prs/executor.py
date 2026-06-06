@@ -8,6 +8,11 @@ from django.utils import timezone
 
 from apps.common.models import AuditEvent
 from apps.github_app.client import GitHubAPIError, GitHubAppClient
+from apps.maintenance_prs.docs_fixes import (
+    apply_docs_maintenance_note,
+    docs_actual_fix_paths,
+    has_implemented_file_fix,
+)
 from apps.maintenance_prs.models import MaintenancePRPlan
 from apps.maintenance_prs.policy import STALE_RUNNING_TIMEOUT
 
@@ -80,23 +85,28 @@ def execute_maintenance_pr_plan(
                 plan=plan,
             )
 
-        marker_sha = client.get_file_sha(
+        _put_marker_file(
+            client,
             owner,
             repo,
-            marker_path,
+            marker_path=marker_path,
+            marker_content=marker_content,
             branch=branch,
             token=token,
+            plan=plan,
         )
-        client.put_file_contents(
+        actual_fix_paths = _apply_actual_file_fixes(
+            client,
             owner,
             repo,
-            marker_path,
-            message=plan.title,
-            content=marker_content,
             branch=branch,
             token=token,
-            sha=marker_sha,
+            plan=plan,
         )
+        if not actual_fix_paths:
+            raise PlanNotExecutableError(
+                "Docs plan did not find any existing safe Markdown file to update."
+            )
 
         pull_request = _create_or_find_pull_request(
             client,
@@ -192,6 +202,79 @@ def _validated_pull_request_result(pull_request: dict[str, Any]) -> tuple[int, s
     return pr_number, pr_url
 
 
+def _apply_actual_file_fixes(
+    client: GitHubAppClient,
+    owner: str,
+    repo: str,
+    *,
+    branch: str,
+    token: str,
+    plan: MaintenancePRPlan,
+) -> list[str]:
+    existing_paths: list[str] = []
+    for path in docs_actual_fix_paths(plan):
+        try:
+            content = client.get_file_contents(
+                owner,
+                repo,
+                path,
+                branch=branch,
+                token=token,
+            )
+        except GitHubAPIError as exc:
+            if exc.status_code == 404:
+                continue
+            raise
+
+        existing_paths.append(path)
+        updated = apply_docs_maintenance_note(content, plan)
+        if updated == content:
+            continue
+
+        sha = client.get_file_sha(owner, repo, path, branch=branch, token=token)
+        client.put_file_contents(
+            owner,
+            repo,
+            path,
+            message=plan.title,
+            content=updated,
+            branch=branch,
+            token=token,
+            sha=sha,
+        )
+    return existing_paths
+
+
+def _put_marker_file(
+    client: GitHubAppClient,
+    owner: str,
+    repo: str,
+    *,
+    marker_path: str,
+    marker_content: str,
+    branch: str,
+    token: str,
+    plan: MaintenancePRPlan,
+) -> None:
+    marker_sha = client.get_file_sha(
+        owner,
+        repo,
+        marker_path,
+        branch=branch,
+        token=token,
+    )
+    client.put_file_contents(
+        owner,
+        repo,
+        marker_path,
+        message=plan.title,
+        content=marker_content,
+        branch=branch,
+        token=token,
+        sha=marker_sha,
+    )
+
+
 def _marker_content(plan: MaintenancePRPlan, body: str) -> str:
     return (
         f"<!-- gardener-maintenance-pr-plan-id: {plan.id} -->\n"
@@ -253,6 +336,10 @@ def _guard_executable(plan: MaintenancePRPlan) -> None:
     if not plan.repository.is_active:
         raise PlanNotExecutableError(
             "Plan repository is not active (unselected, suspended, or deactivated)."
+        )
+    if not has_implemented_file_fix(plan):
+        raise PlanNotExecutableError(
+            "Plan has no implemented autonomous file fix."
         )
 
 

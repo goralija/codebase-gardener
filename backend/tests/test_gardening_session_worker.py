@@ -159,7 +159,7 @@ def test_run_gardening_session_offers_constitution_pr_from_analysis_artifacts(
 
 
 @pytest.mark.django_db
-def test_run_gardening_session_creates_pending_plans_from_real_opportunities(
+def test_run_gardening_session_plans_and_executes_first_report_opportunities(
     settings,
     monkeypatch,
 ):
@@ -184,7 +184,7 @@ def test_run_gardening_session_creates_pending_plans_from_real_opportunities(
             ),
         ],
     )
-    executed = []
+    executed: list[str] = []
 
     monkeypatch.setattr(
         "apps.sessions.tasks.storage_service.load_first_report",
@@ -192,7 +192,7 @@ def test_run_gardening_session_creates_pending_plans_from_real_opportunities(
     )
     monkeypatch.setattr(
         "apps.maintenance_prs.executor.execute_maintenance_pr_plan",
-        lambda plan: executed.append(plan.id),
+        lambda plan: executed.append(str(plan.id)),
     )
 
     run_gardening_session.delay(str(session.id)).get()
@@ -200,14 +200,15 @@ def test_run_gardening_session_creates_pending_plans_from_real_opportunities(
     session.refresh_from_db()
     plans = list(MaintenancePRPlan.objects.for_session(str(session.id)).order_by("title"))
     assert len(plans) == 2
-    assert all(plan.approval_status == MaintenancePRPlan.ApprovalStatus.PENDING for plan in plans)
-    assert executed == []
 
     unblocked = [plan for plan in plans if not plan.blocked]
     blocked = [plan for plan in plans if plan.blocked]
     assert len(unblocked) == 1
     assert len(blocked) == 1
+    assert unblocked[0].approval_status == MaintenancePRPlan.ApprovalStatus.APPROVED
+    assert blocked[0].approval_status == MaintenancePRPlan.ApprovalStatus.PENDING
     assert blocked[0].block_reason == "Opportunity category requires assisted draft PR handling."
+    assert executed == [str(unblocked[0].id)]
     assert session.result["opportunities_selected"] == ["opp_docs"]
     assert session.result["opportunities_deferred"] == [
         {
@@ -218,6 +219,232 @@ def test_run_gardening_session_creates_pending_plans_from_real_opportunities(
     assert session.result["maintenance_pr_plans"] == [str(unblocked[0].id)]
     assert session.result["errors"] == []
     assert_gardening_session_result_contract(session.result)
+
+
+@pytest.mark.django_db
+def test_run_gardening_session_plans_and_executes_real_opportunities(
+    settings,
+    monkeypatch,
+):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "manual"},
+    )
+    opportunities = [
+        worker_opportunity(
+            "opp_lint",
+            "Format generated client",
+            ["src/client.py"],
+            "lint_format",
+            0.98,
+        ),
+        worker_opportunity("opp_docs", "Refresh README", ["README.md"], "docs", 0.94),
+        worker_opportunity(
+            "opp_generated",
+            "Refresh generated schema",
+            ["schema/openapi.json"],
+            "generated_refresh",
+            0.97,
+        ),
+        worker_opportunity(
+            "opp_dependency",
+            "Patch dependency",
+            ["requirements.txt"],
+            "dependency_patch",
+            0.96,
+        ),
+    ]
+    artifacts = {
+        "constitution": worker_constitution(repository),
+        "opportunities": opportunities,
+    }
+    report = report_for_repository(repository, opportunities)
+    executed: list[str] = []
+
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository: SimpleNamespace(analysis=object(), artifacts=artifacts),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.storage_service.load_first_report",
+        lambda _analysis: report,
+    )
+
+    def execute(plan):
+        executed.append(str(plan.id))
+        MaintenancePRPlan.objects.filter(id=plan.id).update(
+            execution_status=MaintenancePRPlan.ExecutionStatus.SUCCEEDED
+        )
+
+    monkeypatch.setattr("apps.maintenance_prs.executor.execute_maintenance_pr_plan", execute)
+
+    run_gardening_session.delay(str(session.id)).get()
+
+    session.refresh_from_db()
+    plans = list(
+        MaintenancePRPlan.objects.for_session(str(session.id)).order_by("created_at", "id")
+    )
+    assert len(plans) == 4
+    approved = [plan for plan in plans if plan.approval_status == "approved"]
+    assert len(approved) == 1
+    assert approved[0].category == "docs"
+    assert len(executed) == 1
+    assert set(executed) == {str(plan.id) for plan in approved}
+    assert session.result["maintenance_pr_plans"] == executed
+    assert session.result["opportunities_selected"] == ["opp_docs"]
+    assert session.result["opportunities_deferred"] == [
+        {
+            "maintenance_opportunity_id": "opp_lint",
+            "reason": "Plan is pending approval for autonomous execution.",
+        },
+        {
+            "maintenance_opportunity_id": "opp_generated",
+            "reason": "Plan is pending approval for autonomous execution.",
+        },
+        {
+            "maintenance_opportunity_id": "opp_dependency",
+            "reason": "Plan is pending approval for autonomous execution.",
+        },
+    ]
+    assert session.result["errors"] == []
+
+
+@pytest.mark.django_db
+def test_run_gardening_session_defers_safe_docs_plans_over_auto_approval_cap(
+    settings,
+    monkeypatch,
+):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "manual"},
+    )
+    opportunities = [
+        worker_opportunity(
+            f"opp_docs_{index}",
+            f"Refresh docs {index}",
+            [f"docs/{index}.md"],
+            "docs",
+            0.94,
+        )
+        for index in range(10)
+    ]
+    artifacts = {
+        "constitution": worker_constitution(repository),
+        "opportunities": opportunities,
+    }
+    report = report_for_repository(repository, opportunities)
+    executed: list[str] = []
+
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository: SimpleNamespace(analysis=object(), artifacts=artifacts),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.storage_service.load_first_report",
+        lambda _analysis: report,
+    )
+
+    def execute(plan):
+        executed.append(str(plan.id))
+        MaintenancePRPlan.objects.filter(id=plan.id).update(
+            execution_status=MaintenancePRPlan.ExecutionStatus.SUCCEEDED
+        )
+
+    monkeypatch.setattr("apps.maintenance_prs.executor.execute_maintenance_pr_plan", execute)
+
+    run_gardening_session.delay(str(session.id)).get()
+
+    session.refresh_from_db()
+    plans = list(
+        MaintenancePRPlan.objects.for_session(str(session.id)).order_by("created_at", "id")
+    )
+    approved = [plan for plan in plans if plan.approval_status == "approved"]
+    pending = [plan for plan in plans if plan.approval_status == "pending"]
+    assert len(plans) == 4
+    assert len(approved) == 3
+    assert len(pending) == 1
+    assert session.result["maintenance_pr_plans"] == executed
+    assert session.result["opportunities_selected"] == [
+        f"opp_docs_{index}" for index in range(9)
+    ]
+    assert session.result["opportunities_deferred"] == [
+        {
+            "maintenance_opportunity_id": "opp_docs_9",
+            "reason": "Plan is pending approval for autonomous execution.",
+        }
+    ]
+
+
+@pytest.mark.django_db
+def test_run_gardening_session_does_not_approve_blocked_protected_or_low_confidence(
+    settings,
+    monkeypatch,
+):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "manual"},
+    )
+    opportunities = [
+        worker_opportunity(
+            "opp_low",
+            "Refresh low confidence docs",
+            ["docs/low.md"],
+            "docs",
+            0.50,
+        ),
+        worker_opportunity(
+            "opp_protected",
+            "Refresh secret docs",
+            ["secret/guide.md"],
+            "docs",
+            0.94,
+        ),
+    ]
+    artifacts = {
+        "constitution": worker_constitution(
+            repository,
+            never_touch=[{"path": "secret/**", "reason": "Secrets stay human-reviewed."}],
+        ),
+        "opportunities": opportunities,
+    }
+    report = report_for_repository(repository, opportunities)
+    executed: list[str] = []
+
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository: SimpleNamespace(analysis=object(), artifacts=artifacts),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.storage_service.load_first_report",
+        lambda _analysis: report,
+    )
+    monkeypatch.setattr(
+        "apps.maintenance_prs.executor.execute_maintenance_pr_plan",
+        lambda plan: executed.append(str(plan.id)),
+    )
+
+    run_gardening_session.delay(str(session.id)).get()
+
+    session.refresh_from_db()
+    plans = list(MaintenancePRPlan.objects.for_session(str(session.id)))
+    assert len(plans) == 2
+    assert all(plan.blocked for plan in plans)
+    assert all(plan.approval_status == "pending" for plan in plans)
+    assert executed == []
+    assert session.result["maintenance_pr_plans"] == []
+    assert sorted(
+        item["maintenance_opportunity_id"]
+        for item in session.result["opportunities_deferred"]
+    ) == ["opp_low", "opp_protected"]
 
 
 @pytest.mark.django_db
@@ -240,6 +467,10 @@ def test_run_gardening_session_planning_is_idempotent_per_session_opportunity(
     monkeypatch.setattr(
         "apps.sessions.tasks.storage_service.load_first_report",
         lambda _analysis: report,
+    )
+    monkeypatch.setattr(
+        "apps.maintenance_prs.executor.execute_maintenance_pr_plan",
+        lambda _plan: None,
     )
 
     run_gardening_session.delay(str(session.id)).get()
@@ -651,7 +882,21 @@ def first_report_for_repository(repository: ManagedRepository, *, opportunities:
     return report
 
 
-def constitution_for_repository(repository: ManagedRepository):
+def report_for_repository(repository: ManagedRepository, opportunities: list[dict]) -> dict:
+    return first_report_for_repository(repository, opportunities=opportunities)
+
+
+def constitution_for_repository(
+    repository: ManagedRepository,
+    *,
+    never_touch: list[dict] | None = None,
+) -> dict:
+    never_touch_rules = never_touch or [
+        {
+            "path": "**/.env*",
+            "reason": "Secrets require human handling.",
+        }
+    ]
     return {
         "schema_version": "1.0",
         "repository_id": str(repository.id),
@@ -664,21 +909,24 @@ def constitution_for_repository(repository: ManagedRepository):
                 "reason": "Billing is protected.",
             }
         ],
-        "never_touch": [
-            {
-                "path": "**/.env*",
-                "reason": "Secrets require human handling.",
-            }
-        ],
+        "never_touch": never_touch_rules,
         "allowed_fixes": {
-            "autonomous": ["docs", "dependency_patch"],
-            "assisted": ["tests", "complexity_reduction", "layer_violation_repair"],
-            "advisory": ["auth", "permissions"],
+            "autonomous": ["docs", "lint_format", "generated_refresh", "dependency_patch"],
+            "assisted": ["tests", "refactoring", "complexity_reduction"],
+            "advisory": ["auth", "payments", "pricing", "permissions"],
         },
         "architecture_boundaries": [],
         "ignored_paths": [],
         "open_questions": [],
     }
+
+
+def worker_constitution(
+    repository: ManagedRepository,
+    *,
+    never_touch: list[dict] | None = None,
+) -> dict:
+    return constitution_for_repository(repository, never_touch=never_touch or [])
 
 
 def opportunity(
@@ -689,7 +937,10 @@ def opportunity(
     category: str = "docs",
     risk_tier: str = "tier_1_autonomous",
     confidence: float = 0.94,
+    expected_entropy_delta: float = -1.1,
+    required_checks: list[str] | None = None,
 ):
+    checks = required_checks or ["docs_review"]
     return {
         "schema_version": "1.0",
         "maintenance_opportunity_id": maintenance_opportunity_id,
@@ -702,16 +953,36 @@ def opportunity(
         "summary": f"{title} summary.",
         "affected_paths": affected_paths,
         "blocked_by": [],
-        "expected_entropy_delta": -1.1,
-        "required_checks": ["docs_review"],
+        "expected_entropy_delta": expected_entropy_delta,
+        "required_checks": checks,
         "evidence": [
             {
                 "source_type": "file",
                 "path": affected_paths[0],
+                "line_start": 1,
+                "line_end": 5,
                 "summary": f"{title} evidence.",
             }
         ],
     }
+
+
+def worker_opportunity(
+    maintenance_opportunity_id: str,
+    title: str,
+    affected_paths: list[str],
+    category: str,
+    confidence: float,
+) -> dict:
+    return opportunity(
+        maintenance_opportunity_id,
+        title,
+        affected_paths,
+        category=category,
+        confidence=confidence,
+        expected_entropy_delta=-1.0,
+        required_checks=["backend-test"],
+    )
 
 
 def create_repository(identifier: int) -> ManagedRepository:
