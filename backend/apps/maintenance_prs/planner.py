@@ -8,6 +8,7 @@ from typing import Iterable
 from django.db import transaction
 
 from apps.maintenance_prs.models import MaintenancePRPlan, MaintenancePRPlanOpportunity
+from apps.maintenance_prs.roi import estimate_roi
 
 
 CONFIDENCE_THRESHOLD = 0.90
@@ -282,6 +283,7 @@ def _pr_body_sections(group: list[dict], decision: PolicyDecision) -> dict:
         ),
         "entropy_impact": f"Expected {entropy_delta:.1f} entropy delta across {len(changed_paths)} path(s).",
         "verification": verification,
+        "roi_impact": estimate_roi(group, blocked=decision.blocked),
     }
 
 

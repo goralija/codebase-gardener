@@ -52,7 +52,10 @@ def test_planner_persists_grouped_contract_shaped_pr_plan():
         "evidence",
         "entropy_impact",
         "verification",
+        "roi_impact",
     }
+    assert "hours saved" in contract["pr_body_sections"]["roi_impact"]
+    assert "Assumptions" in contract["pr_body_sections"]["roi_impact"]
     assert "Minimum opportunity confidence 0.94" in contract["pr_body_sections"]["verification"]
     assert "Changed paths: docs/api.md, docs/architecture.md" in contract["pr_body_sections"]["verification"]
     assert "Categories checked against constitution allowed fixes: docs" in contract["pr_body_sections"]["evidence"]
