@@ -23,6 +23,10 @@ def has_docs_actual_fix(plan: MaintenancePRPlan) -> bool:
     return bool(docs_actual_fix_paths(plan))
 
 
+def has_implemented_file_fix(plan: MaintenancePRPlan) -> bool:
+    return has_docs_actual_fix(plan)
+
+
 def apply_docs_maintenance_note(content: str, plan: MaintenancePRPlan) -> str:
     block = _maintenance_note_block(plan)
     start = _start_marker(plan)

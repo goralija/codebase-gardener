@@ -289,15 +289,96 @@ def test_run_gardening_session_plans_and_executes_real_opportunities(
     )
     assert len(plans) == 4
     approved = [plan for plan in plans if plan.approval_status == "approved"]
-    assert len(approved) == 3
-    assert "docs" in {plan.category for plan in approved}
-    assert len({plan.category for plan in plans} - {plan.category for plan in approved}) == 1
-    assert len(executed) == 3
-    assert MaintenancePRPlan.objects.get(id=executed[0]).category == "docs"
+    assert len(approved) == 1
+    assert approved[0].category == "docs"
+    assert len(executed) == 1
     assert set(executed) == {str(plan.id) for plan in approved}
     assert session.result["maintenance_pr_plans"] == executed
-    assert "opp_docs" in session.result["opportunities_selected"]
+    assert session.result["opportunities_selected"] == ["opp_docs"]
+    assert session.result["opportunities_deferred"] == [
+        {
+            "maintenance_opportunity_id": "opp_lint",
+            "reason": "Plan is pending approval for autonomous execution.",
+        },
+        {
+            "maintenance_opportunity_id": "opp_generated",
+            "reason": "Plan is pending approval for autonomous execution.",
+        },
+        {
+            "maintenance_opportunity_id": "opp_dependency",
+            "reason": "Plan is pending approval for autonomous execution.",
+        },
+    ]
     assert session.result["errors"] == []
+
+
+@pytest.mark.django_db
+def test_run_gardening_session_defers_safe_docs_plans_over_auto_approval_cap(
+    settings,
+    monkeypatch,
+):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "manual"},
+    )
+    opportunities = [
+        worker_opportunity(
+            f"opp_docs_{index}",
+            f"Refresh docs {index}",
+            [f"docs/{index}.md"],
+            "docs",
+            0.94,
+        )
+        for index in range(10)
+    ]
+    artifacts = {
+        "constitution": worker_constitution(repository),
+        "opportunities": opportunities,
+    }
+    report = report_for_repository(repository, opportunities)
+    executed: list[str] = []
+
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository: SimpleNamespace(analysis=object(), artifacts=artifacts),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.storage_service.load_first_report",
+        lambda _analysis: report,
+    )
+
+    def execute(plan):
+        executed.append(str(plan.id))
+        MaintenancePRPlan.objects.filter(id=plan.id).update(
+            execution_status=MaintenancePRPlan.ExecutionStatus.SUCCEEDED
+        )
+
+    monkeypatch.setattr("apps.maintenance_prs.executor.execute_maintenance_pr_plan", execute)
+
+    run_gardening_session.delay(str(session.id)).get()
+
+    session.refresh_from_db()
+    plans = list(
+        MaintenancePRPlan.objects.for_session(str(session.id)).order_by("created_at", "id")
+    )
+    approved = [plan for plan in plans if plan.approval_status == "approved"]
+    pending = [plan for plan in plans if plan.approval_status == "pending"]
+    assert len(plans) == 4
+    assert len(approved) == 3
+    assert len(pending) == 1
+    assert session.result["maintenance_pr_plans"] == executed
+    assert session.result["opportunities_selected"] == [
+        f"opp_docs_{index}" for index in range(9)
+    ]
+    assert session.result["opportunities_deferred"] == [
+        {
+            "maintenance_opportunity_id": "opp_docs_9",
+            "reason": "Plan is pending approval for autonomous execution.",
+        }
+    ]
 
 
 @pytest.mark.django_db

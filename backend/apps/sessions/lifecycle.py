@@ -177,6 +177,15 @@ def _select_database_work(
                     }
                 )
             continue
+        if plan.approval_status != MaintenancePRPlan.ApprovalStatus.APPROVED:
+            for opportunity_id in opportunity_ids:
+                deferred.append(
+                    {
+                        "maintenance_opportunity_id": opportunity_id,
+                        "reason": _pending_plan_reason(plan),
+                    }
+                )
+            continue
 
         plan_ids.append(str(plan.id))
         for opportunity_id in opportunity_ids:
@@ -184,6 +193,12 @@ def _select_database_work(
                 selected.append(opportunity_id)
 
     return selected, deferred, plan_ids
+
+
+def _pending_plan_reason(plan) -> str:
+    if plan.approval_status == "rejected":
+        return "Plan was rejected for execution."
+    return "Plan is pending approval for autonomous execution."
 
 
 def _failed_result(
@@ -255,7 +270,7 @@ def execute_session_pr_plans(
     means pure fixture mode where no DB plans exist for the session.
     """
     from apps.github_app.client import RETRYABLE_STATUS_CODES, GitHubAPIError
-    from apps.maintenance_prs.docs_fixes import has_docs_actual_fix
+    from apps.maintenance_prs.docs_fixes import has_implemented_file_fix
     from apps.maintenance_prs.executor import PRExecutionError, execute_maintenance_pr_plan
     from apps.maintenance_prs.models import MaintenancePRPlan
 
@@ -266,7 +281,7 @@ def execute_session_pr_plans(
         plan
         for _index, plan in sorted(
             enumerate(plans),
-            key=lambda item: (0 if has_docs_actual_fix(item[1]) else 1, item[0]),
+            key=lambda item: (0 if has_implemented_file_fix(item[1]) else 1, item[0]),
         )
     ]
     if not plans:

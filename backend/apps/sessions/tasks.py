@@ -5,7 +5,7 @@ from apps.analysis import storage_service
 from apps.analysis.constitution_pr import maybe_open_constitution_pr
 from apps.analysis.runner import AnalysisRunError, run_repository_analysis
 from apps.github_app.client import RETRYABLE_STATUS_CODES, GitHubAPIError
-from apps.maintenance_prs.docs_fixes import has_docs_actual_fix
+from apps.maintenance_prs.docs_fixes import has_implemented_file_fix
 from apps.maintenance_prs.models import MaintenancePRPlan
 from apps.maintenance_prs.planner import plan_maintenance_prs
 from apps.profiles.models import GardenerProfile
@@ -236,7 +236,7 @@ def _approve_auto_executable_pr_plans(plans: list[MaintenancePRPlan]) -> list[Ma
     approved: list[MaintenancePRPlan] = []
     for _index, plan in sorted(
         enumerate(plans),
-        key=lambda item: (0 if has_docs_actual_fix(item[1]) else 1, item[0]),
+        key=lambda item: (0 if has_implemented_file_fix(item[1]) else 1, item[0]),
     ):
         if len(approved) >= MAX_AUTO_APPROVED_SESSION_PLANS:
             break
@@ -254,4 +254,5 @@ def _safe_for_auto_execution(plan: MaintenancePRPlan) -> bool:
         and plan.risk_tier == "tier_1_autonomous"
         and plan.confidence >= plan.confidence_threshold
         and plan.repository.is_active
+        and has_implemented_file_fix(plan)
     )

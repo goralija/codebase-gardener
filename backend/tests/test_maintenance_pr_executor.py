@@ -119,6 +119,7 @@ def make_plan(repository=None, **overrides):
         gardening_session_id="session_exec",
         branch_name="gardener/docs-refresh",
         title="Refresh docs",
+        category="docs",
         risk_tier="tier_1_autonomous",
         confidence=0.94,
         changed_paths=["docs/api.md"],
@@ -139,7 +140,10 @@ def make_plan(repository=None, **overrides):
 @pytest.mark.django_db
 def test_execute_happy_path_creates_branch_and_pr():
     plan = make_plan()
-    client = FakeGitHubClient()
+    client = FakeGitHubClient(
+        file_contents={"docs/api.md": "# API\n"},
+        file_shas={"docs/api.md": "api_sha"},
+    )
 
     result = execute_maintenance_pr_plan(plan, client=client)
 
@@ -147,6 +151,9 @@ def test_execute_happy_path_creates_branch_and_pr():
         "create_installation_token",
         "get_branch_ref",
         "create_branch_ref",
+        "get_file_sha",
+        "put_file_contents",
+        "get_file_contents",
         "get_file_sha",
         "put_file_contents",
         "create_pull_request",
@@ -161,6 +168,7 @@ def test_execute_happy_path_creates_branch_and_pr():
 
     put_call = next(c for c in client.calls if c[0] == "put_file_contents")
     assert put_call[3] == ".gardener/plans/gardener-docs-refresh.md"
+    assert "## Gardener maintenance note" in client.put_contents["docs/api.md"]
 
 
 @pytest.mark.django_db
@@ -193,6 +201,17 @@ def test_execute_docs_plan_updates_markdown_paths_and_writes_marker():
     guide_put = next(c for c in client.calls if c[0] == "put_file_contents" and c[3] == "docs/guide.md")
     assert readme_put[5] == "readme_sha"
     assert guide_put[5] == "guide_sha"
+    marker_put_index = next(
+        index
+        for index, call in enumerate(client.calls)
+        if call[0] == "put_file_contents" and call[3] == marker_path
+    )
+    readme_put_index = next(
+        index
+        for index, call in enumerate(client.calls)
+        if call[0] == "put_file_contents" and call[3] == "README.md"
+    )
+    assert marker_put_index < readme_put_index
 
 
 @pytest.mark.django_db
@@ -207,16 +226,34 @@ def test_docs_maintenance_note_replaces_existing_section_idempotently():
 
 
 @pytest.mark.django_db
-def test_unsupported_tier_one_category_uses_marker_fallback_only():
+def test_unsupported_tier_one_category_is_not_executable():
     plan = make_plan(
         category="lint_format",
         changed_paths=["src/app.py", "README.md"],
     )
     client = FakeGitHubClient(file_contents={"README.md": "# Project\n"})
 
-    execute_maintenance_pr_plan(plan, client=client)
+    with pytest.raises(PlanNotExecutableError, match="no implemented autonomous file fix"):
+        execute_maintenance_pr_plan(plan, client=client)
 
-    assert set(client.put_contents) == {".gardener/plans/gardener-docs-refresh.md"}
+    assert client.calls == []
+
+
+@pytest.mark.django_db
+def test_docs_plan_without_existing_markdown_target_does_not_open_marker_only_pr():
+    plan = make_plan(changed_paths=["docs/missing.md"])
+    client = FakeGitHubClient(
+        get_file_contents_error=GitHubAPIError("not found", status_code=404),
+    )
+
+    with pytest.raises(PlanNotExecutableError, match="existing safe Markdown"):
+        execute_maintenance_pr_plan(plan, client=client)
+
+    marker_path = ".gardener/plans/gardener-docs-refresh.md"
+    assert set(client.put_contents) == {marker_path}
+    assert "create_pull_request" not in _names(client)
+    plan.refresh_from_db()
+    assert plan.execution_status == MaintenancePRPlan.ExecutionStatus.FAILED
 
 
 @pytest.mark.django_db
