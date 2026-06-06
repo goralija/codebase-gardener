@@ -8,6 +8,10 @@ from django.utils import timezone
 
 from apps.common.models import AuditEvent
 from apps.github_app.client import GitHubAPIError, GitHubAppClient
+from apps.maintenance_prs.docs_fixes import (
+    apply_docs_maintenance_note,
+    docs_actual_fix_paths,
+)
 from apps.maintenance_prs.models import MaintenancePRPlan
 from apps.maintenance_prs.policy import STALE_RUNNING_TIMEOUT
 
@@ -79,6 +83,15 @@ def execute_maintenance_pr_plan(
                 token=token,
                 plan=plan,
             )
+
+        _apply_actual_file_fixes(
+            client,
+            owner,
+            repo,
+            branch=branch,
+            token=token,
+            plan=plan,
+        )
 
         marker_sha = client.get_file_sha(
             owner,
@@ -190,6 +203,46 @@ def _validated_pull_request_result(pull_request: dict[str, Any]) -> tuple[int, s
     if not isinstance(pr_url, str) or not pr_url:
         raise GitHubAPIError("GitHub pull request response did not include a valid html_url.")
     return pr_number, pr_url
+
+
+def _apply_actual_file_fixes(
+    client: GitHubAppClient,
+    owner: str,
+    repo: str,
+    *,
+    branch: str,
+    token: str,
+    plan: MaintenancePRPlan,
+) -> None:
+    for path in docs_actual_fix_paths(plan):
+        try:
+            content = client.get_file_contents(
+                owner,
+                repo,
+                path,
+                branch=branch,
+                token=token,
+            )
+        except GitHubAPIError as exc:
+            if exc.status_code == 404:
+                continue
+            raise
+
+        updated = apply_docs_maintenance_note(content, plan)
+        if updated == content:
+            continue
+
+        sha = client.get_file_sha(owner, repo, path, branch=branch, token=token)
+        client.put_file_contents(
+            owner,
+            repo,
+            path,
+            message=plan.title,
+            content=updated,
+            branch=branch,
+            token=token,
+            sha=sha,
+        )
 
 
 def _marker_content(plan: MaintenancePRPlan, body: str) -> str:

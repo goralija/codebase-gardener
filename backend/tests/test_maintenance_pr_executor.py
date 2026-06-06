@@ -9,6 +9,7 @@ from apps.maintenance_prs.executor import (
     PlanNotExecutableError,
     execute_maintenance_pr_plan,
 )
+from apps.maintenance_prs.docs_fixes import apply_docs_maintenance_note
 from apps.maintenance_prs.models import MaintenancePRPlan
 from tests.test_product_models import (
     create_installation,
@@ -28,6 +29,8 @@ class FakeGitHubClient:
         existing_pr=None,
         marker_sha=None,
         marker_content=None,
+        file_contents=None,
+        file_shas=None,
         pr_response=None,
     ):
         self.calls = []
@@ -38,6 +41,9 @@ class FakeGitHubClient:
         self.existing_pr = existing_pr
         self.marker_sha = marker_sha
         self.marker_content = marker_content
+        self.file_contents = dict(file_contents or {})
+        self.file_shas = dict(file_shas or {})
+        self.put_contents = {}
         self.pr_response = pr_response
 
     def create_installation_token(self, installation_id):
@@ -59,6 +65,8 @@ class FakeGitHubClient:
     def get_file_sha(self, owner, repo, path, *, branch, token):
         self.calls.append(("get_file_sha", owner, repo, path, branch))
         self._maybe_fail("get_file_sha")
+        if path in self.file_shas:
+            return self.file_shas[path]
         return self.marker_sha
 
     def get_file_contents(self, owner, repo, path, *, branch, token):
@@ -66,11 +74,14 @@ class FakeGitHubClient:
         if self.get_file_contents_error is not None:
             raise self.get_file_contents_error
         self._maybe_fail("get_file_contents")
+        if path in self.file_contents:
+            return self.file_contents[path]
         return self.marker_content or ""
 
     def put_file_contents(self, owner, repo, path, *, message, content, branch, token, sha=None):
         self.calls.append(("put_file_contents", owner, repo, path, branch, sha))
         self._maybe_fail("put_file_contents")
+        self.put_contents[path] = content
         return {"commit": {"sha": "commit_sha"}}
 
     def create_pull_request(self, owner, repo, *, title, head, base, body, token):
@@ -150,6 +161,62 @@ def test_execute_happy_path_creates_branch_and_pr():
 
     put_call = next(c for c in client.calls if c[0] == "put_file_contents")
     assert put_call[3] == ".gardener/plans/gardener-docs-refresh.md"
+
+
+@pytest.mark.django_db
+def test_execute_docs_plan_updates_markdown_paths_and_writes_marker():
+    plan = make_plan(
+        category="docs",
+        changed_paths=["README.md", "docs/guide.md", "src/app.py", "docs/*.md"],
+    )
+    client = FakeGitHubClient(
+        file_contents={
+            "README.md": "# Project\n",
+            "docs/guide.md": "# Guide\n",
+        },
+        file_shas={
+            "README.md": "readme_sha",
+            "docs/guide.md": "guide_sha",
+        },
+    )
+
+    execute_maintenance_pr_plan(plan, client=client)
+
+    marker_path = ".gardener/plans/gardener-docs-refresh.md"
+    assert set(client.put_contents) == {"README.md", "docs/guide.md", marker_path}
+    assert "## Gardener maintenance note" in client.put_contents["README.md"]
+    assert f"plan `{plan.id}`" in client.put_contents["docs/guide.md"]
+    assert "src/app.py" not in client.put_contents
+    assert "docs/*.md" not in client.put_contents
+
+    readme_put = next(c for c in client.calls if c[0] == "put_file_contents" and c[3] == "README.md")
+    guide_put = next(c for c in client.calls if c[0] == "put_file_contents" and c[3] == "docs/guide.md")
+    assert readme_put[5] == "readme_sha"
+    assert guide_put[5] == "guide_sha"
+
+
+@pytest.mark.django_db
+def test_docs_maintenance_note_replaces_existing_section_idempotently():
+    plan = make_plan(category="docs")
+    first = apply_docs_maintenance_note("# Project\n", plan)
+    second = apply_docs_maintenance_note(first, plan)
+
+    assert second == first
+    assert first.count("## Gardener maintenance note") == 1
+    assert first.count(f"gardener-maintenance-note:start {plan.id}") == 1
+
+
+@pytest.mark.django_db
+def test_unsupported_tier_one_category_uses_marker_fallback_only():
+    plan = make_plan(
+        category="lint_format",
+        changed_paths=["src/app.py", "README.md"],
+    )
+    client = FakeGitHubClient(file_contents={"README.md": "# Project\n"})
+
+    execute_maintenance_pr_plan(plan, client=client)
+
+    assert set(client.put_contents) == {".gardener/plans/gardener-docs-refresh.md"}
 
 
 @pytest.mark.django_db

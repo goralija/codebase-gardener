@@ -234,6 +234,7 @@ def test_load_first_report_includes_latest_completed_session_and_pr_plans():
         gardening_session_id=str(session.id),
         branch_name="gardener/docs-refresh",
         title="Refresh docs",
+        category="docs",
         risk_tier="tier_1_autonomous",
         confidence=0.94,
         changed_paths=["README.md"],
@@ -270,4 +271,5 @@ def test_load_first_report_keeps_empty_session_when_no_completed_session_exists(
     report = storage_service.load_first_report(analysis)
 
     assert report["gardening_session_result"]["status"] == "not_run"
+    assert report["gardening_session_result"]["repository_id"] == str(repo.id)
     assert report["maintenance_pr_plans"] == []

@@ -255,12 +255,20 @@ def execute_session_pr_plans(
     means pure fixture mode where no DB plans exist for the session.
     """
     from apps.github_app.client import RETRYABLE_STATUS_CODES, GitHubAPIError
+    from apps.maintenance_prs.docs_fixes import has_docs_actual_fix
     from apps.maintenance_prs.executor import PRExecutionError, execute_maintenance_pr_plan
     from apps.maintenance_prs.models import MaintenancePRPlan
 
     plans = list(
         MaintenancePRPlan.objects.for_session(str(session.id)).executable()
     )
+    plans = [
+        plan
+        for _index, plan in sorted(
+            enumerate(plans),
+            key=lambda item: (0 if has_docs_actual_fix(item[1]) else 1, item[0]),
+        )
+    ]
     if not plans:
         return None, []
 
