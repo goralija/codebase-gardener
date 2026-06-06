@@ -74,6 +74,11 @@ Gardener must not directly modify these by default:
 - Do not auto-merge in the v1 default policy.
 - If a session produces conflicting PR candidates, rank them and defer lower-priority work.
 
+## Autonomous authoring scope
+
+- Autonomous authoring currently implements the docs maintenance fix only; a session approves and executes plans that have an implemented file fix, up to its per-session cap.
+- Other categories (dead-code, tests, complexity, layer violations) are planned but stay pending or blocked until category-specific authors exist.
+
 ## Learning rules
 
 - Track accepted, rejected, edited, merged, reverted, and failed PRs.
