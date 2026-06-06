@@ -21,6 +21,7 @@ from apps.repositories.models import ManagedRepository
 from apps.sessions.models import GardeningSession
 from apps.sessions.tasks import run_gardening_session
 from apps.triggers import registry
+<<<<<<< HEAD
 from apps.triggers.models import RepositoryAutomationPolicy, RepositoryCommitTracker
 from apps.triggers.policy import ensure_trigger_permitted
 from apps.triggers.thresholds import (
@@ -28,6 +29,14 @@ from apps.triggers.thresholds import (
     commit_threshold,
     configured_commit_threshold,
 )
+=======
+from apps.triggers.models import RepositoryCommitTracker
+from apps.triggers.policy import (
+    ensure_trigger_permitted,
+    trigger_enabled_for_repository,
+)
+from apps.triggers.thresholds import changed_paths_hit_protected, commit_threshold
+>>>>>>> 6a20e42 (feat(triggers): gate sessions on user-selected triggers (frontend TODO))
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +69,18 @@ def enqueue_session_for_trigger(
         raise ValueError(f"Unknown trigger kind: {kind}")
 
     ensure_trigger_permitted(repository=repository, kind=kind, actor=actor)
+
+    # Honor the user's per-repository automation-trigger selection. Manual and
+    # first-scan are always enabled; automated kinds the user turned off are
+    # skipped without creating a session. (Selection store + UI: see
+    # policy.trigger_enabled_for_repository TODOs.)
+    if not trigger_enabled_for_repository(repository, kind):
+        return {
+            "gardening_session_id": None,
+            "status": "skipped",
+            "deduped": False,
+            "skipped_reason": "trigger_disabled_by_user",
+        }
 
     existing = GardeningSession.objects.filter(
         repository=repository,

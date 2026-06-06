@@ -75,6 +75,10 @@ class AuditEvent(UUIDTimestampedModel):
             "session_trigger_failed",
             "Session trigger failed",
         )
+        MAINTENANCE_PRS_AUTHORED = (
+            "maintenance_prs_authored",
+            "Maintenance PRs authored",
+        )
 
     actor = models.ForeignKey(
         settings.AUTH_USER_MODEL,

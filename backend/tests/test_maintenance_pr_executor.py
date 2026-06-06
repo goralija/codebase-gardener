@@ -97,6 +97,11 @@ class FakeGitHubClient:
             return self.pr_response
         return {"number": 42, "html_url": "https://github.com/org-1/repo-1/pull/42"}
 
+    def add_labels(self, owner, repo, issue_number, labels, *, token):
+        self.calls.append(("add_labels", owner, repo, issue_number, tuple(labels)))
+        self.applied_labels = list(labels)
+        return [{"name": label} for label in labels]
+
     def find_pull_request(self, owner, repo, *, head, base, token):
         self.calls.append(("find_pull_request", owner, repo, head, base))
         return self.existing_pr
@@ -146,6 +151,99 @@ def make_plan(repository=None, **overrides):
 
 
 @pytest.mark.django_db
+def test_execute_ai_dead_code_fix_authors_pr_and_applies_risk_labels(monkeypatch):
+    from apps.maintenance_prs import ai_fixes
+
+    kept = "".join(f"def used_{i}():\n    return {i}\n\n\n" for i in range(8))
+    original = kept + "def dead():\n    return 0\n"
+    monkeypatch.setattr(
+        ai_fixes, "complete", lambda *a, **k: f"```python\n{kept.rstrip()}\n```"
+    )
+
+    plan = make_plan(
+        category="dead_code",
+        branch_name="gardener/dead-code",
+        title="Remove dead code",
+        changed_paths=["core/util.py"],
+    )
+    client = FakeGitHubClient(
+        file_contents={"core/util.py": original},
+        file_shas={"core/util.py": "util_sha"},
+    )
+
+    result = execute_maintenance_pr_plan(plan, client=client)
+
+    assert result["created_pr_number"] == 42
+    # AI edit was committed to the source file (dead symbol removed).
+    assert "def dead()" not in client.put_contents["core/util.py"]
+    # PR labeled by risk tier / confidence / category.
+    assert ("add_labels", "org-1", "repo-1", 42,
+            ("gardener:tier-1-autonomous", "gardener:confidence-high",
+             "gardener:category-dead-code")) in client.calls
+
+
+@pytest.mark.django_db
+def test_execute_ai_fix_authors_multiple_files(monkeypatch):
+    from apps.maintenance_prs import ai_fixes
+
+    def fake_apply(path, content, plan, opportunity, progress=None):
+        return content.replace("def dead():\n    return 0\n", "")
+
+    monkeypatch.setenv("GARDENER_AI_FIX_WORKERS", "2")
+    monkeypatch.setattr(ai_fixes, "apply_ai_fix", fake_apply)
+
+    plan = make_plan(
+        category="dead_code",
+        branch_name="gardener/dead-code-multi",
+        title="Remove dead code",
+        changed_paths=["core/a.py", "core/b.py"],
+    )
+    client = FakeGitHubClient(
+        file_contents={
+            "core/a.py": "def kept_a():\n    return 1\n\n\ndef dead():\n    return 0\n",
+            "core/b.py": "def kept_b():\n    return 2\n\n\ndef dead():\n    return 0\n",
+        },
+        file_shas={"core/a.py": "a_sha", "core/b.py": "b_sha"},
+    )
+
+    execute_maintenance_pr_plan(plan, client=client)
+
+    put_paths = [call[3] for call in client.calls if call[0] == "put_file_contents"]
+    assert put_paths == [
+        ".gardener/plans/gardener-dead-code-multi.md",
+        "core/a.py",
+        "core/b.py",
+    ]
+    assert "def dead()" not in client.put_contents["core/a.py"]
+    assert "def dead()" not in client.put_contents["core/b.py"]
+
+
+@pytest.mark.django_db
+def test_execute_ai_fix_failure_fails_plan_without_pr(monkeypatch):
+    from apps.maintenance_prs import ai_fixes
+    from apps.maintenance_prs.ai_fixes import AIFixError
+
+    def _boom(*a, **k):
+        raise AIFixError("invalid python")
+
+    monkeypatch.setattr(ai_fixes, "apply_ai_fix", _boom)
+
+    plan = make_plan(
+        category="dead_code",
+        branch_name="gardener/dead-code-2",
+        changed_paths=["core/util.py"],
+    )
+    client = FakeGitHubClient(file_contents={"core/util.py": "x = 1\n"})
+
+    with pytest.raises(AIFixError):
+        execute_maintenance_pr_plan(plan, client=client)
+
+    plan.refresh_from_db()
+    assert plan.execution_status == MaintenancePRPlan.ExecutionStatus.FAILED
+    assert "create_pull_request" not in _names(client)
+
+
+@pytest.mark.django_db
 def test_execute_happy_path_creates_branch_and_pr():
     plan = make_plan()
     client = FakeGitHubClient(
@@ -165,6 +263,7 @@ def test_execute_happy_path_creates_branch_and_pr():
         "get_file_sha",
         "put_file_contents",
         "create_pull_request",
+        "add_labels",
     ]
     plan.refresh_from_db()
     assert plan.execution_status == MaintenancePRPlan.ExecutionStatus.SUCCEEDED
