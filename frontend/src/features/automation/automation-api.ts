@@ -68,6 +68,7 @@ const recentPrPlanSchema = v.object({
 })
 
 const repositoryAutomationResponseSchema = v.object({
+  schema_version: v.literal("1.0"),
   repository: automationRepositorySchema,
   policy: repositoryAutomationPolicySchema,
   effective: automationEffectiveSchema,

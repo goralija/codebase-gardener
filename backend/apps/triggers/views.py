@@ -121,6 +121,7 @@ def _automation_payload(repository, user):
     can_create_autonomous_prs = pr_creation_block_reason is None
 
     return {
+        "schema_version": "1.0",
         "repository": _repository_payload(repository),
         "policy": RepositoryAutomationPolicySerializer(policy).data,
         "effective": {

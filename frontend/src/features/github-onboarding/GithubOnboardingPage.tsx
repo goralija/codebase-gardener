@@ -64,7 +64,10 @@ export function GithubOnboardingPage() {
 
   const repositoriesQuery = useQuery({
     queryKey: ["github-onboarding", "repositories", selectedOrganizationId],
-    queryFn: () => fetchOrganizationRepositories(selectedOrganizationId ?? ""),
+    queryFn: () =>
+      fetchOrganizationRepositories(selectedOrganizationId ?? "", {
+        refresh: true,
+      }),
     enabled: Boolean(selectedOrganizationId),
     retry: false,
   })

@@ -1,4 +1,3 @@
-import { useMemo } from "react"
 import type { ReactNode } from "react"
 import { useQuery } from "@tanstack/react-query"
 import {
@@ -22,6 +21,8 @@ import {
   type ManagedRepository,
 } from "@/features/github-onboarding/github-onboarding-api"
 
+const EMPTY_REPOSITORIES: ManagedRepository[] = []
+
 export function App() {
   const organizationsQuery = useQuery({
     queryKey: ["overview", "organizations"],
@@ -43,8 +44,8 @@ export function App() {
     retry: false,
   })
 
-  const repositories = repositoriesQuery.data?.repositories ?? []
-  const topRepositories = useMemo(() => repositories.slice(0, 4), [repositories])
+  const repositories = repositoriesQuery.data?.repositories ?? EMPTY_REPOSITORIES
+  const topRepositories = repositories.slice(0, 4)
   const isPreInstallForbidden =
     organizationsQuery.error instanceof GithubOnboardingRequestError &&
     organizationsQuery.error.status === 403

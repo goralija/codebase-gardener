@@ -285,6 +285,7 @@ Produced by Lane A backend. Displayed and edited by Lane A dashboard.
 
 ```json
 {
+  "schema_version": "1.0",
   "repository": {
     "id": "repo_123",
     "full_name": "acme/api",

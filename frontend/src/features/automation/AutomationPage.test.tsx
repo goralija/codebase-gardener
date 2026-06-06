@@ -239,6 +239,7 @@ function billingPayload() {
 
 function automationPayload() {
   return {
+    schema_version: "1.0",
     repository: {
       id: "repo-1",
       full_name: "acme/api",

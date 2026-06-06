@@ -294,6 +294,22 @@ def test_n_commits_trigger_fires_only_at_threshold():
 
 
 @pytest.mark.django_db
+def test_n_commits_trigger_uses_constitution_threshold_before_policy_default():
+    repository = create_repository(1)
+
+    results = evaluate_push_triggers(
+        repository=repository,
+        ref="refs/heads/main",
+        payload=push_payload(commit_count=3),
+        base_trigger_extra={"source": "github_webhook"},
+        constitution={"risk_policies": {"commit_session_threshold": 3}},
+    )
+
+    assert any(_kind_of(result) == registry.N_COMMITS for result in results)
+    assert RepositoryCommitTracker.objects.get(repository=repository).commits_since_session == 0
+
+
+@pytest.mark.django_db
 def test_n_commits_trigger_does_not_accumulate_when_disabled():
     repository = create_repository(1)
     policy = RepositoryAutomationPolicy.get_or_create_for_repository(repository)

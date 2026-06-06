@@ -86,9 +86,10 @@ describe("github onboarding API", () => {
       organizations: [{ github_login: "acme" }],
     })
 
+    const repositoryFetcher = fetcherReturning(jsonResponse(repositoryListPayload()))
     await expect(
       fetchOrganizationRepositories("org-1", {
-        fetcher: fetcherReturning(jsonResponse(repositoryListPayload())),
+        fetcher: repositoryFetcher,
       })
     ).resolves.toMatchObject({
       repositories: [
@@ -101,6 +102,19 @@ describe("github onboarding API", () => {
         },
       ],
     })
+
+    const refreshFetcher = fetcherReturning(jsonResponse(repositoryListPayload()))
+    await fetchOrganizationRepositories("org-1", {
+      fetcher: refreshFetcher,
+      refresh: true,
+    })
+
+    expect(String(vi.mocked(repositoryFetcher).mock.calls[0][0])).not.toContain(
+      "refresh=1"
+    )
+    expect(String(vi.mocked(refreshFetcher).mock.calls[0][0])).toContain(
+      "refresh=1"
+    )
   })
 
   it("parses pending repository complexity", () => {

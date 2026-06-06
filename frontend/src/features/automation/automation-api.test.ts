@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
+import automationSettingsFixture from "../../../../fixtures/contracts/repository_automation_settings.json"
 import {
   AutomationContractError,
   AutomationRequestError,
@@ -49,6 +50,15 @@ describe("automation API", () => {
         method: "GET",
       })
     )
+  })
+
+  it("parses the shared repository automation settings fixture", () => {
+    expect(parseRepositoryAutomationResponse(automationSettingsFixture)).toMatchObject({
+      schema_version: "1.0",
+      policy: {
+        autonomy_mode: "autonomous",
+      },
+    })
   })
 
   it("updates repository automation with a CSRF token", async () => {
@@ -135,6 +145,7 @@ describe("automation API", () => {
 
 export function automationPayload() {
   return {
+    schema_version: "1.0",
     repository: {
       id: "repo-1",
       full_name: "acme/api",

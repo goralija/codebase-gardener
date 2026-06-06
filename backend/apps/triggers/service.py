@@ -23,7 +23,11 @@ from apps.sessions.tasks import run_gardening_session
 from apps.triggers import registry
 from apps.triggers.models import RepositoryAutomationPolicy, RepositoryCommitTracker
 from apps.triggers.policy import ensure_trigger_permitted
-from apps.triggers.thresholds import changed_paths_hit_protected, commit_threshold
+from apps.triggers.thresholds import (
+    changed_paths_hit_protected,
+    commit_threshold,
+    configured_commit_threshold,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +163,8 @@ def evaluate_push_triggers(
 
     commits = payload.get("commits") or []
     commit_count = len(commits)
-    threshold = policy.commit_threshold or commit_threshold(constitution)
+    threshold = configured_commit_threshold(constitution) or policy.commit_threshold
+    threshold = threshold or commit_threshold(constitution)
     if (
         policy.commit_trigger_enabled
         and commit_count

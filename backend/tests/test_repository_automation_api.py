@@ -1,5 +1,9 @@
+import json
+from pathlib import Path
+
 import pytest
 from django.contrib.auth import get_user_model
+from jsonschema import Draft202012Validator
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Membership
@@ -48,6 +52,8 @@ def test_owner_can_view_and_update_repository_automation_policy():
 
     assert get_response.status_code == 200
     payload = get_response.json()
+    assert payload["schema_version"] == "1.0"
+    assert_repository_automation_settings_contract(payload)
     assert payload["repository"]["full_name"] == repository.full_name
     assert payload["policy"]["autonomy_mode"] == "autonomous"
     assert payload["policy"]["scheduled_trigger_enabled"] is True
@@ -168,3 +174,18 @@ def automation_url(repository):
         f"/api/v1/organizations/{repository.organization_id}/repositories/"
         f"{repository.id}/automation/"
     )
+
+
+def assert_repository_automation_settings_contract(payload):
+    schema_path = (
+        Path(__file__).resolve().parents[2]
+        / "fixtures"
+        / "schemas"
+        / "repository_automation_settings.schema.json"
+    )
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    errors = sorted(
+        Draft202012Validator(schema).iter_errors(payload),
+        key=lambda error: error.json_path,
+    )
+    assert not errors, [f"{error.json_path}: {error.message}" for error in errors]

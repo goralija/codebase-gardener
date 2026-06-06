@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import type { ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -50,6 +50,17 @@ type AutomationDraft = Pick<
   | "commit_threshold"
 >
 
+type DraftState = {
+  policyId: string
+  policyUpdatedAt: string
+  value: AutomationDraft
+}
+
+type RepositorySelection = {
+  organizationId: string
+  repositoryId: string
+}
+
 const EMPTY_ORGANIZATIONS: Organization[] = []
 const EMPTY_REPOSITORIES: ManagedRepository[] = []
 
@@ -80,10 +91,9 @@ export function AutomationPage() {
   const [manualOrganizationId, setManualOrganizationId] = useState<
     string | null
   >(null)
-  const [manualRepositoryId, setManualRepositoryId] = useState<string | null>(
-    null
-  )
-  const [draft, setDraft] = useState<AutomationDraft | null>(null)
+  const [manualRepositorySelection, setManualRepositorySelection] =
+    useState<RepositorySelection | null>(null)
+  const [draftState, setDraftState] = useState<DraftState | null>(null)
 
   const organizationsQuery = useQuery({
     queryKey: ["automation", "organizations"],
@@ -111,7 +121,8 @@ export function AutomationPage() {
 
   const repositories = repositoriesQuery.data?.repositories ?? EMPTY_REPOSITORIES
   const selectedRepositoryId = chooseRepositoryId(
-    manualRepositoryId,
+    selectedOrganizationId,
+    manualRepositorySelection,
     repositories
   )
   const selectedRepository = repositories.find(
@@ -133,16 +144,6 @@ export function AutomationPage() {
     enabled: Boolean(selectedOrganizationId && selectedRepositoryId),
     retry: false,
   })
-
-  useEffect(() => {
-    setManualRepositoryId(null)
-  }, [selectedOrganizationId])
-
-  useEffect(() => {
-    if (automationQuery.data?.policy) {
-      setDraft(policyToDraft(automationQuery.data.policy))
-    }
-  }, [automationQuery.data?.policy.id, automationQuery.data?.policy.updated_at])
 
   const saveMutation = useMutation({
     mutationFn: (payload: RepositoryAutomationUpdatePayload) =>
@@ -204,7 +205,7 @@ export function AutomationPage() {
   })
 
   const automation = automationQuery.data
-  const currentDraft = draft ?? (automation ? policyToDraft(automation.policy) : null)
+  const currentDraft = currentPolicyDraft(automation, draftState)
   const dirty = Boolean(
     automation && currentDraft && !draftMatchesPolicy(currentDraft, automation.policy)
   )
@@ -286,7 +287,14 @@ export function AutomationPage() {
             <LabeledSelect
               disabled={repositoriesQuery.isLoading || repositories.length === 0}
               label="Repository"
-              onChange={setManualRepositoryId}
+              onChange={(repositoryId) => {
+                if (selectedOrganizationId) {
+                  setManualRepositorySelection({
+                    organizationId: selectedOrganizationId,
+                    repositoryId,
+                  })
+                }
+              }}
               value={selectedRepositoryId ?? ""}
               options={repositories.map((repository) => ({
                 label: repository.full_name,
@@ -321,7 +329,15 @@ export function AutomationPage() {
             mutationError={
               saveMutation.error ?? triggerMutation.error ?? addOnMutation.error
             }
-            onDraftChange={setDraft}
+            onDraftChange={(nextDraft) => {
+              if (automation) {
+                setDraftState({
+                  policyId: automation.policy.id,
+                  policyUpdatedAt: automation.policy.updated_at,
+                  value: nextDraft,
+                })
+              }
+            }}
             onRunNow={() => triggerMutation.mutate()}
             onSave={() => {
               if (currentDraft) {
@@ -860,13 +876,35 @@ function draftMatchesPolicy(
 }
 
 function chooseRepositoryId(
-  manualRepositoryId: string | null,
+  selectedOrganizationId: string | null,
+  manualRepositorySelection: RepositorySelection | null,
   repositories: ManagedRepository[]
 ) {
-  if (manualRepositoryId && repositories.some((repo) => repo.id === manualRepositoryId)) {
-    return manualRepositoryId
+  if (
+    manualRepositorySelection &&
+    manualRepositorySelection.organizationId === selectedOrganizationId &&
+    repositories.some((repo) => repo.id === manualRepositorySelection.repositoryId)
+  ) {
+    return manualRepositorySelection.repositoryId
   }
   return repositories[0]?.id ?? null
+}
+
+function currentPolicyDraft(
+  automation: RepositoryAutomationResponse | undefined,
+  draftState: DraftState | null
+) {
+  if (!automation) {
+    return null
+  }
+  if (
+    draftState &&
+    draftState.policyId === automation.policy.id &&
+    draftState.policyUpdatedAt === automation.policy.updated_at
+  ) {
+    return draftState.value
+  }
+  return policyToDraft(automation.policy)
 }
 
 function clampCommitThreshold(value: string) {
