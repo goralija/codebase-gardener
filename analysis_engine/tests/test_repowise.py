@@ -85,7 +85,7 @@ def test_missing_docs_repo_still_indexes_and_snapshots(tmp_path: Path):
 
 
 def test_failed_repowise_command_raises_clear_error(monkeypatch):
-    def fake_run(command, capture_output, text, check, timeout=None):
+    def fake_run(command, capture_output, text, check, timeout=None, **kwargs):
         return subprocess.CompletedProcess(
             args=command,
             returncode=42,

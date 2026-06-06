@@ -234,7 +234,7 @@ The analysis package produces source-truth, intelligence, entropy, and opportuni
 
 #### E03-T05 Implement entropy scoring and forecast
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane B
 - Complexity: XL

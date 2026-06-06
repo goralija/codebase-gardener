@@ -34,3 +34,6 @@ RepoWise/.git.backup/
 RepoWise/.repowise/
 RepoWise/.venv/
 RepoWise/node_modules/
+
+# Local Lane B analysis scratch — never commit (large, regenerable, user data belongs in DB/object store)
+analysis-output/
