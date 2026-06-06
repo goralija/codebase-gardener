@@ -106,6 +106,7 @@ def test_apply_ai_fix_rejects_unmatched_search_block(monkeypatch):
 
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 def test_apply_ai_fix_skips_invalid_python_block_but_keeps_valid_edit(monkeypatch):
     bad_block = (
         "<<<<<<< SEARCH\n"
@@ -129,6 +130,8 @@ def test_apply_ai_fix_skips_invalid_python_block_but_keeps_valid_edit(monkeypatc
     assert "def used()" in result
 
 
+=======
+>>>>>>> 9e7c4e4 (feat(ai-fixes): progress logging + percentage callback for AI authoring)
 def test_apply_ai_fix_reports_progress(monkeypatch):
     fixed = "import os\n\n\ndef used():\n    return 1\n"
     _patch_llm(monkeypatch, f"```python\n{fixed}```")
@@ -146,8 +149,11 @@ def test_apply_ai_fix_reports_progress(monkeypatch):
     assert "done" in phases
 
 
+<<<<<<< HEAD
 =======
 >>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
+=======
+>>>>>>> 9e7c4e4 (feat(ai-fixes): progress logging + percentage callback for AI authoring)
 def test_apply_ai_fix_rejects_invalid_python(monkeypatch):
     _patch_llm(monkeypatch, "```python\ndef broken(:\n    pass\n```")
 

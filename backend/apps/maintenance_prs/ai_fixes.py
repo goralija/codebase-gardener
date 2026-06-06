@@ -11,10 +11,15 @@ from __future__ import annotations
 import ast
 import difflib
 import logging
+<<<<<<< HEAD
 import os
 import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+=======
+import re
+from collections.abc import Callable
+>>>>>>> 9e7c4e4 (feat(ai-fixes): progress logging + percentage callback for AI authoring)
 
 from apps.common.llm import LLMError, complete
 from apps.maintenance_prs.models import MaintenancePRPlan
@@ -193,7 +198,13 @@ def apply_ai_fix(
     so output stays small. Files larger than a single context window are read in
     chunks that together cover the whole file; edit blocks from every chunk are
     collected and applied to the full content.
+<<<<<<< HEAD
 >>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
+=======
+
+    ``progress(percent, phase, message)`` is invoked as the work advances so the
+    worker/UI can show how far along the AI fix is.
+>>>>>>> 9e7c4e4 (feat(ai-fixes): progress logging + percentage callback for AI authoring)
     """
     opportunity = opportunity or {}
     if len(content) > _MAX_FILE_CHARS:
@@ -206,11 +217,14 @@ def apply_ai_fix(
     else:
         chunks = _chunk_content(path, content)
 
+    total = len(chunks)
+    _report(progress, 0, "reading", f"{path}: reading in {total} part(s)")
+
     blocks: list[tuple[str, str]] = []
     whole_file_fallback: str | None = None
     for index, chunk in enumerate(chunks):
         prompt = _build_prompt(
-            path, chunk, plan, opportunity, part=(index + 1, len(chunks))
+            path, chunk, plan, opportunity, part=(index + 1, total)
         )
         try:
             raw = complete(
@@ -222,12 +236,22 @@ def apply_ai_fix(
         chunk_blocks = _parse_edit_blocks(raw)
         if chunk_blocks:
             blocks.extend(chunk_blocks)
-        elif len(chunks) == 1:
+        elif total == 1:
             # Single-pass fallback: model returned the whole file in a fence.
             fenced = _FENCE_RE.search(raw)
             if fenced:
                 whole_file_fallback = fenced.group(1).strip("\n") + "\n"
 
+        # Reserve the last 10% for apply + validate.
+        percent = int((index + 1) / total * 90)
+        _report(
+            progress,
+            percent,
+            "analyzing",
+            f"{path}: part {index + 1}/{total}, {len(blocks)} edit(s) so far",
+        )
+
+    _report(progress, 90, "applying", f"{path}: applying {len(blocks)} edit(s)")
     if blocks:
         blocks = list(dict.fromkeys(blocks))  # dedupe identical edits across chunks
         updated = _apply_edit_blocks(path, content, blocks)

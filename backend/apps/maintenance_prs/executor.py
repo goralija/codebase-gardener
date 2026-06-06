@@ -257,6 +257,7 @@ def _apply_actual_file_fixes(
         existing_paths.append(path)
         if plan.category == "docs":
             updated = apply_docs_maintenance_note(content, plan)
+<<<<<<< HEAD
             _write_updated_file(
                 client,
                 owner,
@@ -268,6 +269,11 @@ def _apply_actual_file_fixes(
                 token=token,
                 plan=plan,
             )
+=======
+        else:
+            updated = apply_ai_fix(path, content, plan, opportunity, progress=progress)
+        if updated == content:
+>>>>>>> 9e7c4e4 (feat(ai-fixes): progress logging + percentage callback for AI authoring)
             continue
         file_inputs.append((path, content))
 
