@@ -87,6 +87,46 @@ def list_history(repository) -> list[RepositoryAnalysis]:
     return list(repository.analyses.order_by("-created_at"))
 
 
+def get_latest_any() -> RepositoryAnalysis | None:
+    """Most recent stored analysis across all repositories (dev/demo convenience)."""
+    return RepositoryAnalysis.objects.order_by("-created_at").first()
+
+
+def load_first_report(analysis: RepositoryAnalysis) -> JsonObject:
+    """Assemble a FirstReport-shaped payload the dashboard already renders.
+
+    Lane C outputs (session result, PR plans) are empty until those lanes run.
+    """
+    snapshot = storage.get_json(analysis.snapshot_key) if analysis.snapshot_key else {}
+    return {
+        "repository_constitution": analysis.constitution or {},
+        "analysis_snapshot": snapshot or {},
+        "entropy_report": analysis.entropy or {},
+        # Lane C has not run for stored analyses yet — a schema-valid "not run"
+        # session keeps the FirstReport contract satisfied for the dashboard.
+        "gardening_session_result": _empty_session(str(analysis.repository_id)),
+        "maintenance_opportunities": analysis.opportunities or [],
+        "maintenance_pr_plans": [],
+    }
+
+
+def _empty_session(repository_id: str) -> JsonObject:
+    return {
+        "schema_version": "1.0",
+        "gardening_session_id": "",
+        "repository_id": repository_id,
+        "trigger": {"type": "none", "actor": "system"},
+        "status": "not_run",
+        "started_at": "",
+        "finished_at": "",
+        "phase_results": [],
+        "opportunities_selected": [],
+        "opportunities_deferred": [],
+        "maintenance_pr_plans": [],
+        "errors": [],
+    }
+
+
 def load_report(analysis: RepositoryAnalysis) -> JsonObject:
     """Assemble a FirstReport-shaped dict: inline contracts + blobs on demand."""
     report: JsonObject = {

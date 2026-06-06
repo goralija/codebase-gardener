@@ -16,6 +16,7 @@ def load_first_report_fixture():
     return json.loads(fixture_path.read_text(encoding="utf-8"))
 
 
+@pytest.mark.django_db
 def test_first_report_endpoint_returns_fixture_contract():
     response = APIClient().get("/api/v1/reports/first/")
 
@@ -23,6 +24,7 @@ def test_first_report_endpoint_returns_fixture_contract():
     assert response.json() == load_first_report_fixture()
 
 
+@pytest.mark.django_db
 @override_settings(CORS_ALLOWED_ORIGINS=["http://localhost:5174"])
 def test_first_report_endpoint_allows_configured_frontend_origin():
     response = APIClient().get(
@@ -85,6 +87,7 @@ def test_first_report_fixture_contract_rejects_pr_body_section_drift():
         validate_first_report_fixture_contract(payload)
 
 
+@pytest.mark.django_db
 def test_first_report_endpoint_treats_invalid_fixture_as_server_error(monkeypatch):
     def load_invalid_fixture():
         raise ImproperlyConfigured("bad fixture")
