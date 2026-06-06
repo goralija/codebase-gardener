@@ -166,7 +166,7 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
         session.last_error = str(exc)
         session.result = build_failed_gardening_session_result(
             session,
-            phase="observe",
+            phase=current_phase,
             message=str(exc),
             started_at=session.started_at,
             finished_at=session.finished_at,

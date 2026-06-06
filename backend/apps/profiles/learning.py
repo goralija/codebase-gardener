@@ -36,8 +36,10 @@ VALID_OUTCOMES = frozenset(
     }
 )
 
-# outcome -> profile category-list field that gains this plan's category
-_CATEGORY_FIELD_BY_OUTCOME = {
+# outcome -> profile category-list field that gains this plan's category. Also
+# reused by apps.profiles.sync to bucket outcome counts in .gardener/profile.yaml
+# so the DB signals and the proposed file stay in agreement.
+OUTCOME_CATEGORY_BUCKET = {
     Outcome.MERGED: "accepted_categories",
     Outcome.ACCEPTED: "accepted_categories",
     Outcome.REJECTED: "rejected_categories",
@@ -199,7 +201,7 @@ def _apply_outcome(
 ) -> set[str]:
     changed: set[str] = set()
 
-    category_field = _CATEGORY_FIELD_BY_OUTCOME.get(outcome)
+    category_field = OUTCOME_CATEGORY_BUCKET.get(outcome)
     if category_field and category:
         if _append_unique(profile, category_field, category):
             changed.add(category_field)
