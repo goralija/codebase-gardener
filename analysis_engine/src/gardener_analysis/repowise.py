@@ -167,7 +167,15 @@ def _run(
 ) -> subprocess.CompletedProcess[str]:
     try:
         result = subprocess.run(
-            command, capture_output=True, text=True, check=False, timeout=timeout
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+            # Isolate stdin so Repowise never blocks on an interactive TTY prompt
+            # (its init checks sys.stdin.isatty()); driven programmatically it must
+            # run non-interactively instead of hanging at 0% CPU.
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired as exc:
         raise RepowiseCommandError(
