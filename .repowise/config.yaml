@@ -1,6 +1,0 @@
-editor_files:
-  claude_md: false
-  agents_md: false
-distill:
-  commands:
-    enabled: false

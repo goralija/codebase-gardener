@@ -8,9 +8,11 @@ const schemaVersionSchema = v.literal("1.0")
 const evidenceReferenceSchema = v.object({
   source_type: v.string(),
   path: v.string(),
-  section: v.string(),
-  line_start: v.number(),
-  line_end: v.number(),
+  // section / line range are optional per the shared contract
+  // (fixtures/schemas/*.evidence_reference) — only present when known.
+  section: v.optional(v.string()),
+  line_start: v.optional(v.number()),
+  line_end: v.optional(v.number()),
   summary: v.string(),
 })
 

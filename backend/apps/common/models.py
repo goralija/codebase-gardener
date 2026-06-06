@@ -43,6 +43,10 @@ class AuditEvent(UUIDTimestampedModel):
             "gardener_profile_updated",
             "Gardener profile updated",
         )
+        ANALYSIS_STORED = (
+            "analysis_stored",
+            "Repository analysis stored",
+        )
         SESSION_TRIGGER_ENQUEUED = (
             "session_trigger_enqueued",
             "Session trigger enqueued",
