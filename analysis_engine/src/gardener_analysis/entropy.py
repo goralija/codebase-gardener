@@ -95,11 +95,63 @@ def build_entropy_report(
     }
 
 
+_SEVERITY_LABELS = {
+    "low": 0.3,
+    "minor": 0.3,
+    "medium": 0.5,
+    "moderate": 0.5,
+    "high": 0.75,
+    "major": 0.75,
+    "critical": 0.95,
+    "blocker": 0.95,
+}
+# Number of signals at which a component reaches full volume weighting.
+_VOLUME_FULL = 25.0
+
+
+def _signal_severity(signal: JsonObject) -> float:
+    """Per-signal severity in [0,1]. Higher = worse."""
+    label = str(signal.get("severity") or "").lower()
+    if label in _SEVERITY_LABELS:
+        return _SEVERITY_LABELS[label]
+
+    kind = signal.get("kind")
+    if kind == "low_health_score":
+        # Repowise health score 0-10, lower is worse.
+        score = signal.get("score")
+        if isinstance(score, int | float) and not isinstance(score, bool):
+            return _clamp((10.0 - float(score)) / 10.0, 0.0, 1.0)
+
+    confidence = signal.get("confidence")
+    if isinstance(confidence, int | float) and not isinstance(confidence, bool):
+        return _clamp(float(confidence), 0.0, 1.0)
+
+    score = signal.get("score")
+    if isinstance(score, int | float) and not isinstance(score, bool):
+        # health_impact-style score, assume 0-10 higher worse.
+        return _clamp(float(score) / 10.0, 0.0, 1.0)
+
+    return 0.5
+
+
 def _component_raw(signals: JsonObject, constitution: JsonObject | None) -> dict[str, float]:
-    raw = {component: 0.0 for component in COMPONENT_WEIGHTS}
+    severities: dict[str, list[float]] = {c: [] for c in COMPONENT_WEIGHTS}
     for bucket, component in _SIGNAL_COMPONENTS.items():
-        count = len(_as_list(signals.get(bucket)))
-        raw[component] = min(_MAX_RAW, raw[component] + count * _PER_SIGNAL_RAW)
+        for signal in _as_list(signals.get(bucket)):
+            if isinstance(signal, dict):
+                severities[component].append(_signal_severity(signal))
+
+    raw: dict[str, float] = {}
+    for component in COMPONENT_WEIGHTS:
+        sevs = severities[component]
+        if sevs:
+            mean_sev = sum(sevs) / len(sevs)
+            volume = min(1.0, len(sevs) / _VOLUME_FULL)
+            # Severity sets the level; volume scales it 0.6 -> 1.0 so many bad
+            # files weigh more than a few, without saturating on count alone.
+            raw[component] = min(_MAX_RAW, 100.0 * mean_sev * (0.6 + 0.4 * volume))
+        else:
+            raw[component] = 0.0
 
     # Knowledge entropy also rises with an incomplete / missing constitution.
     if constitution is not None:
