@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 from django.utils import timezone
 
-from apps.billing.models import RepositoryComplexity
+from apps.billing.models import RepositoryComplexity, Subscription
 from apps.common import storage
 from apps.common.models import AuditEvent
 
@@ -18,6 +19,9 @@ LOC_BANDS = (25_000, 100_000, 250_000)
 MODULE_BANDS = (3, 8, 20)
 CONTRIBUTOR_BANDS = (5, 20, 50)
 SCORE_VALUES = (0.0, 0.33, 0.66, 1.0)
+AUTONOMOUS_PR_ADD_ON_DISABLED_REASON = (
+    "Autonomous PR add-on is disabled for this organization."
+)
 
 
 @dataclass(frozen=True)
@@ -166,6 +170,154 @@ def repository_complexity_payload(
             complexity.calculated_at.isoformat().replace("+00:00", "Z")
             if complexity.calculated_at
             else None
+        ),
+    }
+
+
+def get_or_create_subscription(organization) -> Subscription:
+    subscription, _created = Subscription.objects.get_or_create(
+        organization=organization,
+        defaults={
+            "plan_code": Subscription.PLAN_CODE,
+            "currency": Subscription.CURRENCY,
+            "base_price_cents": Subscription.DEFAULT_BASE_PRICE_CENTS,
+            "autonomous_pr_add_on_enabled": False,
+            "autonomous_pr_add_on_price_cents": (
+                Subscription.DEFAULT_AUTONOMOUS_PR_ADD_ON_PRICE_CENTS
+            ),
+        },
+    )
+    return subscription
+
+
+def billing_summary_payload(organization) -> JsonObject:
+    subscription = get_or_create_subscription(organization)
+    repositories = list(
+        organization.managed_repositories.active()
+        .select_related("complexity", "complexity__source_analysis")
+        .order_by("full_name")
+    )
+    repository_payloads = [
+        _repository_billing_payload(repository, subscription)
+        for repository in repositories
+    ]
+    base_subtotal_cents = sum(
+        int(repository["base_monthly_cents"]) for repository in repository_payloads
+    )
+    add_on_subtotal_cents = (
+        subscription.autonomous_pr_add_on_price_cents
+        if subscription.autonomous_pr_add_on_enabled
+        else 0
+    )
+    billable_units = sum(
+        (Decimal(str(repository["billable_units"])) for repository in repository_payloads),
+        Decimal("0"),
+    )
+
+    return {
+        "subscription": subscription_payload(subscription),
+        "billing": {
+            "active_managed_repository_count": len(repository_payloads),
+            "billable_repository_units": _decimal_number(billable_units),
+            "base_subtotal_cents": base_subtotal_cents,
+            "autonomous_pr_add_on_subtotal_cents": add_on_subtotal_cents,
+            "monthly_estimate_cents": base_subtotal_cents + add_on_subtotal_cents,
+        },
+        "repositories": repository_payloads,
+    }
+
+
+def subscription_payload(subscription: Subscription) -> JsonObject:
+    return {
+        "id": str(subscription.id),
+        "plan_code": subscription.plan_code,
+        "currency": subscription.currency,
+        "base_price_cents": subscription.base_price_cents,
+        "autonomous_pr_add_on_enabled": subscription.autonomous_pr_add_on_enabled,
+        "autonomous_pr_add_on_price_cents": (
+            subscription.autonomous_pr_add_on_price_cents
+        ),
+        "created_at": subscription.created_at.isoformat().replace("+00:00", "Z"),
+        "updated_at": subscription.updated_at.isoformat().replace("+00:00", "Z"),
+    }
+
+
+def update_subscription(
+    *,
+    organization,
+    values: JsonObject,
+    actor=None,
+) -> Subscription:
+    subscription = get_or_create_subscription(organization)
+    previous = _subscription_audit_values(subscription)
+
+    changed_fields: list[str] = []
+    for field, value in values.items():
+        if getattr(subscription, field) != value:
+            setattr(subscription, field, value)
+            changed_fields.append(field)
+
+    if not changed_fields:
+        return subscription
+
+    update_fields = [*changed_fields, "updated_at"]
+    subscription.save(update_fields=update_fields)
+    AuditEvent.objects.create(
+        actor=actor,
+        organization=organization,
+        event_type=AuditEvent.EventType.BILLING_SUBSCRIPTION_UPDATED,
+        source="billing_api",
+        metadata={
+            "previous": previous,
+            "current": _subscription_audit_values(subscription),
+            "changed_fields": changed_fields,
+        },
+    )
+    return subscription
+
+
+def autonomous_pr_add_on_enabled(organization) -> bool:
+    return get_or_create_subscription(organization).autonomous_pr_add_on_enabled
+
+
+def _repository_billing_payload(repository, subscription: Subscription) -> JsonObject:
+    try:
+        complexity = repository.complexity
+    except RepositoryComplexity.DoesNotExist:
+        complexity = None
+
+    multiplier = Decimal(str(complexity.multiplier if complexity else 1.0))
+    base_monthly_cents = _price_for_multiplier(
+        subscription.base_price_cents,
+        multiplier,
+    )
+    return {
+        "id": str(repository.id),
+        "full_name": repository.full_name,
+        "billable_units": _decimal_number(multiplier),
+        "base_monthly_cents": base_monthly_cents,
+        "complexity": repository_complexity_payload(complexity, include_details=True),
+    }
+
+
+def _price_for_multiplier(price_cents: int, multiplier: Decimal) -> int:
+    cents = Decimal(price_cents) * multiplier
+    return int(cents.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _decimal_number(value: Decimal) -> float:
+    normalized = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return float(normalized)
+
+
+def _subscription_audit_values(subscription: Subscription) -> JsonObject:
+    return {
+        "plan_code": subscription.plan_code,
+        "currency": subscription.currency,
+        "base_price_cents": subscription.base_price_cents,
+        "autonomous_pr_add_on_enabled": subscription.autonomous_pr_add_on_enabled,
+        "autonomous_pr_add_on_price_cents": (
+            subscription.autonomous_pr_add_on_price_cents
         ),
     }
 

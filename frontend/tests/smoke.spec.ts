@@ -8,6 +8,7 @@ const firstReportApi = `${apiBaseUrl}/reports/first/`
 const githubInstallStartApi = `${apiBaseUrl}/github-app/installations/start/`
 const organizationsApi = `${apiBaseUrl}/organizations/`
 const repositoriesApi = `${apiBaseUrl}/organizations/org-1/repositories/`
+const billingApi = `${apiBaseUrl}/organizations/org-1/billing/`
 const firstReportFixture = JSON.parse(
   readFileSync(
     new URL(
@@ -236,6 +237,56 @@ test("loads GitHub onboarding with selected repositories", async ({ page }) => {
       },
     })
   })
+  await page.route(billingApi, async (route) => {
+    await route.fulfill({
+      headers: credentialCorsHeaders,
+      json: {
+        organization: {
+          id: "org-1",
+          name: "Acme",
+          github_login: "acme",
+          github_account_type: "organization",
+        },
+        subscription: {
+          id: "subscription-1",
+          plan_code: "managed_repository_base",
+          currency: "USD",
+          base_price_cents: 2000,
+          autonomous_pr_add_on_enabled: true,
+          autonomous_pr_add_on_price_cents: 200,
+          created_at: "2026-06-06T08:00:00Z",
+          updated_at: "2026-06-06T08:00:00Z",
+        },
+        billing: {
+          active_managed_repository_count: 2,
+          billable_repository_units: 3.1,
+          base_subtotal_cents: 6200,
+          autonomous_pr_add_on_subtotal_cents: 200,
+          monthly_estimate_cents: 6400,
+        },
+        repositories: [
+          {
+            id: "repo-1",
+            full_name: "acme/api",
+            billable_units: 2.1,
+            base_monthly_cents: 4200,
+            complexity: completeComplexity,
+          },
+          {
+            id: "repo-2",
+            full_name: "acme/web",
+            billable_units: 1,
+            base_monthly_cents: 2000,
+            complexity: pendingComplexity,
+          },
+        ],
+        permissions: {
+          can_edit_add_on: true,
+          can_edit_plan_and_prices: false,
+        },
+      },
+    })
+  })
 
   await page.goto("/onboarding/github?status=installed&organization_id=org-1")
 
@@ -253,4 +304,8 @@ test("loads GitHub onboarding with selected repositories", async ({ page }) => {
   await expect(
     page.getByRole("link", { name: /Edit repository access in GitHub/ })
   ).toHaveAttribute("href", settingsUrl)
+  await expect(
+    page.getByRole("heading", { name: "Billing plan" })
+  ).toBeVisible()
+  await expect(page.getByText("$64.00")).toBeVisible()
 })

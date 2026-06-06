@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from "vitest"
 
 import {
   buildGithubOnboardingApiUrl,
+  fetchOrganizationBilling,
   fetchInstallationStart,
   fetchOrganizations,
   fetchOrganizationRepositories,
   GithubOnboardingContractError,
   GithubOnboardingRequestError,
+  updateOrganizationBilling,
   parseRepositoriesResponse,
 } from "./github-onboarding-api"
 
@@ -59,6 +61,7 @@ describe("github onboarding API", () => {
       {
         credentials: "include",
         headers: { Accept: "application/json" },
+        method: "GET",
       }
     )
   })
@@ -129,6 +132,74 @@ describe("github onboarding API", () => {
     )
   })
 
+  it("fetches and updates organization billing", async () => {
+    await expect(
+      fetchOrganizationBilling("org-1", {
+        fetcher: fetcherReturning(jsonResponse(billingPayload())),
+      })
+    ).resolves.toMatchObject({
+      billing: {
+        active_managed_repository_count: 1,
+        monthly_estimate_cents: 4400,
+      },
+      subscription: {
+        autonomous_pr_add_on_enabled: true,
+        base_price_cents: 2000,
+      },
+    })
+
+    document.cookie = "csrftoken=; Max-Age=0"
+    const fetcher = fetcherReturning(
+      jsonResponse({
+        ...billingPayload(),
+        subscription: {
+          ...billingPayload().subscription,
+          autonomous_pr_add_on_enabled: false,
+        },
+      })
+    )
+
+    await updateOrganizationBilling(
+      "org-1",
+      { autonomous_pr_add_on_enabled: false },
+      { fetcher }
+    )
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/v1/organizations/org-1/billing/",
+      {
+        body: JSON.stringify({ autonomous_pr_add_on_enabled: false }),
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        method: "PATCH",
+      }
+    )
+  })
+
+  it("sends the CSRF token with billing updates when the cookie is present", async () => {
+    document.cookie = "csrftoken=test-token"
+    const fetcher = fetcherReturning(jsonResponse(billingPayload()))
+
+    await updateOrganizationBilling(
+      "org-1",
+      { autonomous_pr_add_on_enabled: true },
+      { fetcher }
+    )
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/v1/organizations/org-1/billing/",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-CSRFToken": "test-token",
+        }),
+      })
+    )
+    document.cookie = "csrftoken=; Max-Age=0"
+  })
+
   it("rejects request failures", async () => {
     await expect(
       fetchOrganizations({
@@ -184,6 +255,47 @@ function repositoryListPayload() {
         complexity: completeComplexity(),
       },
     ],
+  }
+}
+
+function billingPayload() {
+  return {
+    organization: {
+      id: "org-1",
+      name: "Acme",
+      github_login: "acme",
+      github_account_type: "organization",
+    },
+    subscription: {
+      id: "subscription-1",
+      plan_code: "managed_repository_base",
+      currency: "USD",
+      base_price_cents: 2000,
+      autonomous_pr_add_on_enabled: true,
+      autonomous_pr_add_on_price_cents: 200,
+      created_at: "2026-06-06T08:00:00Z",
+      updated_at: "2026-06-06T08:00:00Z",
+    },
+    billing: {
+      active_managed_repository_count: 1,
+      billable_repository_units: 2.1,
+      base_subtotal_cents: 4200,
+      autonomous_pr_add_on_subtotal_cents: 200,
+      monthly_estimate_cents: 4400,
+    },
+    repositories: [
+      {
+        id: "repo-1",
+        full_name: "acme/api",
+        billable_units: 2.1,
+        base_monthly_cents: 4200,
+        complexity: completeComplexity(),
+      },
+    ],
+    permissions: {
+      can_edit_add_on: true,
+      can_edit_plan_and_prices: false,
+    },
   }
 }
 

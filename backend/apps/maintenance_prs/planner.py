@@ -7,6 +7,10 @@ from typing import Iterable
 
 from django.db import transaction
 
+from apps.billing.services import (
+    AUTONOMOUS_PR_ADD_ON_DISABLED_REASON,
+    autonomous_pr_add_on_enabled,
+)
 from apps.maintenance_prs.models import MaintenancePRPlan, MaintenancePRPlanOpportunity
 from apps.maintenance_prs.policy import (
     DEAD_CODE_CONFIDENCE_THRESHOLD,
@@ -97,6 +101,7 @@ def plan_maintenance_prs(
             gardening_session_id=gardening_session_id,
         ).values_list("branch_name", flat=True)
     )
+    billing_decision = _billing_decision(repository)
 
     with transaction.atomic():
         for group in groups:
@@ -104,6 +109,8 @@ def plan_maintenance_prs(
             forced_reason = forced_block_reasons.get(group[0]["maintenance_opportunity_id"])
             if forced_reason:
                 decision = PolicyDecision(True, forced_reason)
+            if billing_decision.blocked and not decision.blocked:
+                decision = billing_decision
             branch_name = _unique_branch_name(_base_branch_name(group), used_branch_names)
             used_branch_names.add(branch_name)
             plan = MaintenancePRPlan.objects.create(
@@ -200,6 +207,12 @@ def _group_decision(
         if decision.blocked:
             return decision
     return PolicyDecision(False)
+
+
+def _billing_decision(repository) -> PolicyDecision:
+    if autonomous_pr_add_on_enabled(repository.organization):
+        return PolicyDecision(False)
+    return PolicyDecision(True, AUTONOMOUS_PR_ADD_ON_DISABLED_REASON)
 
 
 def _effective_threshold(
