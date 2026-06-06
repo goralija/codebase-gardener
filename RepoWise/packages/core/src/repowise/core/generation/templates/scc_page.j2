@@ -1,0 +1,30 @@
+You are documenting the circular dependency cycle identified as SCC `{{ ctx.scc_id }}`.
+
+## Cycle Description
+{{ ctx.cycle_description }}
+
+## Files Involved ({{ ctx.files | length }})
+{% for f in ctx.files %}
+- `{{ f }}`
+{% endfor %}
+
+## Import Dependencies Creating the Cycle
+{% for ci in ctx.cross_imports %}
+- `{{ ci.from }}` imports from `{{ ci.to }}`
+{% endfor %}
+
+## Key Symbols in Cycle
+{% for member in ctx.member_symbols %}
+{% if member.symbols %}
+**`{{ member.file_path }}`**
+{% for sym in member.symbols %}
+- `{{ sym.signature }}`{% if sym.docstring %} — {{ sym.docstring }}{% endif %}
+
+{% endfor %}
+{% endif %}
+{% endfor %}
+
+## Total Symbols in Cycle
+{{ ctx.total_symbols }}
+
+Generate a complete wiki page following the sections above.

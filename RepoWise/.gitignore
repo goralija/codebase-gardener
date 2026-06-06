@@ -1,0 +1,165 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+/lib/
+/lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+/papers/
+# uv
+.uv/
+
+# Testing
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ruff
+.ruff_cache/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Node / Next.js
+node_modules/
+.next/
+.nuxt/
+out/
+.npm
+.eslintcache
+.parcel-cache
+*.tsbuildinfo
+next-env.d.ts
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# repowise runtime data
+.repowise/
+!.repowise/mcp.json.example
+.repowise-workspace/
+.repowise-workspace.yaml
+
+# Benchmark output (large-repo scale runs) — keep the dir, ignore results
+bench/results/
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# LanceDB
+lancedb/
+lancedb_data/
+*.lance
+
+# Logs
+*.log
+logs/
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+
+# Claude Code
+.claude/
+
+# repowise API keys (local)
+.repowise/.env
+
+# Internal docs (not for distribution)
+docs/COMPETITIVE_ANALYSIS.md
+docs/GRAPH_INTELLIGENCE_UPGRADE.md
+docs/LOCAL_DEV.md
+docs/multi-repo/
+
+# Local-only language work tracker (not for git)
+docs/LANGUAGE_REMAINING_WORK.md
+
+# Local UI/UX audit notes
+AUDIT_UI_UX.md
+docs/WEB_UI_IMPROVEMENT_PLAN.md
+docs/WORKSPACE_ROBUSTNESS.md
+
+# Local demo scripts (not for distribution)
+demo/
+
+# Local scratch — dead-code analysis & R2 tooling
+_pip_check/
+content_engine/
+analyze_findings.py
+fetch_r2.py
+upload_r2.py
+filter_dead_code.py
+inspect_*.py
+eshop_hosted_dead_code.*
+
+# Local scratch / sibling tools (not for distribution)
+GitNexus/
+graphify/
+test-repos/
+
+# Office temp / lock files
+~$*
+*.zip
+
+# Local hosted-product planning (not for OSS distribution)
+docs/IXOPAY_FEATURES.md
+docs/IXOPAY_FEATURES.docx
+docs/HOSTED_PRODUCT_UPGRADE_PLAN.md
+docs/HOSTED_IMPLEMENTATION_GUIDE.md
+docs/HOSTED_PROGRESS.md
+scripts/md_to_docx.py

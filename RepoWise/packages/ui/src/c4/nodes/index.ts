@@ -1,0 +1,29 @@
+import type { NodeTypes } from "@xyflow/react";
+import { SystemNode } from "./SystemNode";
+import { PersonNode } from "./PersonNode";
+import { ExternalSystemNode } from "./ExternalSystemNode";
+import { ContainerNode } from "./ContainerNode";
+import { ComponentNode } from "./ComponentNode";
+import { ArchFileNode } from "./ArchFileNode";
+import { ArchContainerNode } from "./ArchContainerNode";
+import { LayerClusterNode } from "./LayerClusterNode";
+import { PortalNode } from "./PortalNode";
+
+export const c4NodeTypes: NodeTypes = {
+  system: SystemNode,
+  person: PersonNode,
+  external: ExternalSystemNode,
+  container: ContainerNode,
+  component: ComponentNode,
+};
+
+export const archNodeTypes: NodeTypes = {
+  ...c4NodeTypes,
+  archFile: ArchFileNode,
+  archContainer: ArchContainerNode,
+  layerCluster: LayerClusterNode,
+  portal: PortalNode,
+};
+
+export { SystemNode, PersonNode, ExternalSystemNode, ContainerNode, ComponentNode };
+export { ArchFileNode, ArchContainerNode, LayerClusterNode, PortalNode };

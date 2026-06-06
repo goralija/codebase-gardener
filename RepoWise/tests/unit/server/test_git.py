@@ -1,0 +1,251 @@
+"""Tests for git intelligence endpoints."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+from httpx import AsyncClient
+
+from repowise.core.persistence import crud
+from repowise.core.persistence.database import get_session
+from tests.unit.server.conftest import create_test_repo
+
+
+async def _insert_git_metadata(session_factory, repo_id: str) -> None:
+    """Insert test git metadata."""
+    async with get_session(session_factory) as session:
+        await crud.upsert_git_metadata(
+            session,
+            repository_id=repo_id,
+            file_path="src/main.py",
+            commit_count_total=50,
+            commit_count_90d=10,
+            commit_count_30d=3,
+            primary_owner_name="Alice",
+            primary_owner_email="alice@example.com",
+            primary_owner_commit_pct=0.6,
+            top_authors_json=json.dumps([{"name": "Alice", "commits": 30}]),
+            significant_commits_json=json.dumps([{"sha": "abc", "message": "init"}]),
+            co_change_partners_json=json.dumps(
+                [{"file_path": "src/utils.py", "co_change_count": 5}]
+            ),
+            is_hotspot=True,
+            is_stable=False,
+            churn_percentile=0.85,
+            age_days=365,
+            change_entropy=1.5,
+            change_entropy_pct=0.9,
+            prior_defect_count=4,
+            temporal_hotspot_score=12.3,
+            commit_count_capped=True,
+            original_path="src/old_main.py",
+        )
+        await crud.upsert_git_metadata(
+            session,
+            repository_id=repo_id,
+            file_path="src/utils.py",
+            commit_count_total=20,
+            commit_count_90d=0,
+            commit_count_30d=0,
+            primary_owner_name="Bob",
+            primary_owner_email="bob@example.com",
+            primary_owner_commit_pct=0.9,
+            is_hotspot=False,
+            is_stable=True,
+            churn_percentile=0.2,
+            age_days=200,
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_git_metadata(client: AsyncClient, app) -> None:
+    repo = await create_test_repo(client)
+    await _insert_git_metadata(app.state.session_factory, repo["id"])
+
+    resp = await client.get(
+        f"/api/repos/{repo['id']}/git-metadata",
+        params={"file_path": "src/main.py"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["file_path"] == "src/main.py"
+    assert data["commit_count_total"] == 50
+    assert data["is_hotspot"] is True
+    assert data["primary_owner_name"] == "Alice"
+    # Newly surfaced change-complexity + defect-history signals.
+    assert data["change_entropy"] == 1.5
+    assert data["change_entropy_pct"] == 90.0  # normalized 0-1 -> 0-100
+    assert data["prior_defect_count"] == 4
+    assert data["temporal_hotspot_score"] == 12.3
+    assert data["commit_count_capped"] is True
+    assert data["original_path"] == "src/old_main.py"
+
+
+@pytest.mark.asyncio
+async def test_get_git_metadata_not_found(client: AsyncClient) -> None:
+    repo = await create_test_repo(client)
+    resp = await client.get(
+        f"/api/repos/{repo['id']}/git-metadata",
+        params={"file_path": "nonexistent.py"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_hotspots(client: AsyncClient, app) -> None:
+    repo = await create_test_repo(client)
+    await _insert_git_metadata(app.state.session_factory, repo["id"])
+
+    resp = await client.get(f"/api/repos/{repo['id']}/hotspots")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["total"] == 1  # Only main.py is a hotspot
+    assert payload["has_more"] is False
+    data = payload["items"]
+    assert len(data) == 1
+    assert data[0]["file_path"] == "src/main.py"
+    assert data[0]["is_hotspot"] is True
+    assert data[0]["change_entropy_pct"] == 90.0
+    assert data[0]["prior_defect_count"] == 4
+    assert data[0]["original_path"] == "src/old_main.py"
+
+
+@pytest.mark.asyncio
+async def test_get_ownership(client: AsyncClient, app) -> None:
+    repo = await create_test_repo(client)
+    await _insert_git_metadata(app.state.session_factory, repo["id"])
+
+    resp = await client.get(f"/api/repos/{repo['id']}/ownership")
+    assert resp.status_code == 200
+    payload = resp.json()
+    data = payload["items"]
+    assert payload["total"] == len(data)
+    assert len(data) >= 1
+    # Both files are under "src" module
+    src_entry = next((e for e in data if e["module_path"] == "src"), None)
+    assert src_entry is not None
+    assert src_entry["file_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_get_co_changes(client: AsyncClient, app) -> None:
+    repo = await create_test_repo(client)
+    await _insert_git_metadata(app.state.session_factory, repo["id"])
+
+    resp = await client.get(
+        f"/api/repos/{repo['id']}/co-changes",
+        params={"file_path": "src/main.py", "min_count": 3},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["file_path"] == "src/main.py"
+    assert len(data["co_change_partners"]) == 1
+    assert data["co_change_partners"][0]["file_path"] == "src/utils.py"
+
+
+async def _insert_git_commits(session_factory, repo_id: str) -> None:
+    """Insert a small spread of commits with distinct risk scores."""
+    from datetime import UTC, datetime
+
+    def _row(sha: str, risk: float, ts: int, **over) -> dict:
+        base = {
+            "sha": sha,
+            "author_name": "Ann",
+            "author_email": "ann@example.com",
+            "committed_at": datetime.fromtimestamp(ts, tz=UTC),
+            "subject": f"commit {sha}",
+            "lines_added": 40,
+            "lines_deleted": 5,
+            "files_changed": 4,
+            "dirs_changed": 2,
+            "subsystems_changed": 1,
+            "entropy": 1.2,
+            "is_fix": False,
+            "author_experience": 3,
+            "change_risk_score": risk,
+            "change_risk_level": "high" if risk >= 7 else "moderate" if risk >= 4 else "low",
+        }
+        base.update(over)
+        return base
+
+    async with get_session(session_factory) as session:
+        await crud.upsert_git_commits_bulk(
+            session,
+            repo_id,
+            [
+                _row("aaaaaaaa11", 2.0, 3000),
+                _row("bbbbbbbb22", 8.5, 1000),
+                _row("cccccccc33", 5.0, 2000),
+            ],
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_commits_sorted_by_risk(client: AsyncClient, app) -> None:
+    repo = await create_test_repo(client)
+    await _insert_git_commits(app.state.session_factory, repo["id"])
+
+    resp = await client.get(f"/api/repos/{repo['id']}/commits", params={"sort": "risk"})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["total"] == 3
+    items = payload["items"]
+    # Risk-descending review-priority order.
+    assert [c["short_sha"] for c in items] == ["bbbbbbbb", "cccccccc", "aaaaaaaa"]
+    top = items[0]
+    assert top["change_risk_score"] == 8.5
+    # Repo-relative normalization: the top commit is the highest percentile and
+    # falls in the top tercile (portable, not the absolute calibration band).
+    assert top["risk_percentile"] > items[-1]["risk_percentile"]
+    assert top["review_priority"] == "high"
+    assert items[-1]["review_priority"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_get_commits_sorted_by_date(client: AsyncClient, app) -> None:
+    repo = await create_test_repo(client)
+    await _insert_git_commits(app.state.session_factory, repo["id"])
+
+    resp = await client.get(f"/api/repos/{repo['id']}/commits", params={"sort": "date"})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert [c["short_sha"] for c in items] == ["aaaaaaaa", "cccccccc", "bbbbbbbb"]
+
+
+@pytest.mark.asyncio
+async def test_get_commit_detail_has_drivers(client: AsyncClient, app) -> None:
+    repo = await create_test_repo(client)
+    await _insert_git_commits(app.state.session_factory, repo["id"])
+
+    resp = await client.get(f"/api/repos/{repo['id']}/commits/bbbbbbbb")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["sha"] == "bbbbbbbb22"
+    assert data["author_experience"] == 3
+    # Re-scoring the stored features reproduces the persisted score exactly.
+    assert data["change_risk_score"] == 8.5
+    assert len(data["drivers"]) == 7  # la, ld, nf, nd, ns, entropy, exp
+    feats = {d["feature"] for d in data["drivers"]}
+    assert {"la", "exp", "entropy"} <= feats
+
+
+@pytest.mark.asyncio
+async def test_get_commit_not_found(client: AsyncClient) -> None:
+    repo = await create_test_repo(client)
+    resp = await client.get(f"/api/repos/{repo['id']}/commits/deadbeef")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_git_summary(client: AsyncClient, app) -> None:
+    repo = await create_test_repo(client)
+    await _insert_git_metadata(app.state.session_factory, repo["id"])
+
+    resp = await client.get(f"/api/repos/{repo['id']}/git-summary")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_files"] == 2
+    assert data["hotspot_count"] == 1
+    assert data["stable_count"] == 1
+    assert len(data["top_owners"]) == 2

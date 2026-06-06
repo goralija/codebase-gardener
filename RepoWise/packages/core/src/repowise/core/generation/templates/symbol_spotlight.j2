@@ -1,0 +1,41 @@
+You are writing a detailed spotlight page for the symbol `{{ ctx.symbol_name }}`.
+
+## Symbol Details
+- **Name**: `{{ ctx.symbol_name }}`
+- **Qualified name**: `{{ ctx.qualified_name }}`
+- **Kind**: {{ ctx.kind }}
+- **File**: `{{ ctx.file_path }}`
+- **Is async**: {{ ctx.is_async }}
+- **Complexity estimate**: {{ ctx.complexity_estimate }}
+
+## Signature
+```
+{{ ctx.signature }}
+```
+
+{% if ctx.docstring %}
+## Docstring
+{{ ctx.docstring }}
+{% endif %}
+
+{% if ctx.decorators %}
+## Decorators
+{% for dec in ctx.decorators %}
+- `{{ dec }}`
+{% endfor %}
+{% endif %}
+
+{% if ctx.source_body %}
+## Implementation
+```
+{{ ctx.source_body }}
+```
+{% endif %}
+
+## Callers
+Files that import the containing module:
+{% for caller in ctx.callers %}
+- `{{ caller }}`
+{% endfor %}
+
+Generate a complete wiki page following the sections above.
