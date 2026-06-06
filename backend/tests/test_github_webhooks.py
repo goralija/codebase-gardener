@@ -319,6 +319,91 @@ def test_push_webhook_creates_session_for_default_branch_only(monkeypatch):
 
 
 @pytest.mark.django_db
+def test_failed_session_enqueue_does_not_block_followup_webhook_session(monkeypatch):
+    queued_sessions = []
+
+    def flaky_delay(session_id: str):
+        queued_sessions.append(session_id)
+        if len(queued_sessions) == 1:
+            raise RuntimeError("broker unavailable")
+        return SimpleNamespace(id="task-2")
+
+    monkeypatch.setattr("apps.github_app.services.run_gardening_session.delay", flaky_delay)
+    repository = create_repository()
+    first_event = create_webhook_event(
+        event_name="push",
+        payload=push_payload(repository, ref="refs/heads/main", after="abc123"),
+        delivery_id="push-first-enqueue-failure",
+    )
+    second_event = create_webhook_event(
+        event_name="push",
+        payload=push_payload(repository, ref="refs/heads/main", after="def456"),
+        delivery_id="push-followup-after-enqueue-failure",
+    )
+
+    first_result = process_stored_github_webhook_event(str(first_event.id))
+    second_result = process_stored_github_webhook_event(str(second_event.id))
+
+    first_event.refresh_from_db()
+    second_event.refresh_from_db()
+    failed_session = GardeningSession.objects.get(id=queued_sessions[0])
+    queued_session = GardeningSession.objects.get(id=queued_sessions[1])
+    assert first_result["status"] == GitHubWebhookEvent.Status.RECEIVED
+    assert first_event.status == GitHubWebhookEvent.Status.RECEIVED
+    assert first_event.last_error == "Session queue enqueue failed: broker unavailable"
+    assert first_event.result == {
+        "status": "retryable",
+        "error": "Session queue enqueue failed: broker unavailable",
+    }
+    assert failed_session.status == GardeningSession.Status.FAILED
+    assert failed_session.finished_at is not None
+    assert failed_session.last_error == "Session queue enqueue failed: broker unavailable"
+    assert failed_session.result["errors"] == [
+        {"phase": "queue", "message": "Session queue enqueue failed: broker unavailable"}
+    ]
+    assert second_result["status"] == GitHubWebhookEvent.Status.PROCESSED
+    assert second_event.status == GitHubWebhookEvent.Status.PROCESSED
+    assert queued_session.status == GardeningSession.Status.QUEUED
+    assert queued_session.task_id == "task-2"
+    assert GardeningSession.objects.count() == 2
+    assert queued_sessions == [str(failed_session.id), str(queued_session.id)]
+
+
+@pytest.mark.django_db
+def test_failed_session_enqueue_keeps_same_webhook_delivery_retryable(monkeypatch):
+    queued_sessions = []
+
+    def flaky_delay(session_id: str):
+        queued_sessions.append(session_id)
+        if len(queued_sessions) == 1:
+            raise RuntimeError("broker unavailable")
+        return SimpleNamespace(id="task-2")
+
+    monkeypatch.setattr("apps.github_app.services.run_gardening_session.delay", flaky_delay)
+    repository = create_repository()
+    event = create_webhook_event(
+        event_name="push",
+        payload=push_payload(repository, ref="refs/heads/main", after="abc123"),
+        delivery_id="push-retry-same-delivery",
+    )
+
+    first_result = process_stored_github_webhook_event(str(event.id))
+    second_result = process_stored_github_webhook_event(str(event.id))
+
+    event.refresh_from_db()
+    failed_session = GardeningSession.objects.get(id=queued_sessions[0])
+    queued_session = GardeningSession.objects.get(id=queued_sessions[1])
+    assert first_result["status"] == GitHubWebhookEvent.Status.RECEIVED
+    assert second_result["status"] == GitHubWebhookEvent.Status.PROCESSED
+    assert event.status == GitHubWebhookEvent.Status.PROCESSED
+    assert failed_session.status == GardeningSession.Status.FAILED
+    assert queued_session.status == GardeningSession.Status.QUEUED
+    assert queued_session.task_id == "task-2"
+    assert GardeningSession.objects.count() == 2
+    assert queued_sessions == [str(failed_session.id), str(queued_session.id)]
+
+
+@pytest.mark.django_db
 def test_pull_request_webhook_creates_session_for_open_actions(monkeypatch):
     queued_sessions = patch_session_enqueue(monkeypatch)
     repository = create_repository()

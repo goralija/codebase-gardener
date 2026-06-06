@@ -118,7 +118,7 @@ Customers can install the GitHub App, select repositories, and view reports from
 
 #### E02-T01 Build Django/DRF product foundation
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane A
 - Complexity: L
@@ -129,7 +129,7 @@ Customers can install the GitHub App, select repositories, and view reports from
 
 #### E02-T02 Model organizations, installations, repositories, and memberships
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane A
 - Complexity: L
@@ -140,7 +140,7 @@ Customers can install the GitHub App, select repositories, and view reports from
 
 #### E02-T03 Implement GitHub App installation and repository selection
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane A
 - Complexity: L
@@ -151,7 +151,7 @@ Customers can install the GitHub App, select repositories, and view reports from
 
 #### E02-T04 Implement GitHub webhook ingestion
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane A
 - Complexity: L
@@ -162,7 +162,7 @@ Customers can install the GitHub App, select repositories, and view reports from
 
 #### E02-T05 Build dashboard shell and first-report UI from fixtures
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane A
 - Complexity: L
@@ -173,7 +173,7 @@ Customers can install the GitHub App, select repositories, and view reports from
 
 #### E02-T06 Connect dashboard to real backend APIs
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane A
 - Complexity: M
@@ -262,7 +262,7 @@ Hosted Celery workers run gardening sessions, plan safe PRs, and learn from outc
 
 #### E04-T01 Implement Celery worker foundation
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane C
 - Complexity: M
@@ -284,7 +284,7 @@ Hosted Celery workers run gardening sessions, plan safe PRs, and learn from outc
 
 #### E04-T03 Implement session lifecycle from fixture contracts
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane C
 - Complexity: L
@@ -328,7 +328,7 @@ Hosted Celery workers run gardening sessions, plan safe PRs, and learn from outc
 
 #### E04-T07 Implement ROI estimates
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane C
 - Complexity: M

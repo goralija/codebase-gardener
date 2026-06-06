@@ -3,6 +3,21 @@
   "$id": "https://codebase-gardener.dev/schemas/maintenance_opportunity.schema.json",
   "type": "object",
   "required": ["schema_version", "maintenance_opportunity_id", "repository_id", "analysis_snapshot_id", "category", "risk_tier", "confidence", "title", "summary", "affected_paths", "blocked_by", "expected_entropy_delta", "required_checks", "evidence"],
+  "$defs": {
+    "evidence_reference": {
+      "type": "object",
+      "required": ["source_type", "path", "summary"],
+      "properties": {
+        "source_type": { "type": "string" },
+        "path": { "type": "string" },
+        "section": { "type": "string" },
+        "line_start": { "type": "integer", "minimum": 1 },
+        "line_end": { "type": "integer", "minimum": 1 },
+        "summary": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
   "properties": {
     "schema_version": { "const": "1.0" },
     "maintenance_opportunity_id": { "type": "string" },
@@ -14,11 +29,10 @@
     "title": { "type": "string" },
     "summary": { "type": "string" },
     "affected_paths": { "type": "array", "items": { "type": "string" } },
-    "blocked_by": { "type": "array" },
+    "blocked_by": { "type": "array", "items": { "type": "string" } },
     "expected_entropy_delta": { "type": "number" },
     "required_checks": { "type": "array", "items": { "type": "string" } },
-    "evidence": { "type": "array" }
+    "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence_reference" } }
   },
   "additionalProperties": false
 }
-
