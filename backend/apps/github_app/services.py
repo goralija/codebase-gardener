@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC
 from typing import Any
 from urllib.parse import urlencode, quote
 
@@ -20,15 +20,14 @@ from apps.github_app.client import GitHubAPIError, GitHubAppClient
 from apps.github_app.models import GitHubInstallation, GitHubWebhookEvent
 from apps.github_app.state import create_install_state, load_install_state
 from apps.repositories.models import ManagedRepository
-from apps.sessions.models import GardeningSession
-from apps.sessions.tasks import run_gardening_session
+from apps.triggers.service import (
+    SessionEnqueueError,
+    enqueue_session_for_trigger,
+    evaluate_push_triggers,
+)
 
 
 WEBHOOK_AUDIT_SOURCE = "github_webhook"
-ACTIVE_SESSION_STATUSES = [
-    GardeningSession.Status.QUEUED,
-    GardeningSession.Status.RUNNING,
-]
 PR_TRIGGER_ACTIONS = {"opened", "reopened", "synchronize"}
 FAILED_CI_CONCLUSIONS = {
     "action_required",
@@ -69,10 +68,6 @@ class GitHubInstallationSyncError(GitHubAppOnboardingError):
 
 class GitHubWebhookPayloadError(Exception):
     code = "invalid_github_webhook_payload"
-
-
-class SessionEnqueueError(Exception):
-    pass
 
 
 @dataclass(frozen=True)
@@ -545,7 +540,21 @@ def _process_push_webhook(event: GitHubWebhookEvent) -> dict[str, Any]:
             "commit_sha": event.payload.get("after") or "",
         },
     )
-    return _processed_result(sessions_created=[session])
+    sessions = [session]
+    sessions.extend(
+        evaluate_push_triggers(
+            repository=repository,
+            ref=ref,
+            payload=event.payload,
+            base_trigger_extra={
+                "source": WEBHOOK_AUDIT_SOURCE,
+                "delivery_id": event.delivery_id,
+                "event": event.event,
+                "action": event.action,
+            },
+        )
+    )
+    return _processed_result(sessions_created=sessions)
 
 
 def _process_pull_request_webhook(event: GitHubWebhookEvent) -> dict[str, Any]:
@@ -1019,86 +1028,19 @@ def _create_or_get_webhook_session(
     subject_id: str,
     extra: dict[str, Any],
 ) -> dict[str, Any]:
-    existing = GardeningSession.objects.filter(
+    return enqueue_session_for_trigger(
         repository=repository,
-        status__in=ACTIVE_SESSION_STATUSES,
-        trigger__type=trigger_type,
-        trigger__subject_type=subject_type,
-        trigger__subject_id=subject_id,
-    ).first()
-    if existing is not None:
-        return {
-            "gardening_session_id": str(existing.id),
-            "status": existing.status,
-            "deduped": True,
-        }
-
-    trigger = {
-        "type": trigger_type,
-        "source": "github_webhook",
-        "delivery_id": event.delivery_id,
-        "event": event.event,
-        "action": event.action,
-        "subject_type": subject_type,
-        "subject_id": subject_id,
-        **extra,
-    }
-    session = GardeningSession.objects.create(repository=repository, trigger=trigger)
-    try:
-        async_result = run_gardening_session.delay(str(session.id))
-    except Exception as exc:
-        detail = str(exc) or exc.__class__.__name__
-        error = f"Session queue enqueue failed: {detail}"
-        failed_at = timezone.now()
-        session.status = GardeningSession.Status.FAILED
-        session.finished_at = failed_at
-        session.last_error = error
-        session.result = _failed_webhook_session_result(session, error, failed_at)
-        session.save(
-            update_fields=[
-                "status",
-                "finished_at",
-                "last_error",
-                "result",
-                "updated_at",
-            ]
-        )
-        raise SessionEnqueueError(error) from exc
-    task_id = getattr(async_result, "id", "") or ""
-    if task_id:
-        session.task_id = task_id
-        session.save(update_fields=["task_id", "updated_at"])
-    return {
-        "gardening_session_id": str(session.id),
-        "status": session.status,
-        "deduped": False,
-    }
-
-
-def _failed_webhook_session_result(
-    session: GardeningSession,
-    error: str,
-    failed_at: datetime,
-) -> dict[str, Any]:
-    timestamp = _format_webhook_session_timestamp(failed_at)
-    return {
-        "schema_version": "1.0",
-        "gardening_session_id": str(session.id),
-        "repository_id": str(session.repository_id),
-        "trigger": session.trigger,
-        "status": "failed",
-        "started_at": timestamp,
-        "finished_at": timestamp,
-        "phase_results": [{"phase": "queue", "status": "failed", "summary": error}],
-        "opportunities_selected": [],
-        "opportunities_deferred": [],
-        "maintenance_pr_plans": [],
-        "errors": [{"phase": "queue", "message": error}],
-    }
-
-
-def _format_webhook_session_timestamp(value: datetime) -> str:
-    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        kind=trigger_type,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        source=WEBHOOK_AUDIT_SOURCE,
+        extra={
+            "delivery_id": event.delivery_id,
+            "event": event.event,
+            "action": event.action,
+            **extra,
+        },
+    )
 
 
 def _active_installation_for_event(

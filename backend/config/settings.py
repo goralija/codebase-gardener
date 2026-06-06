@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     "apps.entropy.apps.EntropyConfig",
     "apps.sessions.apps.SessionsConfig",
     "apps.maintenance_prs.apps.MaintenancePRsConfig",
+    "apps.triggers.apps.TriggersConfig",
     "apps.billing.apps.BillingConfig",
 ]
 
@@ -131,3 +132,9 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
 CELERY_TASK_TRACK_STARTED = True
+CELERY_BEAT_SCHEDULE = {
+    "dispatch-scheduled-sessions": {
+        "task": "apps.triggers.tasks.dispatch_scheduled_sessions",
+        "schedule": env.float("SCHEDULED_SESSIONS_INTERVAL_SECONDS", default=24 * 60 * 60),
+    },
+}

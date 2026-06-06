@@ -39,6 +39,14 @@ class AuditEvent(UUIDTimestampedModel):
             "analysis_stored",
             "Repository analysis stored",
         )
+        SESSION_TRIGGER_ENQUEUED = (
+            "session_trigger_enqueued",
+            "Session trigger enqueued",
+        )
+        SESSION_TRIGGER_FAILED = (
+            "session_trigger_failed",
+            "Session trigger failed",
+        )
 
     actor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
