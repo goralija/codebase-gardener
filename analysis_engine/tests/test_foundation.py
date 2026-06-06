@@ -1,10 +1,9 @@
 from gardener_analysis import foundation_status
 
 
-def test_foundation_status_marks_repowise_as_reserved():
+def test_foundation_status_marks_indexed_fixture_wrapper_ready():
     assert foundation_status() == {
         "package": "gardener_analysis",
         "status": "ready",
-        "repowise": "reserved_for_lane_b",
+        "repowise": "indexed_fixture_wrapper_ready",
     }
-

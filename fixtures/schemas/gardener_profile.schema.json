@@ -10,10 +10,32 @@
     "accepted_categories": { "type": "array", "items": { "type": "string" } },
     "rejected_categories": { "type": "array", "items": { "type": "string" } },
     "reverted_categories": { "type": "array", "items": { "type": "string" } },
-    "learned_protected_patterns": { "type": "array" },
+    "learned_protected_patterns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["pattern", "reason"],
+        "properties": {
+          "pattern": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
     "review_preferences": { "type": "array", "items": { "type": "string" } },
-    "updated_from_pr_outcomes": { "type": "array" }
+    "updated_from_pr_outcomes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["maintenance_pr_id", "outcome", "category"],
+        "properties": {
+          "maintenance_pr_id": { "type": "string" },
+          "outcome": { "type": "string" },
+          "category": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
   },
   "additionalProperties": false
 }
-

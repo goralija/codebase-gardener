@@ -53,6 +53,38 @@ def test_first_report_fixture_contract_validation_rejects_nested_drift():
         validate_first_report_fixture_contract(payload)
 
 
+def test_first_report_fixture_contract_rejects_protected_module_drift():
+    payload = load_first_report_fixture()
+    payload["repository_constitution"]["protected_modules"][0].pop("paths")
+
+    with pytest.raises(ImproperlyConfigured):
+        validate_first_report_fixture_contract(payload)
+
+
+def test_first_report_fixture_contract_rejects_entropy_component_drift():
+    payload = load_first_report_fixture()
+    payload["entropy_report"]["score"]["components"].pop("testing")
+
+    with pytest.raises(ImproperlyConfigured):
+        validate_first_report_fixture_contract(payload)
+
+
+def test_first_report_fixture_contract_rejects_phase_result_drift():
+    payload = load_first_report_fixture()
+    payload["gardening_session_result"]["phase_results"][0].pop("summary")
+
+    with pytest.raises(ImproperlyConfigured):
+        validate_first_report_fixture_contract(payload)
+
+
+def test_first_report_fixture_contract_rejects_pr_body_section_drift():
+    payload = load_first_report_fixture()
+    payload["maintenance_pr_plans"][0]["pr_body_sections"].pop("verification")
+
+    with pytest.raises(ImproperlyConfigured):
+        validate_first_report_fixture_contract(payload)
+
+
 def test_first_report_endpoint_treats_invalid_fixture_as_server_error(monkeypatch):
     def load_invalid_fixture():
         raise ImproperlyConfigured("bad fixture")
