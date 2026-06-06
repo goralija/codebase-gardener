@@ -7,7 +7,10 @@ from referencing import Registry, Resource
 
 from apps.analysis.fixtures import load_first_report_fixture
 from apps.accounts.models import CustomerOrganization
+from apps.github_app.client import GitHubAPIError
 from apps.github_app.models import GitHubInstallation
+from apps.maintenance_prs.executor import PlanNotExecutableError
+from apps.maintenance_prs.models import MaintenancePRPlan
 from apps.repositories.models import ManagedRepository
 from apps.sessions.models import GardeningSession
 from apps.sessions.tasks import RetryableSessionError, run_gardening_session
@@ -174,6 +177,204 @@ def test_run_gardening_session_marks_failed_after_retry_exhaustion(settings):
         {"phase": "observe", "message": "Simulated retryable session error."}
     ]
     assert_gardening_session_result_contract(session.result)
+
+
+@pytest.mark.django_db
+def test_run_gardening_session_retries_github_execute_errors(settings, monkeypatch):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = False
+    session = GardeningSession.objects.create(
+        repository=create_repository(1),
+        trigger={"type": "manual"},
+    )
+
+    def fail_github(_session):
+        raise GitHubAPIError("rate limited", status_code=429)
+
+    monkeypatch.setattr("apps.sessions.tasks.execute_session_pr_plans", fail_github)
+
+    result = run_gardening_session.apply(args=[str(session.id)], throw=False)
+
+    session.refresh_from_db()
+    assert result.failed()
+    assert isinstance(result.result, GitHubAPIError)
+    assert session.status == GardeningSession.Status.FAILED
+    assert session.retry_count == 3
+    assert session.last_error == "rate limited"
+    assert session.result["phase_results"][-1] == {
+        "phase": "execute",
+        "status": "failed",
+        "summary": "rate limited",
+    }
+    assert session.result["errors"] == [{"phase": "execute", "message": "rate limited"}]
+    assert_gardening_session_result_contract(session.result)
+
+
+@pytest.mark.django_db
+def test_run_gardening_session_marks_non_retryable_github_error_failed(settings, monkeypatch):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = False
+    session = GardeningSession.objects.create(
+        repository=create_repository(1),
+        trigger={"type": "manual"},
+    )
+
+    def fail_github(_session):
+        raise GitHubAPIError("bad request", status_code=422)
+
+    monkeypatch.setattr("apps.sessions.tasks.execute_session_pr_plans", fail_github)
+
+    result = run_gardening_session.apply(args=[str(session.id)], throw=False)
+
+    session.refresh_from_db()
+    assert result.failed()
+    assert isinstance(result.result, GitHubAPIError)
+    assert session.status == GardeningSession.Status.FAILED
+    assert session.retry_count == 0
+    assert session.last_error == "bad request"
+    assert session.result["errors"] == [{"phase": "execute", "message": "bad request"}]
+    assert_gardening_session_result_contract(session.result)
+
+
+@pytest.mark.django_db
+def test_run_gardening_session_reports_pr_policy_failure_and_continues(settings, monkeypatch):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = False
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "manual"},
+    )
+    MaintenancePRPlan.objects.create(
+        repository=repository,
+        gardening_session_id=str(session.id),
+        branch_name="gardener/docs-refresh",
+        title="Refresh docs",
+        risk_tier="tier_1_autonomous",
+        confidence=0.94,
+        approval_status=MaintenancePRPlan.ApprovalStatus.APPROVED,
+    )
+    second = MaintenancePRPlan.objects.create(
+        repository=repository,
+        gardening_session_id=str(session.id),
+        branch_name="gardener/docs-other",
+        title="Refresh other docs",
+        risk_tier="tier_1_autonomous",
+        confidence=0.94,
+        approval_status=MaintenancePRPlan.ApprovalStatus.APPROVED,
+    )
+
+    def execute_or_fail(plan):
+        if plan.branch_name == "gardener/docs-refresh":
+            raise PlanNotExecutableError("Plan became unsafe.")
+
+    monkeypatch.setattr("apps.maintenance_prs.executor.execute_maintenance_pr_plan", execute_or_fail)
+
+    result = run_gardening_session.apply(args=[str(session.id)], throw=False)
+
+    session.refresh_from_db()
+    assert result.successful()
+    assert session.status == GardeningSession.Status.COMPLETED
+    assert session.last_error == ""
+    assert session.result["maintenance_pr_plans"] == [str(second.id)]
+    assert session.result["errors"] == [
+        {
+            "phase": "execute",
+            "maintenance_pr_plan_id": str(
+                MaintenancePRPlan.objects.get(branch_name="gardener/docs-refresh").id
+            ),
+            "message": "Plan became unsafe.",
+        }
+    ]
+    assert_gardening_session_result_contract(session.result)
+
+
+@pytest.mark.django_db
+def test_run_gardening_session_reports_permanent_github_plan_failure_and_continues(
+    settings,
+    monkeypatch,
+):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = False
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "manual"},
+    )
+    failed = MaintenancePRPlan.objects.create(
+        repository=repository,
+        gardening_session_id=str(session.id),
+        branch_name="gardener/docs-refresh",
+        title="Refresh docs",
+        risk_tier="tier_1_autonomous",
+        confidence=0.94,
+        approval_status=MaintenancePRPlan.ApprovalStatus.APPROVED,
+    )
+    succeeded = MaintenancePRPlan.objects.create(
+        repository=repository,
+        gardening_session_id=str(session.id),
+        branch_name="gardener/docs-other",
+        title="Refresh other docs",
+        risk_tier="tier_1_autonomous",
+        confidence=0.94,
+        approval_status=MaintenancePRPlan.ApprovalStatus.APPROVED,
+    )
+
+    def execute_or_fail(plan):
+        if plan.id == failed.id:
+            raise GitHubAPIError("bad request", status_code=422)
+
+    monkeypatch.setattr("apps.maintenance_prs.executor.execute_maintenance_pr_plan", execute_or_fail)
+
+    result = run_gardening_session.apply(args=[str(session.id)], throw=False)
+
+    session.refresh_from_db()
+    assert result.successful()
+    assert session.status == GardeningSession.Status.COMPLETED
+    assert session.last_error == ""
+    assert session.result["maintenance_pr_plans"] == [str(succeeded.id)]
+    assert session.result["errors"] == [
+        {
+            "phase": "execute",
+            "maintenance_pr_plan_id": str(failed.id),
+            "message": "bad request",
+        }
+    ]
+    assert_gardening_session_result_contract(session.result)
+
+
+@pytest.mark.django_db
+def test_run_gardening_session_retries_retryable_github_plan_failure(settings, monkeypatch):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = False
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "manual"},
+    )
+    MaintenancePRPlan.objects.create(
+        repository=repository,
+        gardening_session_id=str(session.id),
+        branch_name="gardener/docs-refresh",
+        title="Refresh docs",
+        risk_tier="tier_1_autonomous",
+        confidence=0.94,
+        approval_status=MaintenancePRPlan.ApprovalStatus.APPROVED,
+    )
+
+    def fail_retryable(_plan):
+        raise GitHubAPIError("rate limited", status_code=429)
+
+    monkeypatch.setattr("apps.maintenance_prs.executor.execute_maintenance_pr_plan", fail_retryable)
+
+    result = run_gardening_session.apply(args=[str(session.id)], throw=False)
+
+    session.refresh_from_db()
+    assert result.failed()
+    assert isinstance(result.result, GitHubAPIError)
+    assert session.status == GardeningSession.Status.FAILED
+    assert session.retry_count == 3
+    assert session.last_error == "rate limited"
 
 
 @pytest.mark.django_db

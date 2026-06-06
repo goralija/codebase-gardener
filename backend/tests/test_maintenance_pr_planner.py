@@ -1,4 +1,5 @@
 import copy
+from pathlib import Path
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -61,6 +62,22 @@ def test_planner_persists_grouped_contract_shaped_pr_plan():
     assert "Categories checked against constitution allowed fixes: docs" in contract["pr_body_sections"]["evidence"]
 
 
+def test_maintenance_pr_plan_contract_accepts_legacy_threshold_omission():
+    contract = _load_json(
+        Path(__file__).resolve().parents[2]
+        / "fixtures"
+        / "contracts"
+        / "maintenance_pr_plan.json"
+    )
+    contract.pop("confidence_threshold")
+    validator = Draft202012Validator(
+        _load_json(_schema_path("maintenance_pr_plan.schema.json")),
+        registry=_schema_registry(),
+    )
+
+    assert not list(validator.iter_errors(contract))
+
+
 @pytest.mark.django_db
 def test_planner_keeps_groups_focused_by_size_category_and_path_conflict():
     repository = demo_repository()
@@ -119,6 +136,50 @@ def test_planner_blocks_low_confidence_protected_and_assisted_work():
     assert reasons["opp_protected"].startswith("Path backend/apps/billing/models.py matches protected module")
     assert reasons["opp_assisted"] == "Opportunity category requires assisted draft PR handling."
     assert all(plan.blocked for plan in plans)
+
+
+@pytest.mark.django_db
+def test_planner_persists_stricter_confidence_threshold_from_constitution():
+    repository = demo_repository()
+    strict_constitution = constitution()
+    strict_constitution["risk_policies"] = {"confidence_threshold": 0.95}
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_strict_threshold",
+        opportunities=[opportunity("opp_docs", "Refresh docs", ["docs/a.md"], confidence=0.94)],
+        constitution=strict_constitution,
+    )
+
+    assert plans[0].blocked
+    assert plans[0].confidence_threshold == 0.95
+    assert plans[0].block_reason == "Confidence below 0.95 PR creation threshold."
+
+
+@pytest.mark.django_db
+def test_planner_persists_dead_code_confidence_threshold():
+    repository = demo_repository()
+    dead_code_constitution = constitution()
+    dead_code_constitution["allowed_fixes"]["autonomous"].append("dead_code")
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_dead_code",
+        opportunities=[
+            opportunity(
+                "opp_dead_code",
+                "Remove dead code",
+                ["src/unused.py"],
+                category="dead_code",
+                confidence=0.94,
+            )
+        ],
+        constitution=dead_code_constitution,
+    )
+
+    assert plans[0].blocked
+    assert plans[0].confidence_threshold == 0.95
+    assert plans[0].block_reason == "Dead-code removal requires confidence >= 0.95."
 
 
 @pytest.mark.django_db

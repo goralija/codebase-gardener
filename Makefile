@@ -3,18 +3,31 @@
 
 PYTHON_VERSION ?= 3.12
 DOCKER ?= docker
+COMPOSE ?= $(shell if $(DOCKER) compose version >/dev/null 2>&1; then printf '$(DOCKER) compose'; fi)
+PNPM ?= corepack pnpm
 VITE_API_BASE_URL ?= http://localhost:8000/api/v1
 
 setup:
 	uv sync --python $(PYTHON_VERSION) --all-packages --all-groups
-	pnpm install
-	pnpm --dir frontend exec playwright install chromium
+	$(PNPM) install
+	$(PNPM) --dir frontend exec playwright install chromium
 
 services:
-	$(DOCKER) compose up -d --wait postgres redis
+	@if [ -n "$(COMPOSE)" ]; then \
+		$(COMPOSE) up -d --wait postgres redis; \
+	else \
+		DOCKER="$(DOCKER)" scripts/start_services_with_docker.sh; \
+	fi
 
 services-check:
-	$(DOCKER) compose config --quiet
+	@if [ -n "$(COMPOSE)" ]; then \
+		$(COMPOSE) config --quiet; \
+	else \
+		$(DOCKER) info >/dev/null 2>&1 || { \
+			echo "Docker daemon is not reachable. Start Docker or run with a Docker command that has socket access."; \
+			exit 1; \
+		}; \
+	fi
 
 runtime-check: services backend-migrate backend-check
 
@@ -28,7 +41,7 @@ worker-dev:
 	cd backend && uv run celery -A config worker -l INFO
 
 frontend-dev:
-	VITE_API_BASE_URL=$(VITE_API_BASE_URL) pnpm --dir frontend dev --host 0.0.0.0
+	VITE_API_BASE_URL=$(VITE_API_BASE_URL) $(PNPM) --dir frontend dev --host 0.0.0.0
 
 check: services-check fixtures-validate docs-skills-validate backend-check backend-test analysis-test frontend-lint frontend-test frontend-build frontend-e2e
 
@@ -51,13 +64,13 @@ docs-skills-validate:
 	uv run python scripts/validate_docs_and_skills.py
 
 frontend-test:
-	pnpm --dir frontend test:run
+	$(PNPM) --dir frontend test:run
 
 frontend-lint:
-	pnpm --dir frontend lint
+	$(PNPM) --dir frontend lint
 
 frontend-build:
-	pnpm --dir frontend build
+	$(PNPM) --dir frontend build
 
 frontend-e2e:
-	pnpm --dir frontend exec playwright test
+	$(PNPM) --dir frontend exec playwright test

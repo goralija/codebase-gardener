@@ -15,8 +15,19 @@
     "opportunities_selected": { "type": "array", "items": { "type": "string" } },
     "opportunities_deferred": { "type": "array" },
     "maintenance_pr_plans": { "type": "array", "items": { "type": "string" } },
-    "errors": { "type": "array" }
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["phase", "message"],
+        "properties": {
+          "phase": { "type": "string" },
+          "message": { "type": "string" },
+          "maintenance_pr_plan_id": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
   },
   "additionalProperties": false
 }
-

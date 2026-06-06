@@ -16,7 +16,7 @@ PHASES = (
     ("diagnose", "Diagnosed fixture entropy contributors and opportunities."),
     ("forecast", "Loaded fixture entropy forecast."),
     ("plan", "Selected fixture opportunities and deferred blocked work."),
-    ("execute", "Referenced fixture maintenance PR plans without GitHub writes."),
+    ("execute", "Executed approved maintenance PR plans through GitHub."),
     ("learn", "Recorded fixture learning inputs for later outcome handling."),
 )
 
@@ -32,11 +32,15 @@ def build_gardening_session_result(
     *,
     started_at: datetime,
     finished_at: datetime | None = None,
+    executed_plan_ids: list[str] | None = None,
+    execution_errors: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     finished_at = finished_at or timezone.now()
     fixture = load_first_report_fixture()
     repository_id = _repository_id(fixture)
     selected, deferred, plan_ids = _select_fixture_work(fixture)
+    if executed_plan_ids is not None:
+        plan_ids = executed_plan_ids
     phase_results = _phase_results()
 
     fail_phase = _failure_phase(session)
@@ -51,6 +55,7 @@ def build_gardening_session_result(
         )
         raise SessionLifecycleError(fail_phase, result["errors"][0]["message"])
 
+    errors = execution_errors or []
     return {
         "schema_version": "1.0",
         "gardening_session_id": str(session.id),
@@ -63,7 +68,7 @@ def build_gardening_session_result(
         "opportunities_selected": selected,
         "opportunities_deferred": deferred,
         "maintenance_pr_plans": plan_ids,
-        "errors": [],
+        "errors": errors,
     }
 
 
@@ -191,6 +196,53 @@ def _failure_repository_id(session: GardeningSession) -> str:
         return _repository_id(load_first_report_fixture())
     except Exception:
         return str(session.repository_id)
+
+
+def execute_session_pr_plans(
+    session: GardeningSession,
+) -> tuple[list[str] | None, list[dict[str, str]]]:
+    """Execute approved PR plans persisted for this session.
+
+    Returns executed plan IDs and per-plan policy errors. A ``None`` plan list
+    means pure fixture mode where no DB plans exist for the session.
+    """
+    from apps.github_app.client import RETRYABLE_STATUS_CODES, GitHubAPIError
+    from apps.maintenance_prs.executor import PRExecutionError, execute_maintenance_pr_plan
+    from apps.maintenance_prs.models import MaintenancePRPlan
+
+    plans = list(
+        MaintenancePRPlan.objects.for_session(str(session.id)).executable()
+    )
+    if not plans:
+        return None, []
+
+    executed: list[str] = []
+    errors: list[dict[str, str]] = []
+    for plan in plans:
+        try:
+            execute_maintenance_pr_plan(plan)
+        except GitHubAPIError as exc:
+            if exc.status_code in RETRYABLE_STATUS_CODES:
+                raise
+            errors.append(
+                {
+                    "phase": "execute",
+                    "maintenance_pr_plan_id": str(plan.id),
+                    "message": str(exc),
+                }
+            )
+            continue
+        except PRExecutionError as exc:
+            errors.append(
+                {
+                    "phase": "execute",
+                    "maintenance_pr_plan_id": str(plan.id),
+                    "message": str(exc),
+                }
+            )
+            continue
+        executed.append(str(plan.id))
+    return executed, errors
 
 
 def _format_timestamp(value: datetime) -> str:

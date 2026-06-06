@@ -27,6 +27,14 @@ class AuditEvent(UUIDTimestampedModel):
             "managed_repository_unselected",
             "Managed repository unselected",
         )
+        MAINTENANCE_PR_CREATED = (
+            "maintenance_pr_created",
+            "Maintenance PR created",
+        )
+        MAINTENANCE_PR_CREATION_FAILED = (
+            "maintenance_pr_creation_failed",
+            "Maintenance PR creation failed",
+        )
 
     actor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
