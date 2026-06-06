@@ -71,6 +71,33 @@ uv --project RepoWise run repowise init . --index-only --mode fast --yes --no-ag
 uv --project RepoWise run repowise health . --format json
 ```
 
+To test Repowise against an E03 fixture repository, copy the fixture into a temporary Git repository first. This keeps generated `.repowise/` data out of the tracked fixture tree:
+
+```bash
+PROJECT=/Users/bloomteq/codebase-gardener
+FIXTURE=normal_repo
+tmpdir=$(mktemp -d /tmp/gardener-fixture-${FIXTURE}.XXXXXX)
+
+cp -R "$PROJECT/fixtures/repos/$FIXTURE/." "$tmpdir"
+
+git -C "$tmpdir" init
+git -C "$tmpdir" add .
+git -C "$tmpdir" -c user.name="Fixture Test" -c user.email="fixture@example.com" commit -m "Initial fixture repo"
+
+uv --project "$PROJECT/RepoWise" run repowise init "$tmpdir" \
+  --index-only \
+  --mode fast \
+  --yes \
+  --no-agents \
+  --no-codex \
+  --no-claude-md \
+  --no-distill-hook
+
+uv --project "$PROJECT/RepoWise" run repowise status "$tmpdir" --no-workspace
+```
+
+Set `FIXTURE` to `normal_repo`, `monorepo_repo`, `missing_docs_repo`, `conflicting_docs_repo`, or `protected_modules_repo`.
+
 To inspect Repowise's own local dashboard:
 
 ```bash
