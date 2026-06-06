@@ -58,10 +58,18 @@ _CATEGORY_GUIDANCE = {
 # Reject whole-file rewrites: fraction of lines allowed to change (except tests).
 _MAX_CHANGE_RATIO = 0.6
 
-# Largest file we send for AI editing (chars). Edit blocks keep the OUTPUT small
-# regardless of size; this bounds the INPUT so it fits the model context. Files
-# beyond this are skipped cleanly (would need chunking).
-_MAX_FILE_CHARS = 200_000
+# Files at/under this size are edited in a single pass with full context.
+_SINGLE_PASS_CHARS = 40_000
+
+# Larger files are read in chunks of this size (the whole file is covered across
+# passes); edits from every chunk are collected and applied to the full file.
+_CHUNK_CHARS = 32_000
+
+# Safety bound on passes per file so a pathological file can't run unbounded.
+_MAX_CHUNKS = 40
+
+# Absolute ceiling; beyond this even chunking is refused (chars).
+_MAX_FILE_CHARS = _CHUNK_CHARS * _MAX_CHUNKS
 
 # Upper bound on requested completion tokens. Edit blocks are small, so this is
 # headroom, not sized to the file.
@@ -97,32 +105,99 @@ def apply_ai_fix(
     """Return the LLM-edited file content, validated. Raises AIFixError on failure.
 
     Uses SEARCH/REPLACE edit blocks: the model returns only the changed regions,
-    so output stays small and the approach scales to large files. Falls back to a
-    whole-file fenced block if the model returns one instead.
+    so output stays small. Files larger than a single context window are read in
+    chunks that together cover the whole file; edit blocks from every chunk are
+    collected and applied to the full content.
     """
+    opportunity = opportunity or {}
     if len(content) > _MAX_FILE_CHARS:
         raise AIFixError(
-            f"{path} is too large ({len(content)} chars) for AI editing; skipped."
+            f"{path} is too large ({len(content)} chars) even for chunked AI editing."
         )
 
-    prompt = _build_prompt(path, content, plan, opportunity or {})
-    try:
-        raw = complete(prompt, system=_SYSTEM_PROMPT, max_tokens=_MODEL_OUTPUT_TOKEN_CAP)
-    except LLMError as exc:
-        raise AIFixError(f"LLM fix failed for {path}: {exc}") from exc
-
-    blocks = _parse_edit_blocks(raw)
-    if blocks:
-        updated = _apply_edit_blocks(path, content, blocks)
+    if len(content) <= _SINGLE_PASS_CHARS:
+        chunks = [content]
     else:
-        # Fallback: model returned the whole file in a fenced block.
-        fenced = _FENCE_RE.search(raw)
-        if not fenced:
-            raise AIFixError(f"AI fix for {path} returned no edit blocks or file.")
-        updated = fenced.group(1).strip("\n") + "\n"
+        chunks = _chunk_content(path, content)
+
+    blocks: list[tuple[str, str]] = []
+    whole_file_fallback: str | None = None
+    for index, chunk in enumerate(chunks):
+        prompt = _build_prompt(
+            path, chunk, plan, opportunity, part=(index + 1, len(chunks))
+        )
+        try:
+            raw = complete(
+                prompt, system=_SYSTEM_PROMPT, max_tokens=_MODEL_OUTPUT_TOKEN_CAP
+            )
+        except LLMError as exc:
+            raise AIFixError(f"LLM fix failed for {path}: {exc}") from exc
+
+        chunk_blocks = _parse_edit_blocks(raw)
+        if chunk_blocks:
+            blocks.extend(chunk_blocks)
+        elif len(chunks) == 1:
+            # Single-pass fallback: model returned the whole file in a fence.
+            fenced = _FENCE_RE.search(raw)
+            if fenced:
+                whole_file_fallback = fenced.group(1).strip("\n") + "\n"
+
+    if blocks:
+        blocks = list(dict.fromkeys(blocks))  # dedupe identical edits across chunks
+        updated = _apply_edit_blocks(path, content, blocks)
+    elif whole_file_fallback is not None:
+        updated = whole_file_fallback
+    else:
+        raise AIFixError(f"AI fix for {path} produced no applicable edits.")
 
     _validate(path, content, updated, plan.category)
     return updated
+
+
+def _chunk_content(path: str, content: str) -> list[str]:
+    """Split content into context-sized chunks that together cover the whole file.
+
+    For Python, prefer splitting on top-level definition boundaries so each chunk
+    is coherent; otherwise fall back to line windows. Chunk count is capped.
+    """
+    boundaries = _python_top_level_line_starts(content) if path.endswith(".py") else None
+    lines = content.split("\n")
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+
+    def flush():
+        nonlocal current, size
+        if current:
+            chunks.append("\n".join(current))
+            current = []
+            size = 0
+
+    for lineno, line in enumerate(lines, start=1):
+        at_boundary = boundaries is not None and lineno in boundaries
+        if size + len(line) + 1 > _CHUNK_CHARS and current and (
+            boundaries is None or at_boundary
+        ):
+            flush()
+        current.append(line)
+        size += len(line) + 1
+    flush()
+
+    if len(chunks) > _MAX_CHUNKS:
+        raise AIFixError(
+            f"{path} needs {len(chunks)} chunks (> {_MAX_CHUNKS}); refused."
+        )
+    return chunks
+
+
+def _python_top_level_line_starts(content: str) -> set[int] | None:
+    try:
+        import ast
+
+        tree = ast.parse(content)
+    except SyntaxError:
+        return None
+    return {node.lineno for node in tree.body if hasattr(node, "lineno")}
 
 
 _SYSTEM_PROMPT = (
@@ -135,7 +210,13 @@ _SYSTEM_PROMPT = (
 )
 
 
-def _build_prompt(path: str, content: str, plan: MaintenancePRPlan, opportunity: dict) -> str:
+def _build_prompt(
+    path: str,
+    content: str,
+    plan: MaintenancePRPlan,
+    opportunity: dict,
+    part: tuple[int, int] = (1, 1),
+) -> str:
     guidance = _CATEGORY_GUIDANCE.get(plan.category, "Apply the smallest safe fix for the finding.")
     summary = opportunity.get("summary") or plan.title
     evidence = opportunity.get("evidence") or []
@@ -144,14 +225,26 @@ def _build_prompt(path: str, content: str, plan: MaintenancePRPlan, opportunity:
         for e in evidence
         if isinstance(e, dict)
     ) or "- (no extra evidence)"
+    index, total = part
+    if total > 1:
+        scope = (
+            f"This is part {index} of {total} of a large file. Only propose edits "
+            "for code shown in THIS part; SEARCH text must be copied from it. If "
+            "nothing here needs changing, return no blocks.\n"
+        )
+        label = f"File part {index}/{total}"
+    else:
+        scope = ""
+        label = "Current file content"
     return (
         f"Category: {plan.category}\n"
         f"File: {path}\n"
         f"Finding: {summary}\n"
         f"Evidence:\n{evidence_lines}\n\n"
         f"Instruction: {guidance}\n"
+        f"{scope}"
         "Respond with SEARCH/REPLACE edit blocks only; do not return the whole file.\n\n"
-        f"Current file content:\n```\n{content}\n```"
+        f"{label}:\n```\n{content}\n```"
     )
 
 

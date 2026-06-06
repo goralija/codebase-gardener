@@ -45,6 +45,31 @@ def test_apply_ai_fix_applies_search_replace_block(monkeypatch):
     assert "def used()" in result
 
 
+def test_apply_ai_fix_chunks_large_file_and_applies_edits(monkeypatch):
+    from apps.maintenance_prs import ai_fixes
+
+    # Build a >40k-char file so it is processed in multiple chunks.
+    kept = "".join(f"def used_{i}():\n    return {i}\n\n\n" for i in range(4000))
+    big = kept + "def dead():\n    return 0\n"
+    assert len(big) > 40_000
+
+    calls = {"n": 0}
+
+    def fake_complete(*a, **k):
+        calls["n"] += 1
+        return (
+            "<<<<<<< SEARCH\ndef dead():\n    return 0\n=======\n>>>>>>> REPLACE\n"
+        )
+
+    monkeypatch.setattr(ai_fixes, "complete", fake_complete)
+
+    result = apply_ai_fix("core/big.py", big, _Plan(changed_paths=["core/big.py"]), {})
+
+    assert calls["n"] > 1          # multiple chunk passes
+    assert "def dead()" not in result
+    assert "def used_0()" in result
+
+
 def test_apply_ai_fix_rejects_unmatched_search_block(monkeypatch):
     block = (
         "<<<<<<< SEARCH\n"
