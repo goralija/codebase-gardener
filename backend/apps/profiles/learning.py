@@ -141,6 +141,13 @@ def record_pr_outcome(
                 AuditEvent.EventType.GARDENER_PROFILE_UPDATED,
                 {"outcome": outcome, "category": category, "fields": sorted(signal_fields)},
             )
+            # Propose the updated profile to .gardener/profile.yaml (E04-T08).
+            # Enqueued on commit so the GitHub work runs outside this txn and
+            # only fires once the profile change is durably persisted.
+            repository_id = str(plan.repository_id)
+            transaction.on_commit(
+                lambda: _enqueue_profile_sync(repository_id)
+            )
 
     return OutcomeResult(
         recorded=True,
@@ -167,6 +174,14 @@ def _persist_plan_outcome_state(
             merge_commit_sha=merge_commit_sha
         )
         plan.merge_commit_sha = merge_commit_sha
+
+
+def _enqueue_profile_sync(repository_id: str) -> None:
+    # Local import avoids importing the Celery task (and its GitHub/executor
+    # dependencies) at module load time.
+    from apps.profiles.tasks import sync_profile_pr
+
+    sync_profile_pr.delay(repository_id)
 
 
 def _already_recorded(profile: GardenerProfile, plan_id: str, outcome: str) -> bool:

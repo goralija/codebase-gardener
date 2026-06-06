@@ -248,6 +248,7 @@ dependencies = [
     { name = "jsonschema" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pyjwt", extra = ["crypto"] },
+    { name = "pyyaml" },
     { name = "redis" },
     { name = "referencing" },
 ]
@@ -271,6 +272,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.25.1,<5" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<3.3" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10,<3" },
+    { name = "pyyaml", specifier = ">=6,<7" },
     { name = "redis", specifier = ">=6,<7" },
     { name = "referencing", specifier = ">=0.37,<0.38" },
 ]
