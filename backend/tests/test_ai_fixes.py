@@ -46,10 +46,17 @@ def test_apply_ai_fix_applies_search_replace_block(monkeypatch):
 
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 def test_apply_ai_fix_chunks_large_file_and_applies_edits(monkeypatch):
     from apps.maintenance_prs import ai_fixes
 
     # Build a >40k-char file so it is processed in multiple chunk passes.
+=======
+def test_apply_ai_fix_chunks_large_file_and_applies_edits(monkeypatch):
+    from apps.maintenance_prs import ai_fixes
+
+    # Build a >40k-char file so it is processed in multiple chunks.
+>>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
     kept = "".join(f"def used_{i}():\n    return {i}\n\n\n" for i in range(4000))
     big = kept + "def dead():\n    return 0\n"
     assert len(big) > 40_000
@@ -62,18 +69,28 @@ def test_apply_ai_fix_chunks_large_file_and_applies_edits(monkeypatch):
             "<<<<<<< SEARCH\ndef dead():\n    return 0\n=======\n>>>>>>> REPLACE\n"
         )
 
+<<<<<<< HEAD
     monkeypatch.setenv("GARDENER_AI_FIX_CHUNK_WORKERS", "4")
+=======
+>>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
     monkeypatch.setattr(ai_fixes, "complete", fake_complete)
 
     result = apply_ai_fix("core/big.py", big, _Plan(changed_paths=["core/big.py"]), {})
 
+<<<<<<< HEAD
     assert calls["n"] > 1
+=======
+    assert calls["n"] > 1          # multiple chunk passes
+>>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
     assert "def dead()" not in result
     assert "def used_0()" in result
 
 
+<<<<<<< HEAD
 =======
 >>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
+=======
+>>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
 def test_apply_ai_fix_rejects_unmatched_search_block(monkeypatch):
     block = (
         "<<<<<<< SEARCH\n"

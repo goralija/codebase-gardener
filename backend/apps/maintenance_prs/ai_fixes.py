@@ -77,6 +77,7 @@ _CATEGORY_GUIDANCE = {
 _MAX_CHANGE_RATIO = 0.6
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Files at/under this size are edited in a single pass with full context.
 _SINGLE_PASS_CHARS = 40_000
 
@@ -92,6 +93,20 @@ _DEFAULT_CHUNK_WORKERS = 8
 # regardless of size; this bounds the INPUT so it fits the model context. Files
 # beyond this are skipped cleanly (would need chunking).
 _MAX_FILE_CHARS = 200_000
+=======
+# Files at/under this size are edited in a single pass with full context.
+_SINGLE_PASS_CHARS = 40_000
+
+# Larger files are read in chunks of this size (the whole file is covered across
+# passes); edits from every chunk are collected and applied to the full file.
+_CHUNK_CHARS = 32_000
+
+# Safety bound on passes per file so a pathological file can't run unbounded.
+_MAX_CHUNKS = 40
+
+# Absolute ceiling; beyond this even chunking is refused (chars).
+_MAX_FILE_CHARS = _CHUNK_CHARS * _MAX_CHUNKS
+>>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
 
 >>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
 # Upper bound on requested completion tokens. Edit blocks are small, so this is
@@ -129,6 +144,7 @@ def apply_ai_fix(
     """Return the LLM-edited file content, validated. Raises AIFixError on failure.
 
     Uses SEARCH/REPLACE edit blocks: the model returns only the changed regions,
+<<<<<<< HEAD
 <<<<<<< HEAD
     so output stays small. Files larger than a single safe context window are
     split into chunks and analyzed concurrently; the merged result is still
@@ -173,27 +189,52 @@ def apply_ai_fix(
 =======
     so output stays small and the approach scales to large files. Falls back to a
     whole-file fenced block if the model returns one instead.
+=======
+    so output stays small. Files larger than a single context window are read in
+    chunks that together cover the whole file; edit blocks from every chunk are
+    collected and applied to the full content.
+>>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
     """
+    opportunity = opportunity or {}
     if len(content) > _MAX_FILE_CHARS:
         raise AIFixError(
-            f"{path} is too large ({len(content)} chars) for AI editing; skipped."
+            f"{path} is too large ({len(content)} chars) even for chunked AI editing."
         )
 
-    prompt = _build_prompt(path, content, plan, opportunity or {})
-    try:
-        raw = complete(prompt, system=_SYSTEM_PROMPT, max_tokens=_MODEL_OUTPUT_TOKEN_CAP)
-    except LLMError as exc:
-        raise AIFixError(f"LLM fix failed for {path}: {exc}") from exc
-
-    blocks = _parse_edit_blocks(raw)
-    if blocks:
-        updated = _apply_edit_blocks(path, content, blocks)
+    if len(content) <= _SINGLE_PASS_CHARS:
+        chunks = [content]
     else:
-        # Fallback: model returned the whole file in a fenced block.
-        fenced = _FENCE_RE.search(raw)
-        if not fenced:
-            raise AIFixError(f"AI fix for {path} returned no edit blocks or file.")
-        updated = fenced.group(1).strip("\n") + "\n"
+        chunks = _chunk_content(path, content)
+
+    blocks: list[tuple[str, str]] = []
+    whole_file_fallback: str | None = None
+    for index, chunk in enumerate(chunks):
+        prompt = _build_prompt(
+            path, chunk, plan, opportunity, part=(index + 1, len(chunks))
+        )
+        try:
+            raw = complete(
+                prompt, system=_SYSTEM_PROMPT, max_tokens=_MODEL_OUTPUT_TOKEN_CAP
+            )
+        except LLMError as exc:
+            raise AIFixError(f"LLM fix failed for {path}: {exc}") from exc
+
+        chunk_blocks = _parse_edit_blocks(raw)
+        if chunk_blocks:
+            blocks.extend(chunk_blocks)
+        elif len(chunks) == 1:
+            # Single-pass fallback: model returned the whole file in a fence.
+            fenced = _FENCE_RE.search(raw)
+            if fenced:
+                whole_file_fallback = fenced.group(1).strip("\n") + "\n"
+
+    if blocks:
+        blocks = list(dict.fromkeys(blocks))  # dedupe identical edits across chunks
+        updated = _apply_edit_blocks(path, content, blocks)
+    elif whole_file_fallback is not None:
+        updated = whole_file_fallback
+    else:
+        raise AIFixError(f"AI fix for {path} produced no applicable edits.")
 
 >>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
     _validate(path, content, updated, plan.category)
@@ -201,6 +242,7 @@ def apply_ai_fix(
     return updated
 
 
+<<<<<<< HEAD
 def _complete_chunks(
     path: str,
     chunks: list[str],
@@ -271,6 +313,8 @@ def _chunk_worker_count() -> int:
     return max(1, min(value, _DEFAULT_CHUNK_WORKERS))
 
 
+=======
+>>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
 def _chunk_content(path: str, content: str) -> list[str]:
     """Split content into context-sized chunks that together cover the whole file.
 
@@ -309,6 +353,11 @@ def _chunk_content(path: str, content: str) -> list[str]:
 
 def _python_top_level_line_starts(content: str) -> set[int] | None:
     try:
+<<<<<<< HEAD
+=======
+        import ast
+
+>>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
         tree = ast.parse(content)
     except SyntaxError:
         return None
@@ -358,6 +407,7 @@ def _build_prompt(
         f"Evidence:\n{evidence_lines}\n\n"
         f"Instruction: {guidance}\n"
 <<<<<<< HEAD
+<<<<<<< HEAD
         f"{scope}"
         "Respond with SEARCH/REPLACE edit blocks only; do not return the whole file.\n\n"
         f"{label}:\n```\n{content}\n```"
@@ -365,6 +415,11 @@ def _build_prompt(
         "Respond with SEARCH/REPLACE edit blocks only; do not return the whole file.\n\n"
         f"Current file content:\n```\n{content}\n```"
 >>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
+=======
+        f"{scope}"
+        "Respond with SEARCH/REPLACE edit blocks only; do not return the whole file.\n\n"
+        f"{label}:\n```\n{content}\n```"
+>>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
     )
 
 
