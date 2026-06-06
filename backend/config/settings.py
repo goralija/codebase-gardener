@@ -61,6 +61,12 @@ OBJECT_STORAGE_SECRET_KEY = env("OBJECT_STORAGE_SECRET_KEY", default="localpass1
 OBJECT_STORAGE_BUCKET = env("OBJECT_STORAGE_BUCKET", default="gardener-analysis")
 OBJECT_STORAGE_REGION = env("OBJECT_STORAGE_REGION", default="auto")
 
+# LLM (OpenRouter) used by the AI code-fix author.
+OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="")
+OPENROUTER_BASE_URL = env("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1")
+OPENROUTER_MODEL = env("OPENROUTER_MODEL", default="deepseek/deepseek-v4-flash")
+OPENROUTER_TIMEOUT_SECONDS = env.float("OPENROUTER_TIMEOUT_SECONDS", default=120.0)
+
 # Hosted analysis worker settings.
 ANALYSIS_REPOWISE_PROJECT_DIR = env(
     "ANALYSIS_REPOWISE_PROJECT_DIR",
@@ -137,6 +143,26 @@ USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "accounts.User"
+
+# Emit Gardener app logs (analysis, AI fixes, sessions) to the console in shell,
+# worker, and server. Level via GARDENER_LOG_LEVEL (default INFO).
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "gardener": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "gardener"},
+    },
+    "loggers": {
+        "gardener": {
+            "handlers": ["console"],
+            "level": env("GARDENER_LOG_LEVEL", default="INFO"),
+            "propagate": False,
+        },
+    },
+}
 
 REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "apps.common.api.api_exception_handler",

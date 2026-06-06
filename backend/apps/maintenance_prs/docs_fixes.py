@@ -24,7 +24,9 @@ def has_docs_actual_fix(plan: MaintenancePRPlan) -> bool:
 
 
 def has_implemented_file_fix(plan: MaintenancePRPlan) -> bool:
-    return has_docs_actual_fix(plan)
+    from apps.maintenance_prs.ai_fixes import has_ai_fix
+
+    return has_docs_actual_fix(plan) or has_ai_fix(plan)
 
 
 def apply_docs_maintenance_note(content: str, plan: MaintenancePRPlan) -> str:
