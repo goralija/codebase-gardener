@@ -18,6 +18,8 @@ node_modules/
 dist/
 build/
 coverage/
+!RepoWise/**/coverage/
+!RepoWise/**/coverage/**
 playwright-report/
 test-results/
 *.tsbuildinfo

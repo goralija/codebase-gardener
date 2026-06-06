@@ -201,7 +201,7 @@ The analysis package produces source-truth, intelligence, entropy, and opportuni
 
 #### E03-T02 Wrap Repowise indexing
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane B
 - Complexity: XL
