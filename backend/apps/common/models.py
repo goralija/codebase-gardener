@@ -55,6 +55,10 @@ class AuditEvent(UUIDTimestampedModel):
             "analysis_stored",
             "Repository analysis stored",
         )
+        REPOSITORY_COMPLEXITY_UPDATED = (
+            "repository_complexity_updated",
+            "Repository complexity updated",
+        )
         SESSION_TRIGGER_ENQUEUED = (
             "session_trigger_enqueued",
             "Session trigger enqueued",

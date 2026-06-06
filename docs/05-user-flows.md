@@ -9,9 +9,10 @@
 2. User selects repositories.
 3. Gardener starts a hosted first scan.
 4. Gardener searches for source-truth files and builds a draft Repository Constitution.
-5. Gardener creates ConstitutionQuestions for missing or conflicting details.
-6. User receives a detailed entropy report with maintenance opportunities and architecture violations.
-7. Gardener opens safe initial maintenance PRs only if policy and confidence allow it.
+5. If `GARDENER.md` is missing, Gardener opens a draft PR proposing a conservative starter constitution.
+6. Gardener creates ConstitutionQuestions for missing or conflicting details.
+7. User receives a detailed entropy report with maintenance opportunities and architecture violations.
+8. Gardener opens safe initial maintenance PRs only if policy and confidence allow it.
 
 ## Answer constitution questions
 
@@ -20,6 +21,8 @@
 3. User answers or edits the proposed rule.
 4. Gardener updates `GARDENER.md` or opens a PR that updates it.
 5. Future sessions use the clarified rule.
+
+When the repository has no `GARDENER.md`, the first scan may already have opened a draft constitution PR. Merging or editing that PR is the customer approval step that lets future sessions move beyond `no_autonomy`.
 
 ## Review entropy and forecast
 

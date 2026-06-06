@@ -147,13 +147,16 @@ def build_analysis_snapshot(
         "created_at": _format_datetime(created_at),
         "logical_systems": _infer_logical_systems(index_result.repo_path),
         "signals": {
-            "dependency_cycles": _dependency_cycles(index_result.health),
+            "dependency_cycles": _dependency_cycles(
+                index_result.health,
+                index_result.knowledge_graph,
+            ),
             "hotspots": _health_hotspots(index_result.health),
             "dead_code_candidates": _dead_code_candidates(index_result.dead_code),
-            "ownership_risks": [],
+            "ownership_risks": _ownership_risks(index_result.repo_path),
             "test_gaps": _test_gaps(index_result.health),
-            "dependency_risks": [],
-            "ci_failures": [],
+            "dependency_risks": _dependency_risks(index_result.repo_path, index_result.health),
+            "ci_failures": _ci_failures(index_result.repo_path, index_result.health),
         },
         "constitution_id": constitution_id,
     }
@@ -387,7 +390,27 @@ def _evidence(path: Any, summary: str) -> list[JsonObject]:
     return [{"source_type": "file", "path": path, "summary": summary}]
 
 
-_ARCH_KEYWORDS = ("cycle", "coupling", "layer", "boundary", "dependency")
+_ARCH_KEYWORDS = ("cycle", "coupling", "layer", "boundary")
+_DEPENDENCY_KEYWORDS = (
+    "dependency",
+    "package",
+    "lockfile",
+    "outdated",
+    "advisory",
+    "vulnerability",
+    "license",
+)
+_CI_KEYWORDS = ("ci", "workflow", "check", "pipeline", "build failed", "test failed")
+_CI_TEST_COMMANDS = (
+    "pytest",
+    "python -m pytest",
+    "npm test",
+    "pnpm test",
+    "yarn test",
+    "vitest",
+    "playwright",
+    "ruff",
+)
 
 
 def _is_architectural(finding: JsonObject) -> bool:
@@ -398,7 +421,10 @@ def _is_architectural(finding: JsonObject) -> bool:
     return any(keyword in haystack for keyword in _ARCH_KEYWORDS)
 
 
-def _dependency_cycles(health: JsonObject) -> list[JsonObject]:
+def _dependency_cycles(
+    health: JsonObject,
+    knowledge_graph: JsonObject | None = None,
+) -> list[JsonObject]:
     """Architecture signals (cycles, coupling, layer/boundary violations) lifted
     from Repowise health findings into the architecture entropy bucket."""
     cycles: list[JsonObject] = []
@@ -416,7 +442,101 @@ def _dependency_cycles(health: JsonObject) -> list[JsonObject]:
                 "evidence": _evidence(finding.get("file_path"), summary),
             }
         )
+    cycles.extend(_knowledge_graph_cycles(knowledge_graph or {}))
     return cycles
+
+
+def _knowledge_graph_cycles(knowledge_graph: JsonObject) -> list[JsonObject]:
+    edges = knowledge_graph.get("edges", [])
+    if not isinstance(edges, list):
+        return []
+
+    graph: dict[str, set[str]] = {}
+    node_paths = _knowledge_graph_file_paths(knowledge_graph)
+    for edge in edges:
+        if not isinstance(edge, dict) or edge.get("type") != "imports":
+            continue
+        source = edge.get("source")
+        target = edge.get("target")
+        if not isinstance(source, str) or not isinstance(target, str):
+            continue
+        if not source.startswith("file:") or not target.startswith("file:"):
+            continue
+        graph.setdefault(source, set()).add(target)
+
+    cycles: list[JsonObject] = []
+    for component in _strongly_connected_components(graph):
+        if len(component) < 2:
+            continue
+        paths = sorted(node_paths.get(node, node.removeprefix("file:")) for node in component)
+        summary = f"Import cycle across {len(paths)} files."
+        cycles.append(
+            {
+                "kind": "import_cycle",
+                "path": paths[0],
+                "severity": "high",
+                "summary": summary,
+                "cycle_paths": paths,
+                "evidence": [_evidence(paths[0], summary)[0]],
+            }
+        )
+        if len(cycles) >= 50:
+            break
+    return cycles
+
+
+def _knowledge_graph_file_paths(knowledge_graph: JsonObject) -> dict[str, str]:
+    paths: dict[str, str] = {}
+    nodes = knowledge_graph.get("nodes", [])
+    if not isinstance(nodes, list):
+        return paths
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = node.get("id")
+        file_path = node.get("filePath")
+        if isinstance(node_id, str) and isinstance(file_path, str):
+            paths[node_id] = file_path
+    return paths
+
+
+def _strongly_connected_components(graph: dict[str, set[str]]) -> list[list[str]]:
+    index = 0
+    stack: list[str] = []
+    on_stack: set[str] = set()
+    indices: dict[str, int] = {}
+    lowlinks: dict[str, int] = {}
+    components: list[list[str]] = []
+
+    def visit(node: str) -> None:
+        nonlocal index
+        indices[node] = index
+        lowlinks[node] = index
+        index += 1
+        stack.append(node)
+        on_stack.add(node)
+
+        for neighbor in graph.get(node, set()):
+            if neighbor not in indices:
+                visit(neighbor)
+                lowlinks[node] = min(lowlinks[node], lowlinks[neighbor])
+            elif neighbor in on_stack:
+                lowlinks[node] = min(lowlinks[node], indices[neighbor])
+
+        if lowlinks[node] == indices[node]:
+            component: list[str] = []
+            while True:
+                current = stack.pop()
+                on_stack.remove(current)
+                component.append(current)
+                if current == node:
+                    break
+            components.append(component)
+
+    for node in sorted(set(graph) | {n for neighbors in graph.values() for n in neighbors}):
+        if node not in indices:
+            visit(node)
+    return components
 
 
 def _dead_code_candidates(dead_code: list[JsonObject] | JsonObject) -> list[JsonObject]:
@@ -480,6 +600,257 @@ def _test_gaps(health: JsonObject) -> list[JsonObject]:
                 }
             )
     return gaps
+
+
+_DEPENDENCY_MANIFESTS = frozenset(
+    {
+        "package.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "poetry.lock",
+        "Pipfile",
+        "go.mod",
+        "Cargo.toml",
+        "pom.xml",
+        "build.gradle",
+        "Gemfile",
+        "composer.json",
+    }
+)
+_LOCKFILES = frozenset(
+    {
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "uv.lock",
+        "poetry.lock",
+        "Pipfile.lock",
+        "requirements.txt",
+        "go.sum",
+        "Cargo.lock",
+        "Gemfile.lock",
+        "composer.lock",
+    }
+)
+
+
+def _dependency_risks(repo_path: Path, health: JsonObject) -> list[JsonObject]:
+    risks: list[JsonObject] = []
+    files = _tracked_source_paths(repo_path)
+    manifests = [
+        path
+        for path in files
+        if Path(path).name in _DEPENDENCY_MANIFESTS or Path(path).name.endswith(".csproj")
+    ]
+    lockfiles = {path for path in files if Path(path).name in _LOCKFILES}
+
+    for manifest in manifests:
+        if _manifest_has_lockfile(manifest, lockfiles):
+            continue
+        summary = f"Dependency manifest {manifest} has no nearby lockfile."
+        risks.append(
+            {
+                "kind": "dependency_manifest_without_lockfile",
+                "path": manifest,
+                "severity": "medium",
+                "summary": summary,
+                "evidence": _evidence(manifest, summary),
+            }
+        )
+
+    for finding in _keyword_findings(health, _DEPENDENCY_KEYWORDS):
+        summary = finding.get("reason") or "Repowise dependency signal."
+        path = finding.get("file_path")
+        risks.append(
+            {
+                "kind": finding.get("biomarker_type", "dependency_risk"),
+                "path": path,
+                "score": finding.get("health_impact"),
+                "severity": finding.get("severity"),
+                "summary": summary,
+                "evidence": _evidence(path, summary),
+            }
+        )
+
+    return _dedupe_signals(risks)
+
+
+def _manifest_has_lockfile(manifest: str, lockfiles: set[str]) -> bool:
+    manifest_path = Path(manifest)
+    parent = "" if str(manifest_path.parent) == "." else manifest_path.parent.as_posix()
+    for lockfile in lockfiles:
+        lock_path = Path(lockfile)
+        lock_parent = "" if str(lock_path.parent) == "." else lock_path.parent.as_posix()
+        if lock_parent == parent:
+            return True
+    return False
+
+
+def _ci_failures(repo_path: Path, health: JsonObject) -> list[JsonObject]:
+    failures: list[JsonObject] = []
+    ci_files = _ci_config_files(repo_path)
+    if not ci_files:
+        summary = "No CI workflow configuration was detected."
+        failures.append(
+            {
+                "kind": "missing_ci_config",
+                "path": "",
+                "severity": "medium",
+                "summary": summary,
+                "evidence": [],
+            }
+        )
+    else:
+        for path in ci_files:
+            text = (repo_path / path).read_text(encoding="utf-8", errors="ignore").lower()
+            if any(command in text for command in _CI_TEST_COMMANDS):
+                continue
+            summary = f"CI configuration {path} does not appear to run tests."
+            failures.append(
+                {
+                    "kind": "ci_without_tests",
+                    "path": path,
+                    "severity": "medium",
+                    "summary": summary,
+                    "evidence": _evidence(path, summary),
+                }
+            )
+
+    for finding in _keyword_findings(health, _CI_KEYWORDS):
+        summary = finding.get("reason") or "Repowise CI signal."
+        path = finding.get("file_path")
+        failures.append(
+            {
+                "kind": finding.get("biomarker_type", "ci_signal"),
+                "path": path,
+                "score": finding.get("health_impact"),
+                "severity": finding.get("severity"),
+                "summary": summary,
+                "evidence": _evidence(path, summary),
+            }
+        )
+    return _dedupe_signals(failures)
+
+
+def _ci_config_files(repo_path: Path) -> list[str]:
+    candidates: list[str] = []
+    workflow_dir = repo_path / ".github" / "workflows"
+    if workflow_dir.exists():
+        for path in sorted(workflow_dir.glob("*")):
+            if path.suffix.lower() in {".yml", ".yaml"} and path.is_file():
+                candidates.append(path.relative_to(repo_path).as_posix())
+    for name in (".gitlab-ci.yml", "bitbucket-pipelines.yml", "Jenkinsfile"):
+        if (repo_path / name).is_file():
+            candidates.append(name)
+    return candidates
+
+
+def _ownership_risks(repo_path: Path) -> list[JsonObject]:
+    authors = _git_lines(repo_path, ["log", "--format=%ae", "--all", "-n", "500"])
+    author_counts: dict[str, int] = {}
+    for author in authors:
+        if author:
+            author_counts[author] = author_counts.get(author, 0) + 1
+
+    risks: list[JsonObject] = []
+    total_commits = sum(author_counts.values())
+    if total_commits and len(author_counts) <= 1:
+        summary = "Repository history shows only one recent committer."
+        risks.append(
+            {
+                "kind": "low_bus_factor",
+                "path": "",
+                "severity": "high",
+                "summary": summary,
+                "commit_count": total_commits,
+                "author_count": len(author_counts),
+                "evidence": [],
+            }
+        )
+
+    file_authors = _file_author_counts(repo_path)
+    for path, counts in sorted(file_authors.items()):
+        total = sum(counts.values())
+        if total < 3:
+            continue
+        lead_author, lead_count = max(counts.items(), key=lambda item: item[1])
+        concentration = lead_count / total
+        if concentration < 0.85:
+            continue
+        summary = f"{round(concentration * 100)}% of recent edits are by one author."
+        risks.append(
+            {
+                "kind": "ownership_concentration",
+                "path": path,
+                "severity": "medium",
+                "summary": summary,
+                "lead_author": lead_author,
+                "touch_count": total,
+                "evidence": _evidence(path, summary),
+            }
+        )
+        if len(risks) >= 50:
+            break
+    return risks
+
+
+def _file_author_counts(repo_path: Path) -> dict[str, dict[str, int]]:
+    lines = _git_lines(
+        repo_path,
+        ["log", "--name-only", "--format=author:%ae", "--all", "-n", "500"],
+    )
+    current_author = ""
+    counts: dict[str, dict[str, int]] = {}
+    for line in lines:
+        if line.startswith("author:"):
+            current_author = line.removeprefix("author:")
+            continue
+        if not line or not current_author:
+            continue
+        path = line.strip()
+        if Path(path).suffix not in _SOURCE_EXTENSIONS:
+            continue
+        counts.setdefault(path, {})
+        counts[path][current_author] = counts[path].get(current_author, 0) + 1
+    return counts
+
+
+def _git_lines(repo_path: Path, args: list[str]) -> list[str]:
+    try:
+        result = _run(["git", "-C", str(repo_path), *args], timeout=60)
+    except RepowiseCommandError:
+        return []
+    return result.stdout.splitlines()
+
+
+def _keyword_findings(health: JsonObject, keywords: tuple[str, ...]) -> list[JsonObject]:
+    findings: list[JsonObject] = []
+    for finding in health.get("findings", []):
+        if not isinstance(finding, dict):
+            continue
+        haystack = " ".join(
+            str(finding.get(key, ""))
+            for key in ("biomarker_type", "reason", "details")
+        ).lower()
+        if any(keyword in haystack for keyword in keywords):
+            findings.append(finding)
+    return findings
+
+
+def _dedupe_signals(signals: list[JsonObject]) -> list[JsonObject]:
+    deduped: list[JsonObject] = []
+    seen: set[tuple[str, str, str]] = set()
+    for signal in signals:
+        key = (
+            str(signal.get("kind", "")),
+            str(signal.get("path", "")),
+            str(signal.get("summary", "")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(signal)
+    return deduped
 
 
 def _format_datetime(value: datetime) -> str:

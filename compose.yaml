@@ -32,8 +32,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-local}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-localpass123}
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "${MINIO_API_PORT:-19000}:9000"
+      - "${MINIO_CONSOLE_PORT:-19001}:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -49,9 +49,9 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
+      set -e;
       mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-local} ${MINIO_ROOT_PASSWORD:-localpass123};
       mc mb --ignore-existing local/${OBJECT_STORAGE_BUCKET:-gardener-analysis};
-      exit 0;
       "
 
 volumes:

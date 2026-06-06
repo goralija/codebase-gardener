@@ -345,7 +345,7 @@ The three lanes move from fixture contracts to real end-to-end behavior.
 
 #### E05-T01 Wire first real analysis into first report
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Shared
 - Complexity: XL

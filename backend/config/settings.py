@@ -44,12 +44,20 @@ FRONTEND_REDIRECT_BASE_URL = env(
 # S3-compatible object storage (MinIO locally, Cloudflare R2 in production).
 # Same code path; only endpoint + credentials differ between environments.
 OBJECT_STORAGE_ENDPOINT_URL = env(
-    "OBJECT_STORAGE_ENDPOINT_URL", default="http://localhost:9000"
+    "OBJECT_STORAGE_ENDPOINT_URL", default="http://localhost:19000"
 )
 OBJECT_STORAGE_ACCESS_KEY = env("OBJECT_STORAGE_ACCESS_KEY", default="local")
 OBJECT_STORAGE_SECRET_KEY = env("OBJECT_STORAGE_SECRET_KEY", default="localpass123")
 OBJECT_STORAGE_BUCKET = env("OBJECT_STORAGE_BUCKET", default="gardener-analysis")
 OBJECT_STORAGE_REGION = env("OBJECT_STORAGE_REGION", default="auto")
+
+# Hosted analysis worker settings.
+ANALYSIS_REPOWISE_PROJECT_DIR = env(
+    "ANALYSIS_REPOWISE_PROJECT_DIR",
+    default=str(BASE_DIR.parent / "RepoWise"),
+)
+ANALYSIS_CLONE_DEPTH = env.int("ANALYSIS_CLONE_DEPTH", default=100)
+ANALYSIS_CLONE_TIMEOUT_SECONDS = env.int("ANALYSIS_CLONE_TIMEOUT_SECONDS", default=600)
 
 INSTALLED_APPS = [
     "django.contrib.auth",

@@ -34,11 +34,12 @@ def build_gardening_session_result(
     finished_at: datetime | None = None,
     executed_plan_ids: list[str] | None = None,
     execution_errors: list[dict[str, str]] | None = None,
+    first_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     finished_at = finished_at or timezone.now()
-    fixture = load_first_report_fixture()
-    repository_id = _repository_id(fixture)
-    selected, deferred, plan_ids = _select_fixture_work(fixture)
+    report = first_report or load_first_report_fixture()
+    repository_id = _repository_id(report)
+    selected, deferred, plan_ids = _select_fixture_work(report)
     if executed_plan_ids is not None:
         plan_ids = executed_plan_ids
     phase_results = _phase_results()
@@ -192,10 +193,7 @@ def _repository_id(fixture: dict[str, Any]) -> str:
 
 
 def _failure_repository_id(session: GardeningSession) -> str:
-    try:
-        return _repository_id(load_first_report_fixture())
-    except Exception:
-        return str(session.repository_id)
+    return str(session.repository_id)
 
 
 def execute_session_pr_plans(

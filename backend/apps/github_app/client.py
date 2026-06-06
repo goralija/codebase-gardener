@@ -226,12 +226,19 @@ class GitHubAppClient:
         base: str,
         body: str,
         token: str,
+        draft: bool = False,
     ) -> dict[str, Any]:
         return self._api_request(
             "POST",
             f"/repos/{quote(owner)}/{quote(repo)}/pulls",
             token=token,
-            json={"title": title, "head": head, "base": base, "body": body},
+            json={
+                "title": title,
+                "head": head,
+                "base": base,
+                "body": body,
+                "draft": draft,
+            },
         )
 
     def find_pull_request(

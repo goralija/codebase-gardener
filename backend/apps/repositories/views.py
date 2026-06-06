@@ -2,7 +2,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from apps.accounts.models import CustomerOrganization
+from apps.accounts.models import CustomerOrganization, Membership
 from apps.accounts.serializers import CustomerOrganizationSerializer
 from apps.common.api import api_error_response
 from apps.github_app.models import GitHubInstallation
@@ -38,6 +38,7 @@ def organization_repositories(request, organization_id):
 
     repositories = (
         ManagedRepository.objects.visible_to(request.user)
+        .select_related("complexity", "complexity__source_analysis")
         .filter(organization=organization, github_installation=installation)
         .order_by("full_name")
     )
@@ -46,7 +47,16 @@ def organization_repositories(request, organization_id):
         {
             "organization": CustomerOrganizationSerializer(organization).data,
             "installation": GitHubInstallationSummarySerializer(installation).data,
-            "repositories": ManagedRepositorySerializer(repositories, many=True).data,
+            "repositories": ManagedRepositorySerializer(
+                repositories,
+                many=True,
+                context={
+                    "include_complexity_details": _can_view_complexity_details(
+                        request.user,
+                        organization,
+                    )
+                },
+            ).data,
         }
     )
 
@@ -64,3 +74,11 @@ def _visible_organization(user, organization_id):
         .distinct()
         .first()
     )
+
+
+def _can_view_complexity_details(user, organization) -> bool:
+    return Membership.objects.active().filter(
+        user=user,
+        organization=organization,
+        role__in=[Membership.Role.OWNER, Membership.Role.ADMIN],
+    ).exists()
