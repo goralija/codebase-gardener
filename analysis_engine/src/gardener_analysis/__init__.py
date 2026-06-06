@@ -1,9 +1,21 @@
 from .fixtures import FixtureRepository, list_fixture_repositories, load_fixture_repository
 from .foundation import foundation_status
+from .repowise import (
+    RepowiseCommandError,
+    RepowiseIndexOptions,
+    RepowiseIndexResult,
+    build_analysis_snapshot,
+    index_repository,
+)
 
 __all__ = [
     "FixtureRepository",
+    "RepowiseCommandError",
+    "RepowiseIndexOptions",
+    "RepowiseIndexResult",
+    "build_analysis_snapshot",
     "foundation_status",
+    "index_repository",
     "list_fixture_repositories",
     "load_fixture_repository",
 ]
