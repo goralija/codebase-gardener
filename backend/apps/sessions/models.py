@@ -24,6 +24,7 @@ class GardeningSession(UUIDTimestampedModel):
     task_id = models.CharField(max_length=255, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    result = models.JSONField(default=dict, blank=True)
     last_error = models.TextField(blank=True)
     retry_count = models.PositiveSmallIntegerField(default=0)
 
