@@ -61,6 +61,12 @@ OBJECT_STORAGE_SECRET_KEY = env("OBJECT_STORAGE_SECRET_KEY", default="localpass1
 OBJECT_STORAGE_BUCKET = env("OBJECT_STORAGE_BUCKET", default="gardener-analysis")
 OBJECT_STORAGE_REGION = env("OBJECT_STORAGE_REGION", default="auto")
 
+# LLM (OpenRouter) used by the AI code-fix author.
+OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="")
+OPENROUTER_BASE_URL = env("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1")
+OPENROUTER_MODEL = env("OPENROUTER_MODEL", default="deepseek/deepseek-chat")
+OPENROUTER_TIMEOUT_SECONDS = env.float("OPENROUTER_TIMEOUT_SECONDS", default=120.0)
+
 # Hosted analysis worker settings.
 ANALYSIS_REPOWISE_PROJECT_DIR = env(
     "ANALYSIS_REPOWISE_PROJECT_DIR",

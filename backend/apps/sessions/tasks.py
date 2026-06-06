@@ -4,6 +4,7 @@ from django.utils import timezone
 from apps.analysis import storage_service
 from apps.analysis.constitution_pr import maybe_open_constitution_pr
 from apps.analysis.runner import AnalysisRunError, run_repository_analysis
+from apps.common.models import AuditEvent
 from apps.github_app.client import RETRYABLE_STATUS_CODES, GitHubAPIError
 from apps.maintenance_prs.docs_fixes import has_implemented_file_fix
 from apps.maintenance_prs.models import MaintenancePRPlan
@@ -68,6 +69,7 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
             execution_errors=execution_errors,
             first_report=first_report,
         )
+        _emit_completion_notification(session, executed_plan_ids)
     except AnalysisRunError as exc:
         session.status = GardeningSession.Status.FAILED
         session.finished_at = timezone.now()
@@ -256,3 +258,49 @@ def _safe_for_auto_execution(plan: MaintenancePRPlan) -> bool:
         and plan.repository.is_active
         and has_implemented_file_fix(plan)
     )
+
+
+def _emit_completion_notification(
+    session: GardeningSession, executed_plan_ids: list
+) -> dict:
+    """Summarize authored PRs for the user and record an audit event."""
+    executed_plan_ids = executed_plan_ids or []
+    authored = [
+        {
+            "maintenance_pr_plan_id": str(plan.id),
+            "category": plan.category,
+            "risk_tier": plan.risk_tier,
+            "pr_number": plan.created_pr_number,
+            "pr_url": plan.created_pr_url,
+        }
+        for plan in MaintenancePRPlan.objects.for_session(str(session.id))
+        .filter(created_pr_number__isnull=False)
+        .order_by("created_at", "id")
+    ]
+    notification = {
+        "type": "session_completed",
+        "repository_id": str(session.repository_id),
+        "authored_pr_count": len(authored),
+        "review_required": bool(authored),
+        "authored_prs": authored,
+        "message": (
+            f"Gardener authored {len(authored)} maintenance PR(s); review required."
+            if authored
+            else "Gardener session completed; no PRs authored."
+        ),
+    }
+    try:
+        AuditEvent.objects.create(
+            organization=session.repository.organization,
+            repository=session.repository,
+            event_type=AuditEvent.EventType.MAINTENANCE_PRS_AUTHORED,
+            source="gardening_worker",
+            metadata={
+                "gardening_session_id": str(session.id),
+                "executed_plan_ids": [str(pid) for pid in executed_plan_ids],
+                "notification": notification,
+            },
+        )
+    except Exception:  # noqa: BLE001 - audit failure must not mask session outcome
+        pass
+    return notification

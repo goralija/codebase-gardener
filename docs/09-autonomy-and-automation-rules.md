@@ -77,8 +77,10 @@ Gardener must not directly modify these by default:
 
 ## Autonomous authoring scope
 
-- Autonomous authoring currently implements the docs maintenance fix only; a session approves and executes plans that have an implemented file fix, up to its per-session cap.
-- Other categories (dead-code, tests, complexity, layer violations) are planned but stay pending or blocked until category-specific authors exist.
+- Docs maintenance fixes use a deterministic author; other categories (dead-code, complexity, refactoring, layer violations, tests) are authored by an LLM (OpenRouter) that produces a minimal, validated edit.
+- AI edits are validated before a PR is opened (syntax/AST parse and a bounded-change guard); a failed validation fails the plan and creates no PR.
+- A session approves and executes tier_1 autonomous plans that have an implemented file fix, up to its per-session cap; PRs are labeled by risk tier and confidence; no auto-merge.
+- The user is notified on session completion with the authored PRs and their risk tiers.
 
 ## Learning rules
 

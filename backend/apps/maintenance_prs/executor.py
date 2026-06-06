@@ -12,6 +12,7 @@ from apps.billing.services import (
 )
 from apps.common.models import AuditEvent
 from apps.github_app.client import GitHubAPIError, GitHubAppClient
+from apps.maintenance_prs.ai_fixes import ai_fixable_paths, apply_ai_fix
 from apps.maintenance_prs.docs_fixes import (
     apply_docs_maintenance_note,
     docs_actual_fix_paths,
@@ -125,6 +126,7 @@ def execute_maintenance_pr_plan(
             token=token,
         )
         pr_number, pr_url = _validated_pull_request_result(pull_request)
+        _apply_risk_labels(client, owner, repo, pr_number, plan, token=token)
     except Exception as exc:
         plan.execution_status = MaintenancePRPlan.ExecutionStatus.FAILED
         plan.execution_error = str(exc)
@@ -217,8 +219,15 @@ def _apply_actual_file_fixes(
     token: str,
     plan: MaintenancePRPlan,
 ) -> list[str]:
+    if plan.category == "docs":
+        paths = docs_actual_fix_paths(plan)
+        opportunity = {}
+    else:
+        paths = ai_fixable_paths(plan)
+        opportunity = _lookup_opportunity(plan)
+
     existing_paths: list[str] = []
-    for path in docs_actual_fix_paths(plan):
+    for path in paths:
         try:
             content = client.get_file_contents(
                 owner,
@@ -233,7 +242,10 @@ def _apply_actual_file_fixes(
             raise
 
         existing_paths.append(path)
-        updated = apply_docs_maintenance_note(content, plan)
+        if plan.category == "docs":
+            updated = apply_docs_maintenance_note(content, plan)
+        else:
+            updated = apply_ai_fix(path, content, plan, opportunity)
         if updated == content:
             continue
 
@@ -249,6 +261,58 @@ def _apply_actual_file_fixes(
             sha=sha,
         )
     return existing_paths
+
+
+def _risk_labels(plan: MaintenancePRPlan) -> list[str]:
+    """Reviewer-facing labels: risk tier, confidence band, category."""
+    tier = (plan.risk_tier or "unknown").replace("_", "-")
+    if plan.confidence >= 0.9:
+        band = "high"
+    elif plan.confidence >= 0.7:
+        band = "medium"
+    else:
+        band = "low"
+    labels = [f"gardener:{tier}", f"gardener:confidence-{band}"]
+    if plan.category:
+        labels.append(f"gardener:category-{plan.category.replace('_', '-')}")
+    return labels
+
+
+def _apply_risk_labels(
+    client: GitHubAppClient,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    plan: MaintenancePRPlan,
+    *,
+    token: str,
+) -> None:
+    """Best-effort: never fail PR creation if labeling errors."""
+    try:
+        client.add_labels(owner, repo, pr_number, _risk_labels(plan), token=token)
+    except Exception:  # noqa: BLE001 - labeling is non-critical
+        pass
+
+
+def _lookup_opportunity(plan: MaintenancePRPlan) -> dict:
+    """Find the source opportunity for this plan in the latest stored analysis."""
+    from apps.analysis import storage_service
+
+    opportunity_ids = set(
+        plan.opportunity_links.values_list("maintenance_opportunity_id", flat=True)
+    )
+    if not opportunity_ids:
+        return {}
+    analysis = storage_service.get_latest(plan.repository)
+    if analysis is None:
+        return {}
+    for opportunity in analysis.opportunities or []:
+        if (
+            isinstance(opportunity, dict)
+            and opportunity.get("maintenance_opportunity_id") in opportunity_ids
+        ):
+            return opportunity
+    return {}
 
 
 def _put_marker_file(

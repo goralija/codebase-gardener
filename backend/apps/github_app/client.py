@@ -241,6 +241,23 @@ class GitHubAppClient:
             },
         )
 
+    def add_labels(
+        self,
+        owner: str,
+        repo: str,
+        issue_number: int,
+        labels: list[str],
+        *,
+        token: str,
+    ) -> dict[str, Any]:
+        # GitHub auto-creates labels that do not yet exist on the repository.
+        return self._api_request(
+            "POST",
+            f"/repos/{quote(owner)}/{quote(repo)}/issues/{issue_number}/labels",
+            token=token,
+            json={"labels": labels},
+        )
+
     def find_pull_request(
         self,
         owner: str,
