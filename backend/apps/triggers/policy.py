@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from apps.accounts.models import Membership
 from apps.repositories.models import ManagedRepository
-from apps.triggers.registry import ACTOR_REQUIRED_KINDS, MANUAL_TRIGGER_ROLES
 from apps.triggers import registry
 from apps.triggers.models import RepositoryAutomationPolicy
+from apps.triggers.registry import (
+    ACTOR_REQUIRED_KINDS,
+    FIRST_SCAN,
+    MANUAL,
+    MANUAL_TRIGGER_ROLES,
+)
 
 
 CONSERVATIVE_AUTONOMY_PR_BLOCK_REASON = (
@@ -29,6 +34,29 @@ TRIGGER_POLICY_FIELDS = {
 
 class TriggerNotPermittedError(Exception):
     code = "trigger_not_permitted"
+
+
+# Trigger kinds that are always on regardless of user selection: manual (the
+# user explicitly clicked it) and the onboarding first scan.
+ALWAYS_ENABLED_TRIGGER_KINDS = frozenset({MANUAL, FIRST_SCAN})
+
+
+def trigger_enabled_for_repository(repository: ManagedRepository, kind: str) -> bool:
+    """Whether an automated trigger kind is enabled for this repository.
+
+    The user chooses which automated triggers (push, n_commits, risky_module,
+    pr_opened, ci_failure, schedule) author code-fix PRs for each repository.
+    Manual and first-scan are always enabled.
+
+    The selected trigger fields are stored on ``RepositoryAutomationPolicy``.
+    """
+    if kind in ALWAYS_ENABLED_TRIGGER_KINDS:
+        return True
+    policy_field = TRIGGER_POLICY_FIELDS.get(kind)
+    if policy_field is None:
+        return True
+    policy = RepositoryAutomationPolicy.get_or_create_for_repository(repository)
+    return bool(getattr(policy, policy_field))
 
 
 def ensure_trigger_permitted(
