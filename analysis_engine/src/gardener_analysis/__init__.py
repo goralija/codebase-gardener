@@ -3,6 +3,7 @@ from .discovery import SourceTruthDiscovery, SourceTruthFile, discover_source_tr
 from .entropy import EntropyThresholds, build_entropy_report
 from .fixtures import FixtureRepository, list_fixture_repositories, load_fixture_repository
 from .foundation import foundation_status
+from .opportunities import generate_maintenance_opportunities
 from .repowise import (
     RepowiseCommandError,
     RepowiseIndexOptions,
@@ -24,6 +25,7 @@ __all__ = [
     "build_repository_constitution",
     "discover_source_truth",
     "foundation_status",
+    "generate_maintenance_opportunities",
     "index_repository",
     "list_fixture_repositories",
     "load_fixture_repository",

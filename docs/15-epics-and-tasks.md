@@ -245,7 +245,7 @@ The analysis package produces source-truth, intelligence, entropy, and opportuni
 
 #### E03-T06 Generate maintenance opportunities
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane B
 - Complexity: L
