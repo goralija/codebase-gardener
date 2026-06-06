@@ -38,6 +38,10 @@ _COMPLETENESS_CATEGORIES = (
 
 # Keyword -> fix-category slug. First match wins, longest keys first.
 _FIX_KEYWORDS: tuple[tuple[str, str], ...] = (
+    ("dead code removal", "dead_code"),
+    ("dead-code removal", "dead_code"),
+    ("dead code", "dead_code"),
+    ("dead-code", "dead_code"),
     ("documentation", "docs"),
     ("doc", "docs"),
     ("lint", "lint_format"),

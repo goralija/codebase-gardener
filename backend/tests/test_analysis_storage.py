@@ -1,4 +1,5 @@
 import pytest
+from django.utils import timezone
 from moto import mock_aws
 
 from apps.accounts.models import CustomerOrganization
@@ -7,7 +8,9 @@ from apps.analysis.models import RepositoryAnalysis
 from apps.common import storage
 from apps.common.models import AuditEvent
 from apps.github_app.models import GitHubInstallation
+from apps.maintenance_prs.models import MaintenancePRPlan, MaintenancePRPlanOpportunity
 from apps.repositories.models import ManagedRepository
+from apps.sessions.models import GardeningSession
 
 
 BUCKET = "gardener-analysis"
@@ -196,3 +199,75 @@ def test_load_report_assembles_inline_plus_blobs():
     assert report["maintenance_opportunities"] == [{"category": "docs"}]
     assert report["knowledge_graph"] == {"nodes": [1, 2, 3]}
     assert report["snapshot"]["commit_sha"] == "abc123"
+
+
+@pytest.mark.django_db
+@mock_aws
+def test_load_first_report_includes_latest_completed_session_and_pr_plans():
+    org = _org()
+    repo = _repo(org)
+    analysis = storage_service.store_analysis(
+        organization=org, repository=repo, commit_sha="abc123", artifacts=_artifacts()
+    )
+    session = GardeningSession.objects.create(
+        repository=repo,
+        status=GardeningSession.Status.COMPLETED,
+        finished_at=timezone.now(),
+        trigger={"type": "first_scan"},
+        result={
+            "schema_version": "1.0",
+            "gardening_session_id": "session_123",
+            "repository_id": str(repo.id),
+            "trigger": {"type": "first_scan"},
+            "status": "completed",
+            "started_at": "2026-06-06T12:00:00Z",
+            "finished_at": "2026-06-06T12:01:00Z",
+            "phase_results": [],
+            "opportunities_selected": ["opp_docs"],
+            "opportunities_deferred": [],
+            "maintenance_pr_plans": [],
+            "errors": [],
+        },
+    )
+    plan = MaintenancePRPlan.objects.create(
+        repository=repo,
+        gardening_session_id=str(session.id),
+        branch_name="gardener/docs-refresh",
+        title="Refresh docs",
+        risk_tier="tier_1_autonomous",
+        confidence=0.94,
+        changed_paths=["README.md"],
+        pr_body_sections={
+            "goal": "Refresh docs.",
+            "evidence": "Docs opportunity.",
+            "entropy_impact": "Expected -1.0 entropy.",
+            "verification": "Docs review.",
+        },
+        required_checks=["docs_review"],
+    )
+    MaintenancePRPlanOpportunity.objects.create(
+        plan=plan,
+        maintenance_opportunity_id="opp_docs",
+    )
+
+    report = storage_service.load_first_report(analysis)
+
+    assert report["gardening_session_result"] == session.result
+    assert len(report["maintenance_pr_plans"]) == 1
+    assert report["maintenance_pr_plans"][0]["maintenance_pr_plan_id"] == str(plan.id)
+    assert report["maintenance_pr_plans"][0]["maintenance_opportunity_ids"] == ["opp_docs"]
+
+
+@pytest.mark.django_db
+@mock_aws
+def test_load_first_report_keeps_empty_session_when_no_completed_session_exists():
+    org = _org()
+    repo = _repo(org)
+    analysis = storage_service.store_analysis(
+        organization=org, repository=repo, commit_sha="abc123", artifacts=_artifacts()
+    )
+
+    report = storage_service.load_first_report(analysis)
+
+    assert report["gardening_session_result"]["status"] == "not_run"
+    assert report["maintenance_pr_plans"] == []

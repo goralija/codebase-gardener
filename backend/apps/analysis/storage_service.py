@@ -101,21 +101,41 @@ def get_latest_any() -> RepositoryAnalysis | None:
 
 
 def load_first_report(analysis: RepositoryAnalysis) -> JsonObject:
-    """Assemble a FirstReport-shaped payload the dashboard already renders.
-
-    Lane C outputs (session result, PR plans) are empty until those lanes run.
-    """
+    """Assemble a FirstReport-shaped payload the dashboard already renders."""
     snapshot = storage.get_json(analysis.snapshot_key) if analysis.snapshot_key else {}
+    session_result, maintenance_pr_plans = _latest_session_outputs(analysis.repository)
     return {
         "repository_constitution": analysis.constitution or {},
         "analysis_snapshot": snapshot or {},
         "entropy_report": analysis.entropy or {},
-        # Lane C has not run for stored analyses yet — a schema-valid "not run"
-        # session keeps the FirstReport contract satisfied for the dashboard.
-        "gardening_session_result": _empty_session(str(analysis.repository_id)),
+        "gardening_session_result": session_result or _empty_session(str(analysis.repository_id)),
         "maintenance_opportunities": analysis.opportunities or [],
-        "maintenance_pr_plans": [],
+        "maintenance_pr_plans": maintenance_pr_plans,
     }
+
+
+def _latest_session_outputs(repository) -> tuple[JsonObject | None, list[JsonObject]]:
+    from apps.maintenance_prs.models import MaintenancePRPlan
+    from apps.sessions.models import GardeningSession
+
+    session = (
+        GardeningSession.objects.filter(
+            repository=repository,
+            status=GardeningSession.Status.COMPLETED,
+        )
+        .order_by("-finished_at", "-created_at")
+        .first()
+    )
+    if session is None or not session.result:
+        return None, []
+
+    plans = [
+        plan.to_contract()
+        for plan in MaintenancePRPlan.objects.for_session(str(session.id))
+        .prefetch_related("opportunity_links")
+        .order_by("created_at", "id")
+    ]
+    return session.result, plans
 
 
 def _empty_session(repository_id: str) -> JsonObject:

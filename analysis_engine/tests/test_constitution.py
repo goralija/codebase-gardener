@@ -75,6 +75,29 @@ def test_normal_repo_parses_allowed_autonomous_fixes():
     assert "lint_format" in autonomous
 
 
+def test_dead_code_removal_phrase_maps_to_dead_code_category(tmp_path):
+    (tmp_path / "GARDENER.md").write_text(
+        "\n".join(
+            [
+                "# GARDENER.md",
+                "",
+                "## Autonomous Fixes Allowed",
+                "",
+                "- dead code removal",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    c = build_repository_constitution(
+        tmp_path,
+        repository_id="repo_dead_code",
+        commit_sha="abc123",
+    )
+
+    assert c["allowed_fixes"]["autonomous"] == ["dead_code"]
+
+
 def test_boundary_rule_carries_file_evidence_with_section():
     c = _build("monorepo_repo")
 

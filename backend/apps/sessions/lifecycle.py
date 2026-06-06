@@ -39,7 +39,7 @@ def build_gardening_session_result(
     finished_at = finished_at or timezone.now()
     report = first_report or load_first_report_fixture()
     repository_id = _repository_id(report)
-    selected, deferred, plan_ids = _select_fixture_work(report)
+    selected, deferred, plan_ids = _select_session_work(session, report)
     if executed_plan_ids is not None:
         plan_ids = executed_plan_ids
     phase_results = _phase_results()
@@ -134,6 +134,56 @@ def _select_fixture_work(fixture: dict[str, Any]) -> tuple[list[str], list[dict[
                 selected_plan_ids.append(plan_id)
 
     return selected, deferred, selected_plan_ids
+
+
+def _select_session_work(
+    session: GardeningSession,
+    report: dict[str, Any],
+) -> tuple[list[str], list[dict[str, str]], list[str]]:
+    selected, deferred, plan_ids = _select_database_work(session)
+    if selected or deferred or plan_ids:
+        return selected, deferred, plan_ids
+    return _select_fixture_work(report)
+
+
+def _select_database_work(
+    session: GardeningSession,
+) -> tuple[list[str], list[dict[str, str]], list[str]]:
+    from apps.maintenance_prs.models import MaintenancePRPlan
+
+    plans = list(
+        MaintenancePRPlan.objects.for_session(str(session.id))
+        .prefetch_related("opportunity_links")
+        .order_by("created_at", "id")
+    )
+    if not plans:
+        return [], [], []
+
+    selected: list[str] = []
+    deferred: list[dict[str, str]] = []
+    plan_ids: list[str] = []
+    for plan in plans:
+        opportunity_ids = [
+            link.maintenance_opportunity_id
+            for link in plan.opportunity_links.all()
+        ]
+        if plan.blocked:
+            reason = plan.block_reason or "Blocked by PR planning policy."
+            for opportunity_id in opportunity_ids:
+                deferred.append(
+                    {
+                        "maintenance_opportunity_id": opportunity_id,
+                        "reason": reason,
+                    }
+                )
+            continue
+
+        plan_ids.append(str(plan.id))
+        for opportunity_id in opportunity_ids:
+            if opportunity_id not in selected:
+                selected.append(opportunity_id)
+
+    return selected, deferred, plan_ids
 
 
 def _failed_result(
