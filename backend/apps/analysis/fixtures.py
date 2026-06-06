@@ -23,12 +23,32 @@ def first_report_fixture_path() -> Path:
 
 
 def validate_first_report_fixture_contract(fixture: dict[str, Any]) -> None:
-    schema = _load_json(_schema_path("first_report_fixture.schema.json"))
+    validate_against_schema(
+        "first_report_fixture.schema.json",
+        fixture,
+        label="First report fixture",
+    )
+
+
+def validate_against_schema(
+    schema_name: str,
+    payload: dict[str, Any],
+    *,
+    label: str | None = None,
+) -> None:
+    """Validate ``payload`` against a fixture schema by file name.
+
+    Raises ``ImproperlyConfigured`` with aggregated error details when the
+    payload does not match the contract.
+    """
+
+    schema = _load_json(_schema_path(schema_name))
     validator = Draft202012Validator(schema, registry=_schema_registry())
-    errors = sorted(validator.iter_errors(fixture), key=lambda error: error.json_path)
+    errors = sorted(validator.iter_errors(payload), key=lambda error: error.json_path)
     if errors:
         details = "; ".join(f"{error.json_path}: {error.message}" for error in errors)
-        raise ImproperlyConfigured(f"First report fixture does not match contract: {details}")
+        prefix = label or schema_name
+        raise ImproperlyConfigured(f"{prefix} does not match contract: {details}")
 
 
 @cache
