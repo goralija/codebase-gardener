@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Python tests — matrix across Python 3.11, 3.12, 3.13
+  # ---------------------------------------------------------------------------
+  test-python:
+    name: Python ${{ matrix.python-version }} tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --all-packages --python ${{ matrix.python-version }}
+
+      - name: Run provider tests (no API keys required)
+        run: uv run pytest tests/providers/ -v --tb=short
+
+      - name: Run unit tests
+        run: uv run pytest tests/unit/ -v --tb=short
+
+  # ---------------------------------------------------------------------------
+  # Integration tests (run on push to main only, slower)
+  # ---------------------------------------------------------------------------
+  test-integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-packages
+
+      - name: Run integration tests
+        run: uv run pytest tests/integration/ -v --tb=short
+
+  # ---------------------------------------------------------------------------
+  # Web UI — lint and type check
+  # ---------------------------------------------------------------------------
+  test-web:
+    name: Web UI lint + type check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --workspace packages/web
+
+      - name: Type check
+        run: npm run type-check --workspace packages/web
+
+      - name: Lint
+        run: npm run lint --workspace packages/web

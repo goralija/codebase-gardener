@@ -1,0 +1,76 @@
+## Workspace: {{ data.workspace_name }} ({{ data.repos|length }} repo{{ "s" if data.repos|length != 1 else "" }})
+
+> Indexed by [Repowise](https://repowise.dev). Use `repo="all"` for workspace-wide queries, or `repo="alias"` for a specific repo.
+
+### Repositories
+| Repo | Files | Symbols | Hotspots | Role |
+|------|-------|---------|----------|------|
+{% for r in data.repos %}
+| `{{ r.alias }}` | {{ r.file_count }} | {{ r.symbol_count }} | {{ r.hotspot_count }} | {{ "default" if r.alias == data.default_repo else ("primary" if r.is_primary else "") }} |
+{% endfor %}
+
+{% if data.contract_links %}
+### Cross-Repo API Contracts
+{% if data.contracts_by_type %}
+**By type:** {% for ctype, count in data.contracts_by_type.items() %}{{ ctype }}: {{ count }}{% if not loop.last %}, {% endif %}{% endfor %}
+
+{% endif %}
+| Provider | Consumer | Type | Contract |
+|----------|----------|------|----------|
+{% for link in data.contract_links %}
+| `{{ link.provider_repo }}:{{ link.provider_file }}` | `{{ link.consumer_repo }}:{{ link.consumer_file }}` | {{ link.contract_type }} | `{{ link.contract_id }}` |
+{% endfor %}
+{% endif %}
+
+{% if data.co_changes %}
+### Cross-Repo Co-Changes
+Files that frequently change together across repos — consider reviewing both when editing either.
+
+| Source | Target | Co-changes |
+|--------|--------|------------|
+{% for cc in data.co_changes[:10] %}
+| `{{ cc.source_repo }}:{{ cc.source_file }}` | `{{ cc.target_repo }}:{{ cc.target_file }}` | {{ cc.frequency }} |
+{% endfor %}
+{% endif %}
+
+{% if data.package_deps %}
+### Package Dependencies
+{% for dep in data.package_deps %}
+- `{{ dep.source_repo }}` → `{{ dep.target_repo }}` ({{ dep.kind }})
+{% endfor %}
+{% endif %}
+
+### Per-Repo Entry Points
+{% for r in data.repos %}
+#### `{{ r.alias }}`{% if r.alias == data.default_repo %} (default){% elif r.is_primary %} (primary){% endif %}
+
+{% if r.entry_points %}
+{% for ep in r.entry_points %}
+- `{{ ep }}`
+{% endfor %}
+{% else %}
+_No entry points indexed._
+{% endif %}
+{% endfor %}
+
+### Repowise MCP Tools
+
+These tools work across all repos in this workspace. Pass `repo="alias"` to scope, `repo="all"` for cross-repo queries, or omit for the default repo. Every response carries `_meta` with `index_age_days`, `indexed_commit`, and a `stale_warning` only when the index has diverged from HEAD.
+
+| Tool | What only this tool answers |
+|------|------------------------------|
+| `get_answer(question)` | Synthesised answer with verified citations and a calibrated `retrieval_quality`. First call for "how does X work" / "why is Y like this". On low confidence returns `best_guesses` with one-line justifications. |
+| `get_context(targets=[...])` | Triage card for files/modules/symbols — title, summary, signatures, `hotspot` bit, `decision_records` titles, and `symbol_id`s to pipe into `get_symbol`. Use `include=[...]` to widen. NOT for source bytes. |
+| `get_symbol("path/to/file.py::Name")` | Raw source bytes for one indexed symbol with exact line bounds. Cheaper than `Read` + offset math. |
+| `search_codebase(query, kind?)` | Find pages by concept when you don't know the file. Each result tags its `search_method` (`embedding` vs `bm25`). For exact identifiers use Grep. |
+| `get_why(query, targets?)` | Architectural decision archaeology — *why* the code is shaped this way. Call before refactors. Falls back to git archaeology when no ADRs exist. |
+| `get_risk(targets, changed_files?)` | What history says about touching these files. Pass `changed_files` for PR mode → returns a `directive` (`will_break`, `missing_cochanges`, `missing_tests`) plus cross-repo blast radius. |
+| `get_dead_code(...)` | Tiered unreachable / unused-export / zombie-package findings; cross-repo consumer detection lowers confidence on shared exports. |
+| `get_overview(repo?)` | Architecture map. `repo="all"` returns cross-repo topology (co-changes, package deps, API contracts). |
+
+**Composition tips:**
+- `get_answer` → on `confidence: medium/low`, follow `best_guesses[0].file` into `get_context`, then `get_symbol` for bytes.
+- `get_context` returns `hotspot: true` → call `get_risk` before editing.
+- PR review across repos → `get_risk(changed_files=[...])` picks up cross-repo consumers automatically.
+
+**Verify when:** `_meta.stale_warning` is present, `retrieval_quality` is `partial`/`weak`, or `search_method` is `bm25`. Otherwise trust the response.

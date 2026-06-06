@@ -1,0 +1,21 @@
+You are documenting the infrastructure file `{{ ctx.file_path }}`.
+
+## Infrastructure File
+- **File**: `{{ ctx.file_path }}`
+- **Language**: {{ ctx.language }}
+
+## Key Targets / Stages
+{% if ctx.targets %}
+{% for target in ctx.targets %}
+- {{ target }}
+{% endfor %}
+{% else %}
+No targets explicitly extracted. See raw content below.
+{% endif %}
+
+## Raw Content
+```{{ ctx.language }}
+{{ ctx.raw_content }}
+```
+
+Generate a complete wiki page following the sections above.

@@ -1,0 +1,30 @@
+You are documenting the API contract defined in `{{ ctx.file_path }}`.
+
+## API Contract
+- **File**: `{{ ctx.file_path }}`
+- **Language**: {{ ctx.language }}
+
+## Endpoints
+{% if ctx.endpoints %}
+{% for ep in ctx.endpoints %}
+- {{ ep }}
+{% endfor %}
+{% else %}
+No endpoints explicitly extracted. See raw content below.
+{% endif %}
+
+## Schemas / Models
+{% if ctx.schemas %}
+{% for schema in ctx.schemas %}
+- {{ schema }}
+{% endfor %}
+{% else %}
+No schemas explicitly extracted.
+{% endif %}
+
+## Raw Content
+```{{ ctx.language }}
+{{ ctx.raw_content }}
+```
+
+Generate a complete wiki page following the sections above.

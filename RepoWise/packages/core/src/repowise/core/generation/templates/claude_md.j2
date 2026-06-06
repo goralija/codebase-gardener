@@ -1,0 +1,129 @@
+## IMPORTANT: Codebase Intelligence Instructions for {{ data.repo_name }}
+
+> This repository is indexed by [Repowise](https://repowise.dev).
+> Use the MCP tools below for orientation, discovery, and enriched context
+> (documentation, ownership, history, decisions). **Always verify against
+> actual source files before making changes** — the index may be stale.
+
+Last indexed: {{ data.indexed_at }}{% if data.indexed_commit %} (commit {{ data.indexed_commit }}){% endif %}{% if data.avg_confidence %}. Confidence: {{ (data.avg_confidence * 100) | int }}%.{% endif %}
+
+{% if data.architecture_summary %}
+### Architecture
+{{ data.architecture_summary }}
+{% endif %}
+{% if data.key_modules %}
+### Key Modules
+| Module | Purpose | Owner |
+|--------|---------|-------|
+{% for mod in data.key_modules %}
+| `{{ mod.name }}` | {{ mod.purpose or "—" }} | {{ mod.owner or "—" }} |
+{% endfor %}
+{% endif %}
+{% if data.entry_points %}
+### Entry Points
+{% for ep in data.entry_points %}
+- `{{ ep }}`
+{% endfor %}
+{% endif %}
+{% if data.tech_stack %}
+### Tech Stack
+{% set langs = data.tech_stack | selectattr("category", "eq", "language") | list %}
+{% set frameworks = data.tech_stack | selectattr("category", "eq", "framework") | list %}
+{% set infra = data.tech_stack | selectattr("category", "eq", "infra") | list %}
+{% set dbs = data.tech_stack | selectattr("category", "eq", "database") | list %}
+{% if langs %}**Languages:** {{ langs | map(attribute="name") | join(", ") }}{% endif %}
+
+{% if frameworks %}**Frameworks:** {{ frameworks | map(attribute="name") | join(", ") }}{% endif %}
+
+{% if dbs %}**Databases:** {{ dbs | map(attribute="name") | join(", ") }}{% endif %}
+
+{% if infra %}**Infra:** {{ infra | map(attribute="name") | join(", ") }}{% endif %}
+{% endif %}
+{% if data.kg_layers %}
+### Architectural Layers
+| Layer | Files | Purpose |
+|-------|-------|---------|
+{% for layer in data.kg_layers[:10] %}
+| {{ layer.name }} | {{ layer.file_count }} | {{ layer.description[:80] }} |
+{% endfor %}
+{% if data.kg_tour %}
+
+### Guided Tour ({{ data.kg_tour | length }} steps)
+{% for step in data.kg_tour[:6] %}
+{{ step.order }}. **{{ step.title }}**{% if step.primary_file %} — `{{ step.primary_file }}`{% endif %}
+
+{% endfor %}
+{% if data.kg_tour | length > 6 %}
+... and {{ data.kg_tour | length - 6 }} more steps
+{% endif %}
+{% endif %}
+{% endif %}
+{% if data.hotspots %}
+### Hotspots (High Churn)
+| File | Churn | 90d Commits | Owner |
+|------|-------|-------------|-------|
+{% for h in data.hotspots %}
+| `{{ h.path }}` | {{ h.churn_percentile }}th %ile | {{ h.commit_count_90d }} | {{ h.owner or "—" }} |
+{% endfor %}
+{% endif %}
+{% if data.code_health %}
+
+## Code health
+Hotspot health: {{ data.code_health.hotspot_health }}/10 ({{ data.code_health.hotspot_trend }}) ·
+Average: {{ data.code_health.average_health }}/10 ·
+Worst: {{ data.code_health.worst_score }}/10 (`{{ data.code_health.worst_path }}`)
+{% if data.code_health.critical_biomarkers %}
+
+### Critical biomarkers
+{% for b in data.code_health.critical_biomarkers %}
+- `{{ b.path }}` — {{ b.summary }}
+{% endfor %}
+{% endif %}
+{% if data.code_health.untested_hotspots %}
+
+### Untested hotspots
+{% for h in data.code_health.untested_hotspots %}
+- `{{ h.path }}` — {{ h.dependents }} dependents, {{ h.coverage_pct }}% coverage, {{ h.commits_90d }} commits/90d
+{% endfor %}
+{% endif %}
+{% endif %}
+
+### Repowise MCP Tools
+
+This repo has the Repowise MCP server configured. The tools below answer questions `grep`/`Read` cannot. Every response carries an `_meta` envelope with `index_age_days`, `indexed_commit`, and a `stale_warning` only when the index has actually diverged from HEAD — silence means the index is current.
+
+**When to call which tool:**
+
+| Tool | What only this tool answers |
+|------|------------------------------|
+| `get_answer(question)` | Synthesised answer with verified citations and a calibrated `retrieval_quality`. First call for "how does X work" / "why is Y like this". On low confidence returns `best_guesses` with one-line justifications instead of an empty answer. |
+| `get_context(targets=[...])` | Triage card for files/modules/symbols — title, summary, signatures, `hotspot` bit, `decision_records` titles, and `symbol_id`s to pipe into `get_symbol`. Use `include=["callers","ownership",...]` to widen. NOT for source bytes. |
+| `get_symbol("path/to/file.py::Name")` | Raw source bytes for one indexed symbol with exact line bounds. Cheaper and safer than `Read` + offset math. Use the `symbol_id` returned by `get_context`. |
+| `search_codebase(query, kind?)` | Find pages by concept when you don't know the file. Each result carries `search_method` (`embedding` vs `bm25` fallback). For exact identifiers use Grep — the tool will hint when it sees one. |
+| `get_why(query, targets?)` | Architectural decision archaeology — *why* the code is shaped this way. Call before refactors or pattern divergences. Falls back to git archaeology when no ADRs exist for a file. |
+| `get_risk(targets, changed_files?)` | What history says about touching these files: churn, owners, blast radius. Pass `changed_files` for PR mode → returns a `directive` (`will_break`, `missing_cochanges`, `missing_tests`). |
+| `get_dead_code(...)` | Tiered unreachable / unused-export / zombie-package findings. Run before a cleanup sprint, not before a targeted fix. |
+| `get_overview(repo?)` | Architecture map for an unfamiliar repo. One-time orientation; skip on subsequent calls in the same session. |
+
+**Composition tips:**
+- `get_answer` → if `confidence` is `medium`/`low`, follow the `best_guesses[0].file` or `fallback_targets[0]` into `get_context`, then `get_symbol` for bytes.
+- `get_context` returns `decision_records` titles → call `get_why(targets=[...])` for the rationale.
+- `get_context` returns `hotspot: true` → call `get_risk` before editing.
+- PR review → `get_risk(targets=[...], changed_files=[...])`; read the `directive` block first.
+
+**Verify when:** `_meta.stale_warning` is present, or `retrieval_quality` is `partial`/`weak`, or `search_method` is `bm25`. Otherwise trust the response and act on it.
+
+### Output Distillation
+
+- Prefer `repowise distill <cmd>` for noisy commands — test runs, builds, `git status`/`log`/`diff`, searches, file listings. It runs the command unchanged (exit code preserved) and prints a compact, errors-first rendering; every error line survives.
+- Output may contain a marker like `[repowise#a1b2c3d4e5f6: 230 lines omitted (~6.1k tokens); restore: repowise expand a1b2c3d4e5f6]`. The omitted content is fully preserved — run `repowise expand <ref>` to retrieve it, or `repowise expand <ref> -q <regex>` for just the matching lines.
+- Never re-run a command to see omitted output; expand the marker instead.
+- For structure-level questions about a large indexed file ("what's in here", "which function handles X"), `get_context(["path"], include=["skeleton"])` returns the file with bodies elided — every signature plus the bodies of the most central symbols — at a fraction of the cost of a full Read.
+{% if data.build_commands %}
+
+### Codebase Conventions
+**Commands:**
+{% for label, cmd in data.build_commands.items() %}
+- {{ label | capitalize }}: `{{ cmd }}`
+{% endfor %}
+{% endif %}
