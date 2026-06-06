@@ -147,7 +147,7 @@ def build_analysis_snapshot(
         "created_at": _format_datetime(created_at),
         "logical_systems": _infer_logical_systems(index_result.repo_path),
         "signals": {
-            "dependency_cycles": [],
+            "dependency_cycles": _dependency_cycles(index_result.health),
             "hotspots": _health_hotspots(index_result.health),
             "dead_code_candidates": _dead_code_candidates(index_result.dead_code),
             "ownership_risks": [],
@@ -247,43 +247,57 @@ def _parse_final_json_stdout(stdout: str) -> list[JsonObject] | JsonObject:
     raise ValueError("Expected final JSON array or object from Repowise command.")
 
 
+_SOURCE_EXTENSIONS = frozenset(
+    {
+        ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java",
+        ".rb", ".php", ".cs", ".kt", ".swift", ".scala", ".c", ".cc",
+        ".cpp", ".h", ".hpp", ".vue", ".svelte",
+    }
+)
+
+# Containers whose immediate children are the real logical systems (monorepo).
+_MONOREPO_PARENTS = frozenset({"apps", "packages", "services", "libs"})
+
+_ACRONYMS = frozenset({"api", "ui", "db", "cli", "sdk", "http", "ml", "ai", "css"})
+
+
+def _system_name(name: str) -> str:
+    if name.lower() in _ACRONYMS:
+        return name.upper()
+    return _display_name(name)
+
+
 def _infer_logical_systems(repo_path: Path) -> list[JsonObject]:
-    paths = _tracked_source_paths(repo_path)
+    source_paths = [
+        path
+        for path in _tracked_source_paths(repo_path)
+        if Path(path).suffix in _SOURCE_EXTENSIONS
+    ]
+
+    # Group source files into logical systems by their top-level directory,
+    # expanding monorepo containers (apps/, packages/, ...) one level deeper.
+    groups: dict[tuple[str, str], None] = {}
+    for path in source_paths:
+        parts = path.split("/")
+        if len(parts) == 1:
+            key = ("root", "root")
+        elif parts[0] in _MONOREPO_PARENTS and len(parts) >= 3:
+            prefix = f"{parts[0]}/{parts[1]}"
+            key = (prefix, parts[1])
+        else:
+            key = (parts[0], parts[0])
+        groups[key] = None
+
     systems: list[JsonObject] = []
-
-    def add(system_id: str, name: str, glob: str, predicate: str) -> None:
-        if any(path == predicate or path.startswith(f"{predicate}/") for path in paths):
-            systems.append(
-                {
-                    "logical_system_id": system_id,
-                    "name": name,
-                    "paths": [glob],
-                }
-            )
-
-    add("sys_api", "API", "apps/api/**", "apps/api")
-    add("sys_web", "Web", "apps/web/**", "apps/web")
-
-    package_names = sorted(
-        {
-            parts[1]
-            for path in paths
-            if (parts := path.split("/"))
-            and len(parts) >= 3
-            and parts[0] == "packages"
-        }
-    )
-    for package in package_names:
+    for prefix, name in sorted(groups):
+        glob = "**" if prefix == "root" else f"{prefix}/**"
         systems.append(
             {
-                "logical_system_id": f"sys_{_slug(package)}",
-                "name": _display_name(package),
-                "paths": [f"packages/{package}/**"],
+                "logical_system_id": f"sys_{_slug(name)}",
+                "name": _system_name(name),
+                "paths": [glob],
             }
         )
-
-    add("sys_src", "Source", "src/**", "src")
-    add("sys_tests", "Tests", "tests/**", "tests")
 
     if systems:
         return systems
@@ -337,28 +351,72 @@ def _health_hotspots(health: JsonObject) -> list[JsonObject]:
             continue
         score = metric.get("score")
         if isinstance(score, int | float) and not isinstance(score, bool) and score < 7:
+            summary = f"Repowise health score {score}."
             hotspots.append(
                 {
                     "kind": "low_health_score",
                     "path": metric.get("file_path"),
                     "score": score,
-                    "summary": f"Repowise health score {score}.",
+                    "summary": summary,
+                    "evidence": _evidence(metric.get("file_path"), summary),
                 }
             )
 
     for finding in health.get("findings", []):
         if not isinstance(finding, dict):
             continue
+        if _is_architectural(finding):
+            continue  # routed to dependency_cycles instead
+        summary = finding.get("reason") or "Repowise health finding."
         hotspots.append(
             {
                 "kind": finding.get("biomarker_type", "health_finding"),
                 "path": finding.get("file_path"),
                 "score": finding.get("health_impact"),
                 "severity": finding.get("severity"),
-                "summary": finding.get("reason") or "Repowise health finding.",
+                "summary": summary,
+                "evidence": _evidence(finding.get("file_path"), summary),
             }
         )
     return hotspots
+
+
+def _evidence(path: Any, summary: str) -> list[JsonObject]:
+    if not isinstance(path, str) or not path:
+        return []
+    return [{"source_type": "file", "path": path, "summary": summary}]
+
+
+_ARCH_KEYWORDS = ("cycle", "coupling", "layer", "boundary", "dependency")
+
+
+def _is_architectural(finding: JsonObject) -> bool:
+    haystack = " ".join(
+        str(finding.get(key, ""))
+        for key in ("biomarker_type", "reason", "details")
+    ).lower()
+    return any(keyword in haystack for keyword in _ARCH_KEYWORDS)
+
+
+def _dependency_cycles(health: JsonObject) -> list[JsonObject]:
+    """Architecture signals (cycles, coupling, layer/boundary violations) lifted
+    from Repowise health findings into the architecture entropy bucket."""
+    cycles: list[JsonObject] = []
+    for finding in health.get("findings", []):
+        if not isinstance(finding, dict) or not _is_architectural(finding):
+            continue
+        summary = finding.get("reason") or "Repowise architecture finding."
+        cycles.append(
+            {
+                "kind": finding.get("biomarker_type", "architecture_finding"),
+                "path": finding.get("file_path"),
+                "score": finding.get("health_impact"),
+                "severity": finding.get("severity"),
+                "summary": summary,
+                "evidence": _evidence(finding.get("file_path"), summary),
+            }
+        )
+    return cycles
 
 
 def _dead_code_candidates(dead_code: list[JsonObject] | JsonObject) -> list[JsonObject]:
@@ -370,6 +428,7 @@ def _dead_code_candidates(dead_code: list[JsonObject] | JsonObject) -> list[Json
     for finding in findings:
         if not isinstance(finding, dict):
             continue
+        summary = finding.get("reason") or "Repowise dead-code finding."
         candidates.append(
             {
                 "kind": finding.get("kind", "dead_code"),
@@ -377,7 +436,8 @@ def _dead_code_candidates(dead_code: list[JsonObject] | JsonObject) -> list[Json
                 "symbol": finding.get("symbol_name"),
                 "confidence": finding.get("confidence"),
                 "safe_to_delete": finding.get("safe_to_delete"),
-                "summary": finding.get("reason") or "Repowise dead-code finding.",
+                "summary": summary,
+                "evidence": _evidence(finding.get("file_path"), summary),
             }
         )
     return candidates
@@ -390,11 +450,13 @@ def _test_gaps(health: JsonObject) -> list[JsonObject]:
             continue
         path = metric.get("file_path")
         if metric.get("has_test_file") is False and isinstance(path, str):
+            summary = "Repowise did not find a paired test file."
             gaps.append(
                 {
                     "kind": "missing_test_file",
                     "path": path,
-                    "summary": "Repowise did not find a paired test file.",
+                    "summary": summary,
+                    "evidence": _evidence(path, summary),
                 }
             )
 
@@ -407,12 +469,14 @@ def _test_gaps(health: JsonObject) -> list[JsonObject]:
             for key in ("biomarker_type", "reason", "details")
         ).lower()
         if any(keyword in haystack for keyword in keywords):
+            summary = finding.get("reason") or "Repowise testing signal."
             gaps.append(
                 {
                     "kind": finding.get("biomarker_type", "test_gap"),
                     "path": finding.get("file_path"),
                     "severity": finding.get("severity"),
-                    "summary": finding.get("reason") or "Repowise testing signal.",
+                    "summary": summary,
+                    "evidence": _evidence(finding.get("file_path"), summary),
                 }
             )
     return gaps
