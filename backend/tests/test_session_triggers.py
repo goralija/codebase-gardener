@@ -9,7 +9,7 @@ from apps.github_app.models import GitHubInstallation
 from apps.repositories.models import ManagedRepository
 from apps.sessions.models import GardeningSession
 from apps.triggers import registry
-from apps.triggers.models import RepositoryCommitTracker
+from apps.triggers.models import RepositoryAutomationPolicy, RepositoryCommitTracker
 from apps.triggers.policy import TriggerNotPermittedError, ensure_trigger_permitted
 from apps.triggers.service import (
     SessionEnqueueError,
@@ -185,6 +185,23 @@ def test_manual_trigger_rejects_insufficient_role():
 
 
 @pytest.mark.django_db
+def test_manual_trigger_rejects_disabled_repository_policy():
+    repository = create_repository(1)
+    policy = RepositoryAutomationPolicy.get_or_create_for_repository(repository)
+    policy.manual_trigger_enabled = False
+    policy.save(update_fields=["manual_trigger_enabled", "updated_at"])
+    maintainer = User.objects.create_user(email="maint@example.com", password="pw")
+    Membership.objects.create(
+        user=maintainer,
+        organization=repository.organization,
+        role=Membership.Role.MAINTAINER,
+    )
+
+    with pytest.raises(TriggerNotPermittedError):
+        trigger_manual_session(repository=repository, actor=maintainer)
+
+
+@pytest.mark.django_db
 def test_manual_trigger_allows_maintainer_and_audits():
     repository = create_repository(1)
     maintainer = User.objects.create_user(email="maint@example.com", password="pw")
@@ -248,8 +265,11 @@ def test_changed_paths_hit_protected_constitution_and_fallback():
 @pytest.mark.django_db
 def test_n_commits_trigger_fires_only_at_threshold():
     repository = create_repository(1)
+    policy = RepositoryAutomationPolicy.get_or_create_for_repository(repository)
+    policy.commit_threshold = 3
+    policy.save(update_fields=["commit_threshold", "updated_at"])
     ref = "refs/heads/main"
-    constitution = {"risk_policies": {"commit_session_threshold": 3}}
+    constitution = {}
 
     first = evaluate_push_triggers(
         repository=repository,
@@ -271,6 +291,26 @@ def test_n_commits_trigger_fires_only_at_threshold():
     assert any(_kind_of(r) == registry.N_COMMITS for r in second)
     # Counter reset after firing.
     assert RepositoryCommitTracker.objects.get(repository=repository).commits_since_session == 0
+
+
+@pytest.mark.django_db
+def test_n_commits_trigger_does_not_accumulate_when_disabled():
+    repository = create_repository(1)
+    policy = RepositoryAutomationPolicy.get_or_create_for_repository(repository)
+    policy.commit_trigger_enabled = False
+    policy.commit_threshold = 1
+    policy.save(update_fields=["commit_trigger_enabled", "commit_threshold", "updated_at"])
+
+    results = evaluate_push_triggers(
+        repository=repository,
+        ref="refs/heads/main",
+        payload=push_payload(commit_count=2),
+        base_trigger_extra={"source": "github_webhook"},
+        constitution={},
+    )
+
+    assert not results
+    assert not RepositoryCommitTracker.objects.filter(repository=repository).exists()
 
 
 @pytest.mark.django_db
@@ -302,6 +342,25 @@ def test_risky_module_trigger_fires_for_protected_paths():
     assert not any(_kind_of(r) == registry.RISKY_MODULE for r in safe)
 
 
+@pytest.mark.django_db
+def test_risky_module_trigger_respects_disabled_repository_policy():
+    repository = create_repository(1)
+    policy = RepositoryAutomationPolicy.get_or_create_for_repository(repository)
+    policy.risky_module_trigger_enabled = False
+    policy.save(update_fields=["risky_module_trigger_enabled", "updated_at"])
+    constitution = {"protected_modules": [{"name": "auth", "paths": ["src/auth/*"]}]}
+
+    results = evaluate_push_triggers(
+        repository=repository,
+        ref="refs/heads/main",
+        payload=push_payload(commit_count=1, modified=["src/auth/session.py"]),
+        base_trigger_extra={"source": "github_webhook"},
+        constitution=constitution,
+    )
+
+    assert not any(_kind_of(result) == registry.RISKY_MODULE for result in results)
+
+
 # --------------------------------------------------------------------------- #
 # Scheduled dispatch
 # --------------------------------------------------------------------------- #
@@ -328,6 +387,21 @@ def test_dispatch_scheduled_sessions_one_per_active_repo(monkeypatch):
     second = dispatch_scheduled_sessions()
     assert second["dispatched"] == 0
     assert second["deduped"] == 2
+
+
+@pytest.mark.django_db
+def test_dispatch_scheduled_sessions_skips_disabled_policy(monkeypatch):
+    _keep_sessions_queued(monkeypatch)
+    repository = create_repository(1)
+    policy = RepositoryAutomationPolicy.get_or_create_for_repository(repository)
+    policy.scheduled_trigger_enabled = False
+    policy.save(update_fields=["scheduled_trigger_enabled", "updated_at"])
+
+    result = dispatch_scheduled_sessions()
+
+    assert result["dispatched"] == 0
+    assert result["disabled"] == 1
+    assert GardeningSession.objects.filter(repository=repository).count() == 0
 
 
 @pytest.mark.django_db

@@ -71,7 +71,7 @@ export function GithubOnboardingPage() {
   const billingQuery = useQuery({
     queryKey: ["github-onboarding", "billing", selectedOrganizationId],
     queryFn: () => fetchOrganizationBilling(selectedOrganizationId ?? ""),
-    enabled: Boolean(selectedOrganizationId),
+    enabled: Boolean(selectedOrganizationId && repositoriesQuery.isSuccess),
     retry: false,
   })
   const billingMutation = useMutation({
@@ -180,7 +180,14 @@ export function GithubOnboardingPage() {
         ) : (
           <>
             <RepositorySelectionPanel
+              isRefreshing={repositoriesQuery.isFetching}
               isLoading={repositoriesQuery.isLoading}
+              onRefresh={() => {
+                void repositoriesQuery.refetch()
+                if (selectedOrganizationId) {
+                  void billingQuery.refetch()
+                }
+              }}
               repositories={repositories}
               settingsUrl={installation?.html_url}
             />
@@ -301,10 +308,14 @@ function EmptyOnboardingPanel({ installUrl }: { installUrl?: string }) {
 
 function RepositorySelectionPanel({
   isLoading,
+  isRefreshing,
+  onRefresh,
   repositories,
   settingsUrl,
 }: {
   isLoading: boolean
+  isRefreshing: boolean
+  onRefresh: () => void
   repositories: Array<{
     id: string
     complexity: ManagedRepository["complexity"]
@@ -328,15 +339,27 @@ function RepositorySelectionPanel({
             {repositories.length === 1 ? "repository" : "repositories"}
           </p>
         </div>
-        {settingsUrl ? (
-          <Button asChild variant="outline">
-            <a href={settingsUrl}>
-              <Settings />
-              Edit repository access in GitHub
-              <ExternalLink />
-            </a>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            aria-label="Refresh repositories"
+            disabled={isRefreshing}
+            onClick={onRefresh}
+            type="button"
+            variant="outline"
+          >
+            <RefreshCw className={isRefreshing ? "animate-spin" : ""} />
+            Refresh
           </Button>
-        ) : null}
+          {settingsUrl ? (
+            <Button asChild variant="outline">
+              <a href={settingsUrl}>
+                <Settings />
+                Edit repository access in GitHub
+                <ExternalLink />
+              </a>
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-5">

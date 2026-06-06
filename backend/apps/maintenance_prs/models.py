@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from apps.common.models import UUIDTimestampedModel
 from apps.maintenance_prs.policy import DEFAULT_CONFIDENCE_THRESHOLD, STALE_RUNNING_TIMEOUT
+from apps.triggers.models import RepositoryAutomationPolicy
 
 
 class MaintenancePRPlanQuerySet(models.QuerySet):
@@ -25,6 +26,13 @@ class MaintenancePRPlanQuerySet(models.QuerySet):
             repository__github_installation__suspended_at__isnull=True,
             repository__github_installation__deleted_at__isnull=True,
             repository__github_installation__organization_id=F("repository__organization_id"),
+        ).filter(
+            Q(repository__automation_policy__isnull=True)
+            | Q(
+                repository__automation_policy__autonomy_mode=(
+                    RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS
+                )
+            )
         ).filter(
             Q(
                 execution_status__in=[

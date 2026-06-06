@@ -17,6 +17,15 @@ env = environ.Env(
             "http://127.0.0.1:5174",
         ],
     ),
+    DJANGO_CSRF_TRUSTED_ORIGINS=(
+        list,
+        [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:5174",
+            "http://127.0.0.1:5174",
+        ],
+    ),
 )
 environ.Env.read_env(BASE_DIR.parent / ".env")
 
@@ -26,6 +35,7 @@ ALLOWED_HOSTS = env("DJANGO_ALLOWED_HOSTS")
 CORS_ALLOWED_ORIGINS = env("DJANGO_CORS_ALLOWED_ORIGINS")
 CORS_ALLOW_CREDENTIALS = True
 CORS_URLS_REGEX = r"^/api/.*$"
+CSRF_TRUSTED_ORIGINS = env("DJANGO_CSRF_TRUSTED_ORIGINS")
 
 GITHUB_APP_SLUG = env("GITHUB_APP_SLUG", default="codebase-gardener")
 GITHUB_APP_ID = env("GITHUB_APP_ID", default="")

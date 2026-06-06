@@ -11,7 +11,10 @@ from apps.accounts.models import CustomerOrganization, Membership
 from apps.common.models import AuditEvent
 from apps.github_app.client import GitHubAPIError, GitHubAppClient
 from apps.github_app.models import GitHubInstallation
-from apps.github_app.services import sync_installation_from_github_payloads
+from apps.github_app.services import (
+    refresh_installation_repositories_from_github,
+    sync_installation_from_github_payloads,
+)
 from apps.github_app.state import load_install_state
 from apps.repositories.models import ManagedRepository
 
@@ -315,6 +318,81 @@ def test_installation_resync_marks_removed_grants_inactive_and_reactivates_regra
 
 
 @pytest.mark.django_db
+def test_refresh_existing_installation_reconciles_current_github_repository_grants():
+    sync_installation_from_github_payloads(
+        github_user=github_user_payload(),
+        installation_payload=installation_payload(),
+        repository_payloads=[repository_payload(3001, "api")],
+    )
+    actor = get_user_model().objects.get(github_user_id=501)
+    installation = GitHubInstallation.objects.get(github_installation_id=2001)
+    removed_repository = ManagedRepository.objects.get(github_repository_id=3001)
+
+    result = refresh_installation_repositories_from_github(
+        installation=installation,
+        actor=actor,
+        client=RepositoryRefreshFakeGitHubClient(
+            installation.github_installation_id,
+            repositories=[
+                repository_payload(3002, "web"),
+                repository_payload(3003, "worker"),
+            ],
+        ),
+    )
+
+    assert result.repository_count == 2
+    removed_repository.refresh_from_db()
+    assert removed_repository.unselected_at is not None
+    assert sorted(
+        ManagedRepository.objects.active().values_list("full_name", flat=True)
+    ) == ["acme/web", "acme/worker"]
+    assert AuditEvent.objects.filter(
+        event_type=AuditEvent.EventType.GITHUB_INSTALLATION_SYNCED,
+        source="github_repository_refresh",
+    ).exists()
+
+
+@pytest.mark.django_db
+@override_settings(GITHUB_APP_ID="123", GITHUB_APP_PRIVATE_KEY="test-private-key")
+def test_repository_api_refreshes_github_grants_for_installation_manager(monkeypatch):
+    sync_installation_from_github_payloads(
+        github_user=github_user_payload(),
+        installation_payload=installation_payload(),
+        repository_payloads=[repository_payload(3001, "api")],
+    )
+    user = get_user_model().objects.get(github_user_id=501)
+    organization = CustomerOrganization.objects.get(github_account_id=1001)
+
+    def refresh_from_github(*, installation, actor):
+        return refresh_installation_repositories_from_github(
+            installation=installation,
+            actor=actor,
+            client=RepositoryRefreshFakeGitHubClient(
+                installation.github_installation_id,
+                repositories=[
+                    repository_payload(3001, "api"),
+                    repository_payload(3002, "web"),
+                ],
+            ),
+        )
+
+    monkeypatch.setattr(
+        "apps.repositories.views.refresh_installation_repositories_from_github",
+        refresh_from_github,
+    )
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    response = client.get(f"/api/v1/organizations/{organization.id}/repositories/?refresh=1")
+
+    assert response.status_code == 200
+    assert [repo["full_name"] for repo in response.json()["repositories"]] == [
+        "acme/api",
+        "acme/web",
+    ]
+
+
+@pytest.mark.django_db
 def test_organization_and_repository_apis_scope_to_active_membership_installation_and_repos():
     user = get_user_model().objects.create_user("member@example.com", password="secret")
     other_user = get_user_model().objects.create_user("other@example.com", password="secret")
@@ -420,6 +498,24 @@ class FakeGitHubClient:
             repository_payload(3001, "api"),
             repository_payload(3002, "web"),
         ]
+
+
+class RepositoryRefreshFakeGitHubClient:
+    def __init__(self, installation_id: int, *, repositories: list[dict]):
+        self.installation_id = installation_id
+        self.repositories = repositories
+
+    def get_installation(self, installation_id):
+        assert installation_id == self.installation_id
+        return installation_payload()
+
+    def create_installation_token(self, installation_id):
+        assert installation_id == self.installation_id
+        return "installation-token"
+
+    def list_installation_repositories(self, installation_token):
+        assert installation_token == "installation-token"
+        return self.repositories
 
 
 def github_user_payload():

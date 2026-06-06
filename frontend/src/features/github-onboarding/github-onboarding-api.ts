@@ -187,7 +187,7 @@ export async function fetchOrganizationRepositories(
   { apiBaseUrl, fetcher = fetch }: FetchOptions = {}
 ) {
   return requestJson(
-    `/organizations/${organizationId}/repositories/`,
+    `/organizations/${organizationId}/repositories/?refresh=1`,
     parseRepositoriesResponse,
     { apiBaseUrl, fetcher }
   )

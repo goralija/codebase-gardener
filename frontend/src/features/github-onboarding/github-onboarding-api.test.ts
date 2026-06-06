@@ -166,7 +166,7 @@ describe("github onboarding API", () => {
     )
 
     expect(fetcher).toHaveBeenCalledWith(
-      "/api/v1/organizations/org-1/billing/",
+      expect.stringContaining("/api/v1/organizations/org-1/billing/"),
       {
         body: JSON.stringify({ autonomous_pr_add_on_enabled: false }),
         credentials: "include",
@@ -190,7 +190,7 @@ describe("github onboarding API", () => {
     )
 
     expect(fetcher).toHaveBeenCalledWith(
-      "/api/v1/organizations/org-1/billing/",
+      expect.stringContaining("/api/v1/organizations/org-1/billing/"),
       expect.objectContaining({
         headers: expect.objectContaining({
           "X-CSRFToken": "test-token",

@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -6,6 +7,10 @@ from apps.accounts.models import CustomerOrganization, Membership
 from apps.accounts.serializers import CustomerOrganizationSerializer
 from apps.common.api import api_error_response
 from apps.github_app.models import GitHubInstallation
+from apps.github_app.services import (
+    GitHubInstallationSyncError,
+    refresh_installation_repositories_from_github,
+)
 from apps.repositories.models import ManagedRepository
 from apps.repositories.serializers import (
     GitHubInstallationSummarySerializer,
@@ -35,6 +40,23 @@ def organization_repositories(request, organization_id):
             "Active GitHub installation not found.",
             status_code=status.HTTP_404_NOT_FOUND,
         )
+
+    if _should_refresh_repository_grants(request) and _can_refresh_repository_grants(
+        request.user,
+        organization,
+    ):
+        try:
+            refresh_installation_repositories_from_github(
+                installation=installation,
+                actor=request.user,
+            )
+            installation.refresh_from_db()
+        except GitHubInstallationSyncError:
+            return api_error_response(
+                "github_installation_sync_failed",
+                "Could not refresh GitHub repository access.",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
     repositories = (
         ManagedRepository.objects.visible_to(request.user)
@@ -81,4 +103,24 @@ def _can_view_complexity_details(user, organization) -> bool:
         user=user,
         organization=organization,
         role__in=[Membership.Role.OWNER, Membership.Role.ADMIN],
+    ).exists()
+
+
+def _should_refresh_repository_grants(request) -> bool:
+    return str(request.query_params.get("refresh") or "").lower() in {"1", "true", "yes"}
+
+
+def _can_refresh_repository_grants(user, organization) -> bool:
+    if not settings.GITHUB_APP_ID.strip() or not settings.GITHUB_APP_PRIVATE_KEY.strip():
+        return False
+    if getattr(user, "is_staff", False):
+        return True
+    return Membership.objects.active().filter(
+        user=user,
+        organization=organization,
+        role__in=[
+            Membership.Role.OWNER,
+            Membership.Role.ADMIN,
+            Membership.Role.MAINTAINER,
+        ],
     ).exists()

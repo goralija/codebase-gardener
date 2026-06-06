@@ -13,6 +13,8 @@ from apps.maintenance_prs.planner import (
     plan_maintenance_prs,
     serialize_maintenance_pr_plan,
 )
+from apps.triggers.models import RepositoryAutomationPolicy
+from apps.triggers.policy import CONSERVATIVE_AUTONOMY_PR_BLOCK_REASON
 from tests.test_product_models import create_installation, create_organization, create_repository
 
 
@@ -440,6 +442,25 @@ def test_autonomous_pr_add_on_disabled_blocks_otherwise_allowed_plans():
         "opp_docs_a",
         "opp_docs_b",
     ]
+
+
+@pytest.mark.django_db
+def test_conservative_autonomy_mode_blocks_otherwise_allowed_plans():
+    repository = demo_repository(autonomous_pr_add_on_enabled=True)
+    policy = RepositoryAutomationPolicy.get_or_create_for_repository(repository)
+    policy.autonomy_mode = RepositoryAutomationPolicy.AutonomyMode.CONSERVATIVE
+    policy.save(update_fields=["autonomy_mode", "updated_at"])
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_autonomy_gate",
+        opportunities=[opportunity("opp_docs_a", "Refresh docs A", ["docs/a.md"])],
+        constitution=constitution(),
+    )
+
+    assert len(plans) == 1
+    assert plans[0].blocked
+    assert plans[0].block_reason == CONSERVATIVE_AUTONOMY_PR_BLOCK_REASON
 
 
 def demo_repository(*, autonomous_pr_add_on_enabled=True):

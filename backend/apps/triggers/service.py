@@ -21,7 +21,7 @@ from apps.repositories.models import ManagedRepository
 from apps.sessions.models import GardeningSession
 from apps.sessions.tasks import run_gardening_session
 from apps.triggers import registry
-from apps.triggers.models import RepositoryCommitTracker
+from apps.triggers.models import RepositoryAutomationPolicy, RepositoryCommitTracker
 from apps.triggers.policy import ensure_trigger_permitted
 from apps.triggers.thresholds import changed_paths_hit_protected, commit_threshold
 
@@ -155,10 +155,16 @@ def evaluate_push_triggers(
 
     source = base_trigger_extra.get("source", "github_webhook")
     webhook_extra = {key: value for key, value in base_trigger_extra.items() if key != "source"}
+    policy = RepositoryAutomationPolicy.get_or_create_for_repository(repository)
 
     commits = payload.get("commits") or []
     commit_count = len(commits)
-    if commit_count and _accumulate_commits(repository, commit_count) >= commit_threshold(constitution):
+    threshold = policy.commit_threshold or commit_threshold(constitution)
+    if (
+        policy.commit_trigger_enabled
+        and commit_count
+        and _accumulate_commits(repository, commit_count) >= threshold
+    ):
         # Reset before enqueue: a queue failure then under-triggers (safe and
         # self-heals on the next threshold) instead of re-firing every push.
         _reset_commits(repository)
@@ -175,7 +181,7 @@ def evaluate_push_triggers(
 
     changed_paths = changed_paths_from_push(payload)
     reason = changed_paths_hit_protected(changed_paths, constitution)
-    if reason:
+    if policy.risky_module_trigger_enabled and reason:
         results.append(
             enqueue_session_for_trigger(
                 repository=repository,

@@ -19,6 +19,8 @@ from apps.maintenance_prs.docs_fixes import (
 )
 from apps.maintenance_prs.models import MaintenancePRPlan
 from apps.maintenance_prs.policy import STALE_RUNNING_TIMEOUT
+from apps.triggers.models import RepositoryAutomationPolicy
+from apps.triggers.policy import autonomous_pr_execution_block_reason
 
 WORKER_AUDIT_SOURCE = "gardening_worker"
 
@@ -341,6 +343,9 @@ def _guard_executable(plan: MaintenancePRPlan) -> None:
         raise PlanNotExecutableError(
             "Plan repository is not active (unselected, suspended, or deactivated)."
         )
+    automation_block_reason = autonomous_pr_execution_block_reason(plan.repository)
+    if automation_block_reason:
+        raise PlanNotExecutableError(automation_block_reason)
     if not autonomous_pr_add_on_enabled(plan.repository.organization):
         raise PlanNotExecutableError(AUTONOMOUS_PR_ADD_ON_DISABLED_REASON)
     if not has_implemented_file_fix(plan):
@@ -351,6 +356,7 @@ def _guard_executable(plan: MaintenancePRPlan) -> None:
 
 def _claim_plan_for_execution(plan: MaintenancePRPlan) -> None:
     stale_running_cutoff = _stale_running_cutoff()
+    RepositoryAutomationPolicy.get_or_create_for_repository(plan.repository)
     updated = MaintenancePRPlan.objects.filter(
         pk=plan.pk,
         blocked=False,
@@ -363,6 +369,9 @@ def _claim_plan_for_execution(plan: MaintenancePRPlan) -> None:
         repository__github_installation__suspended_at__isnull=True,
         repository__github_installation__deleted_at__isnull=True,
         repository__github_installation__organization_id=F("repository__organization_id"),
+        repository__automation_policy__autonomy_mode=(
+            RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS
+        ),
         repository__organization__subscription__autonomous_pr_add_on_enabled=True,
     ).filter(
         Q(

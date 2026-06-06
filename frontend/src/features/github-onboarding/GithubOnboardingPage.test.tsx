@@ -97,6 +97,16 @@ function mockOnboardingFetch({
   )
 }
 
+function repositoryRequestCount() {
+  const mockedFetch = fetch as unknown as {
+    mock: { calls: Array<[RequestInfo | URL, RequestInit | undefined]> }
+  }
+  return mockedFetch.mock.calls.filter(([input]) => {
+    const url = new URL(String(input), "http://localhost")
+    return url.pathname === "/api/v1/organizations/org-1/repositories/"
+  }).length
+}
+
 describe("GithubOnboardingPage", () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -164,6 +174,7 @@ describe("GithubOnboardingPage", () => {
   })
 
   it("renders callback success and selected repositories", async () => {
+    const user = userEvent.setup()
     mockOnboardingFetch()
 
     renderPage("?status=installed&organization_id=org-1")
@@ -193,6 +204,10 @@ describe("GithubOnboardingPage", () => {
       "href",
       "https://github.com/organizations/acme/settings/installations/2001"
     )
+    await user.click(screen.getByRole("button", { name: "Refresh repositories" }))
+    await waitFor(() => {
+      expect(repositoryRequestCount()).toBeGreaterThan(1)
+    })
     expect(
       screen.getByRole("heading", { name: "Billing plan" })
     ).toBeInTheDocument()
@@ -217,7 +232,7 @@ describe("GithubOnboardingPage", () => {
       expect(toggle).not.toBeChecked()
     })
     expect(fetch).toHaveBeenCalledWith(
-      "/api/v1/organizations/org-1/billing/",
+      expect.stringContaining("/api/v1/organizations/org-1/billing/"),
       expect.objectContaining({
         body: JSON.stringify({ autonomous_pr_add_on_enabled: false }),
         method: "PATCH",
