@@ -24,7 +24,21 @@ SECRET_KEY = env("DJANGO_SECRET_KEY", default="dev-insecure-change-me")
 DEBUG = env("DJANGO_DEBUG")
 ALLOWED_HOSTS = env("DJANGO_ALLOWED_HOSTS")
 CORS_ALLOWED_ORIGINS = env("DJANGO_CORS_ALLOWED_ORIGINS")
+CORS_ALLOW_CREDENTIALS = True
 CORS_URLS_REGEX = r"^/api/.*$"
+
+GITHUB_APP_SLUG = env("GITHUB_APP_SLUG", default="codebase-gardener")
+GITHUB_APP_ID = env("GITHUB_APP_ID", default="")
+GITHUB_APP_CLIENT_ID = env("GITHUB_APP_CLIENT_ID", default="")
+GITHUB_APP_CLIENT_SECRET = env("GITHUB_APP_CLIENT_SECRET", default="")
+GITHUB_APP_PRIVATE_KEY = env("GITHUB_APP_PRIVATE_KEY", default="")
+GITHUB_API_BASE_URL = env("GITHUB_API_BASE_URL", default="https://api.github.com")
+GITHUB_WEB_BASE_URL = env("GITHUB_WEB_BASE_URL", default="https://github.com")
+GITHUB_API_VERSION = env("GITHUB_API_VERSION", default="2022-11-28")
+FRONTEND_REDIRECT_BASE_URL = env(
+    "FRONTEND_REDIRECT_BASE_URL",
+    default="http://localhost:5173",
+)
 
 INSTALLED_APPS = [
     "django.contrib.auth",
@@ -34,6 +48,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "corsheaders",
     "rest_framework",
+    "apps.common.apps.CommonConfig",
     "apps.accounts.apps.AccountsConfig",
     "apps.github_app.apps.GitHubAppConfig",
     "apps.repositories.apps.RepositoriesConfig",

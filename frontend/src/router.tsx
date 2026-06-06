@@ -1,6 +1,12 @@
-import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router"
+import {
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+} from "@tanstack/react-router"
 
 import App from "@/App.tsx"
+import { GithubOnboardingPage } from "@/features/github-onboarding"
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -12,7 +18,13 @@ const indexRoute = createRoute({
   component: App,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute])
+const githubOnboardingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/onboarding/github",
+  component: GithubOnboardingPage,
+})
+
+const routeTree = rootRoute.addChildren([indexRoute, githubOnboardingRoute])
 
 export const router = createRouter({ routeTree })
 
@@ -21,4 +33,3 @@ declare module "@tanstack/react-router" {
     router: typeof router
   }
 }
-

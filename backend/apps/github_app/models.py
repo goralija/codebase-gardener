@@ -38,6 +38,7 @@ class GitHubInstallation(UUIDTimestampedModel):
     )
     permissions = models.JSONField(default=dict, blank=True)
     events = models.JSONField(default=list, blank=True)
+    html_url = models.URLField(blank=True)
     suspended_at = models.DateTimeField(null=True, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
