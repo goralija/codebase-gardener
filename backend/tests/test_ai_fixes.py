@@ -30,6 +30,35 @@ def test_apply_ai_fix_returns_validated_reduced_file(monkeypatch):
     assert "def used()" in result
 
 
+def test_apply_ai_fix_applies_search_replace_block(monkeypatch):
+    block = (
+        "<<<<<<< SEARCH\n"
+        "def dead():\n    return 2\n"
+        "=======\n"
+        ">>>>>>> REPLACE\n"
+    )
+    _patch_llm(monkeypatch, f"Here is the edit:\n{block}")
+
+    result = apply_ai_fix("core/util.py", ORIGINAL, _Plan(), {"summary": "dead()"})
+
+    assert "def dead()" not in result
+    assert "def used()" in result
+
+
+def test_apply_ai_fix_rejects_unmatched_search_block(monkeypatch):
+    block = (
+        "<<<<<<< SEARCH\n"
+        "def not_in_file():\n    return 9\n"
+        "=======\n"
+        "def replaced():\n    return 9\n"
+        ">>>>>>> REPLACE\n"
+    )
+    _patch_llm(monkeypatch, block)
+
+    with pytest.raises(AIFixError):
+        apply_ai_fix("core/util.py", ORIGINAL, _Plan(), {})
+
+
 def test_apply_ai_fix_rejects_invalid_python(monkeypatch):
     _patch_llm(monkeypatch, "```python\ndef broken(:\n    pass\n```")
 

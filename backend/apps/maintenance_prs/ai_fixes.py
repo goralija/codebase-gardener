@@ -58,11 +58,13 @@ _CATEGORY_GUIDANCE = {
 # Reject whole-file rewrites: fraction of lines allowed to change (except tests).
 _MAX_CHANGE_RATIO = 0.6
 
-# Largest file we attempt whole-file editing on (chars). Bigger files are skipped
-# cleanly; they need the diff-based author (follow-up) to be handled safely.
-_MAX_FILE_CHARS = 48_000
+# Largest file we send for AI editing (chars). Edit blocks keep the OUTPUT small
+# regardless of size; this bounds the INPUT so it fits the model context. Files
+# beyond this are skipped cleanly (would need chunking).
+_MAX_FILE_CHARS = 200_000
 
-# Upper bound on requested completion tokens (model output ceiling headroom).
+# Upper bound on requested completion tokens. Edit blocks are small, so this is
+# headroom, not sized to the file.
 _MODEL_OUTPUT_TOKEN_CAP = 16_000
 
 _FENCE_RE = re.compile(r"```[a-zA-Z0-9_+-]*\n(.*?)```", re.DOTALL)
@@ -92,31 +94,44 @@ def apply_ai_fix(
     plan: MaintenancePRPlan,
     opportunity: dict | None = None,
 ) -> str:
-    """Return the LLM-edited file content, validated. Raises AIFixError on failure."""
+    """Return the LLM-edited file content, validated. Raises AIFixError on failure.
+
+    Uses SEARCH/REPLACE edit blocks: the model returns only the changed regions,
+    so output stays small and the approach scales to large files. Falls back to a
+    whole-file fenced block if the model returns one instead.
+    """
     if len(content) > _MAX_FILE_CHARS:
         raise AIFixError(
-            f"{path} is too large ({len(content)} chars) for whole-file AI editing; "
-            "skipped."
+            f"{path} is too large ({len(content)} chars) for AI editing; skipped."
         )
 
     prompt = _build_prompt(path, content, plan, opportunity or {})
-    # Allow the full file back: budget output tokens from the file size
-    # (~4 chars/token) plus headroom, capped at the model's output ceiling.
-    max_tokens = min(_MODEL_OUTPUT_TOKEN_CAP, len(content) // 3 + 1024)
     try:
-        raw = complete(prompt, system=_SYSTEM_PROMPT, max_tokens=max_tokens)
+        raw = complete(prompt, system=_SYSTEM_PROMPT, max_tokens=_MODEL_OUTPUT_TOKEN_CAP)
     except LLMError as exc:
         raise AIFixError(f"LLM fix failed for {path}: {exc}") from exc
 
-    updated = _extract_code(raw)
+    blocks = _parse_edit_blocks(raw)
+    if blocks:
+        updated = _apply_edit_blocks(path, content, blocks)
+    else:
+        # Fallback: model returned the whole file in a fenced block.
+        fenced = _FENCE_RE.search(raw)
+        if not fenced:
+            raise AIFixError(f"AI fix for {path} returned no edit blocks or file.")
+        updated = fenced.group(1).strip("\n") + "\n"
+
     _validate(path, content, updated, plan.category)
     return updated
 
 
 _SYSTEM_PROMPT = (
-    "You are a careful senior engineer making one minimal, safe maintenance edit. "
-    "Return ONLY the complete updated file inside a single fenced code block, with no "
-    "explanation before or after."
+    "You are a careful senior engineer making minimal, safe maintenance edits. "
+    "Return ONLY SEARCH/REPLACE edit blocks, no prose. Each block:\n"
+    "<<<<<<< SEARCH\n<exact lines copied verbatim from the file>\n=======\n"
+    "<replacement lines>\n>>>>>>> REPLACE\n"
+    "The SEARCH text must match the current file exactly (including indentation). "
+    "Use as few, as small blocks as possible. To delete code, leave the REPLACE side empty."
 )
 
 
@@ -135,15 +150,50 @@ def _build_prompt(path: str, content: str, plan: MaintenancePRPlan, opportunity:
         f"Finding: {summary}\n"
         f"Evidence:\n{evidence_lines}\n\n"
         f"Instruction: {guidance}\n"
-        "Preserve formatting and unrelated code. Return the FULL updated file.\n\n"
+        "Respond with SEARCH/REPLACE edit blocks only; do not return the whole file.\n\n"
         f"Current file content:\n```\n{content}\n```"
     )
 
 
-def _extract_code(text: str) -> str:
-    match = _FENCE_RE.search(text)
-    code = match.group(1) if match else text
-    return code.strip("\n") + "\n"
+_EDIT_BLOCK_RE = re.compile(
+    r"<{5,}[ \t]*SEARCH[ \t]*\n(.*?)={5,}[^\n]*\n(.*?)>{5,}[ \t]*REPLACE",
+    re.DOTALL,
+)
+
+
+def _parse_edit_blocks(text: str) -> list[tuple[str, str]]:
+    return [(m.group(1), m.group(2)) for m in _EDIT_BLOCK_RE.finditer(text)]
+
+
+def _apply_edit_blocks(path: str, content: str, blocks: list[tuple[str, str]]) -> str:
+    updated = content
+    for search, replace in blocks:
+        if not search.strip():
+            raise AIFixError(f"AI fix for {path} had an empty SEARCH block.")
+        if search in updated:
+            updated = updated.replace(search, replace, 1)
+            continue
+        # Tolerate trailing-whitespace / line-ending differences.
+        normalized = _match_ignoring_trailing_ws(updated, search)
+        if normalized is None:
+            raise AIFixError(
+                f"AI fix for {path}: a SEARCH block did not match the file exactly."
+            )
+        updated = updated.replace(normalized, replace, 1)
+    return updated
+
+
+def _match_ignoring_trailing_ws(content: str, search: str) -> str | None:
+    """Return the substring of *content* matching *search* ignoring trailing
+    whitespace per line, or None if not found."""
+    search_lines = [line.rstrip() for line in search.split("\n")]
+    content_lines = content.split("\n")
+    n = len(search_lines)
+    for i in range(len(content_lines) - n + 1):
+        window = content_lines[i : i + n]
+        if [line.rstrip() for line in window] == search_lines:
+            return "\n".join(window)
+    return None
 
 
 def _validate(path: str, original: str, updated: str, category: str) -> None:
