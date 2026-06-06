@@ -1,4 +1,4 @@
-.PHONY: setup services dev backend-dev frontend-dev check backend-check backend-test analysis-test fixtures-validate docs-skills-validate frontend-lint frontend-test frontend-build frontend-e2e
+.PHONY: setup services dev backend-dev frontend-dev worker-dev check backend-check backend-test analysis-test fixtures-validate docs-skills-validate frontend-lint frontend-test frontend-build frontend-e2e
 .PHONY: services-check runtime-check backend-migrate
 
 PYTHON_VERSION ?= 3.12
@@ -23,6 +23,9 @@ dev: services
 
 backend-dev:
 	cd backend && uv run python manage.py runserver 0.0.0.0:8000
+
+worker-dev:
+	cd backend && uv run celery -A config worker -l INFO
 
 frontend-dev:
 	VITE_API_BASE_URL=$(VITE_API_BASE_URL) pnpm --dir frontend dev --host 0.0.0.0
