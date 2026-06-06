@@ -48,7 +48,7 @@ def test_apply_ai_fix_applies_search_replace_block(monkeypatch):
 def test_apply_ai_fix_chunks_large_file_and_applies_edits(monkeypatch):
     from apps.maintenance_prs import ai_fixes
 
-    # Build a >40k-char file so it is processed in multiple chunks.
+    # Build a >40k-char file so it is processed in multiple chunk passes.
     kept = "".join(f"def used_{i}():\n    return {i}\n\n\n" for i in range(4000))
     big = kept + "def dead():\n    return 0\n"
     assert len(big) > 40_000
@@ -61,11 +61,12 @@ def test_apply_ai_fix_chunks_large_file_and_applies_edits(monkeypatch):
             "<<<<<<< SEARCH\ndef dead():\n    return 0\n=======\n>>>>>>> REPLACE\n"
         )
 
+    monkeypatch.setenv("GARDENER_AI_FIX_CHUNK_WORKERS", "4")
     monkeypatch.setattr(ai_fixes, "complete", fake_complete)
 
     result = apply_ai_fix("core/big.py", big, _Plan(changed_paths=["core/big.py"]), {})
 
-    assert calls["n"] > 1          # multiple chunk passes
+    assert calls["n"] > 1
     assert "def dead()" not in result
     assert "def used_0()" in result
 
@@ -82,6 +83,29 @@ def test_apply_ai_fix_rejects_unmatched_search_block(monkeypatch):
 
     with pytest.raises(AIFixError):
         apply_ai_fix("core/util.py", ORIGINAL, _Plan(), {})
+
+
+def test_apply_ai_fix_skips_invalid_python_block_but_keeps_valid_edit(monkeypatch):
+    bad_block = (
+        "<<<<<<< SEARCH\n"
+        "def used():\n    return 1\n"
+        "=======\n"
+        "def used():\n    return {\n"
+        ">>>>>>> REPLACE\n"
+    )
+    good_block = (
+        "<<<<<<< SEARCH\n"
+        "def dead():\n    return 2\n"
+        "=======\n"
+        ">>>>>>> REPLACE\n"
+    )
+    _patch_llm(monkeypatch, bad_block + good_block)
+
+    result = apply_ai_fix("core/util.py", ORIGINAL, _Plan(), {"summary": "dead()"})
+
+    assert "return {" not in result
+    assert "def dead()" not in result
+    assert "def used()" in result
 
 
 def test_apply_ai_fix_reports_progress(monkeypatch):

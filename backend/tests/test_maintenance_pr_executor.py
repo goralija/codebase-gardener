@@ -183,6 +183,42 @@ def test_execute_ai_dead_code_fix_authors_pr_and_applies_risk_labels(monkeypatch
 
 
 @pytest.mark.django_db
+def test_execute_ai_fix_authors_multiple_files(monkeypatch):
+    from apps.maintenance_prs import ai_fixes
+
+    def fake_apply(path, content, plan, opportunity, progress=None):
+        return content.replace("def dead():\n    return 0\n", "")
+
+    monkeypatch.setenv("GARDENER_AI_FIX_WORKERS", "2")
+    monkeypatch.setattr(ai_fixes, "apply_ai_fix", fake_apply)
+
+    plan = make_plan(
+        category="dead_code",
+        branch_name="gardener/dead-code-multi",
+        title="Remove dead code",
+        changed_paths=["core/a.py", "core/b.py"],
+    )
+    client = FakeGitHubClient(
+        file_contents={
+            "core/a.py": "def kept_a():\n    return 1\n\n\ndef dead():\n    return 0\n",
+            "core/b.py": "def kept_b():\n    return 2\n\n\ndef dead():\n    return 0\n",
+        },
+        file_shas={"core/a.py": "a_sha", "core/b.py": "b_sha"},
+    )
+
+    execute_maintenance_pr_plan(plan, client=client)
+
+    put_paths = [call[3] for call in client.calls if call[0] == "put_file_contents"]
+    assert put_paths == [
+        ".gardener/plans/gardener-dead-code-multi.md",
+        "core/a.py",
+        "core/b.py",
+    ]
+    assert "def dead()" not in client.put_contents["core/a.py"]
+    assert "def dead()" not in client.put_contents["core/b.py"]
+
+
+@pytest.mark.django_db
 def test_execute_ai_fix_failure_fails_plan_without_pr(monkeypatch):
     from apps.maintenance_prs import ai_fixes
     from apps.maintenance_prs.ai_fixes import AIFixError

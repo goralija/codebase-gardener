@@ -11,8 +11,10 @@ from __future__ import annotations
 import ast
 import difflib
 import logging
+import os
 import re
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from apps.common.llm import LLMError, complete
 from apps.maintenance_prs.models import MaintenancePRPlan
@@ -77,15 +79,12 @@ _MAX_CHANGE_RATIO = 0.6
 # Files at/under this size are edited in a single pass with full context.
 _SINGLE_PASS_CHARS = 40_000
 
-# Larger files are read in chunks of this size (the whole file is covered across
-# passes); edits from every chunk are collected and applied to the full file.
+# Larger files are processed in parallel chunks. The merged edit is still
+# validated before the executor commits anything to GitHub.
 _CHUNK_CHARS = 32_000
-
-# Safety bound on passes per file so a pathological file can't run unbounded.
 _MAX_CHUNKS = 40
-
-# Absolute ceiling; beyond this even chunking is refused (chars).
 _MAX_FILE_CHARS = _CHUNK_CHARS * _MAX_CHUNKS
+_DEFAULT_CHUNK_WORKERS = 8
 
 # Upper bound on requested completion tokens. Edit blocks are small, so this is
 # headroom, not sized to the file.
@@ -122,9 +121,9 @@ def apply_ai_fix(
     """Return the LLM-edited file content, validated. Raises AIFixError on failure.
 
     Uses SEARCH/REPLACE edit blocks: the model returns only the changed regions,
-    so output stays small. Files larger than a single context window are read in
-    chunks that together cover the whole file; edit blocks from every chunk are
-    collected and applied to the full content.
+    so output stays small. Files larger than a single safe context window are
+    split into chunks and analyzed concurrently; the merged result is still
+    rejected unless it validates.
 
     ``progress(percent, phase, message)`` is invoked as the work advances so the
     worker/UI can show how far along the AI fix is.
@@ -135,44 +134,23 @@ def apply_ai_fix(
             f"{path} is too large ({len(content)} chars) even for chunked AI editing."
         )
 
-    if len(content) <= _SINGLE_PASS_CHARS:
-        chunks = [content]
-    else:
-        chunks = _chunk_content(path, content)
-
+    chunks = [content] if len(content) <= _SINGLE_PASS_CHARS else _chunk_content(path, content)
     total = len(chunks)
     _report(progress, 0, "reading", f"{path}: reading in {total} part(s)")
 
     blocks: list[tuple[str, str]] = []
     whole_file_fallback: str | None = None
-    for index, chunk in enumerate(chunks):
-        prompt = _build_prompt(
-            path, chunk, plan, opportunity, part=(index + 1, total)
-        )
-        try:
-            raw = complete(
-                prompt, system=_SYSTEM_PROMPT, max_tokens=_MODEL_OUTPUT_TOKEN_CAP
-            )
-        except LLMError as exc:
-            raise AIFixError(f"LLM fix failed for {path}: {exc}") from exc
-
+    outputs = _complete_chunks(path, chunks, plan, opportunity, progress=progress)
+    for index, raw in enumerate(outputs):
         chunk_blocks = _parse_edit_blocks(raw)
         if chunk_blocks:
             blocks.extend(chunk_blocks)
-        elif total == 1:
+            continue
+        if total == 1:
             # Single-pass fallback: model returned the whole file in a fence.
             fenced = _FENCE_RE.search(raw)
             if fenced:
                 whole_file_fallback = fenced.group(1).strip("\n") + "\n"
-
-        # Reserve the last 10% for apply + validate.
-        percent = int((index + 1) / total * 90)
-        _report(
-            progress,
-            percent,
-            "analyzing",
-            f"{path}: part {index + 1}/{total}, {len(blocks)} edit(s) so far",
-        )
 
     _report(progress, 90, "applying", f"{path}: applying {len(blocks)} edit(s)")
     if blocks:
@@ -186,6 +164,76 @@ def apply_ai_fix(
     _validate(path, content, updated, plan.category)
     _report(progress, 100, "done", f"{path}: fix ready")
     return updated
+
+
+def _complete_chunks(
+    path: str,
+    chunks: list[str],
+    plan: MaintenancePRPlan,
+    opportunity: dict,
+    progress: ProgressCallback | None = None,
+) -> list[str]:
+    total = len(chunks)
+    if total == 1:
+        return [_complete_chunk(path, chunks[0], plan, opportunity, part=(1, 1))]
+
+    workers = min(_chunk_worker_count(), total)
+    outputs: dict[int, str] = {}
+    completed = 0
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(
+                _complete_chunk,
+                path,
+                chunk,
+                plan,
+                opportunity,
+                (index + 1, total),
+            ): index
+            for index, chunk in enumerate(chunks)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            outputs[index] = future.result()
+            completed += 1
+            percent = int(completed / total * 90)
+            blocks_so_far = sum(
+                len(_parse_edit_blocks(output)) for output in outputs.values()
+            )
+            _report(
+                progress,
+                percent,
+                "analyzing",
+                f"{path}: part {index + 1}/{total}, {blocks_so_far} edit(s) so far",
+            )
+
+    return [outputs[index] for index in range(total)]
+
+
+def _complete_chunk(
+    path: str,
+    content: str,
+    plan: MaintenancePRPlan,
+    opportunity: dict,
+    part: tuple[int, int],
+) -> str:
+    prompt = _build_prompt(path, content, plan, opportunity, part=part)
+    try:
+        return complete(prompt, system=_SYSTEM_PROMPT, max_tokens=_MODEL_OUTPUT_TOKEN_CAP)
+    except LLMError as exc:
+        raise AIFixError(f"LLM fix failed for {path}: {exc}") from exc
+
+
+def _chunk_worker_count() -> int:
+    raw = os.getenv("GARDENER_AI_FIX_CHUNK_WORKERS") or os.getenv(
+        "GARDENER_AI_FIX_WORKERS",
+        str(_DEFAULT_CHUNK_WORKERS),
+    )
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_CHUNK_WORKERS
+    return max(1, min(value, _DEFAULT_CHUNK_WORKERS))
 
 
 def _chunk_content(path: str, content: str) -> list[str]:
@@ -226,8 +274,6 @@ def _chunk_content(path: str, content: str) -> list[str]:
 
 def _python_top_level_line_starts(content: str) -> set[int] | None:
     try:
-        import ast
-
         tree = ast.parse(content)
     except SyntaxError:
         return None
@@ -293,21 +339,51 @@ def _parse_edit_blocks(text: str) -> list[tuple[str, str]]:
 
 
 def _apply_edit_blocks(path: str, content: str, blocks: list[tuple[str, str]]) -> str:
+    """Apply edit blocks best-effort.
+
+    Blocks whose SEARCH no longer matches (model mis-quote, or a region already
+    changed by an earlier block) are skipped rather than failing the whole fix —
+    important when a large file yields dozens of blocks. For Python, each
+    accepted block must keep the full file parseable, so one malformed chunk edit
+    cannot poison the whole merged patch. Fails only if nothing applied. The
+    final result is still validated (ast parse + change ratio).
+    """
     updated = content
+    applied = 0
+    skipped = 0
     for search, replace in blocks:
         if not search.strip():
-            raise AIFixError(f"AI fix for {path} had an empty SEARCH block.")
-        if search in updated:
-            updated = updated.replace(search, replace, 1)
+            skipped += 1
             continue
-        # Tolerate trailing-whitespace / line-ending differences.
-        normalized = _match_ignoring_trailing_ws(updated, search)
-        if normalized is None:
-            raise AIFixError(
-                f"AI fix for {path}: a SEARCH block did not match the file exactly."
-            )
-        updated = updated.replace(normalized, replace, 1)
+
+        matched = search if search in updated else _match_ignoring_trailing_ws(updated, search)
+        if matched is None:
+            skipped += 1
+            continue
+
+        candidate = updated.replace(matched, replace, 1)
+        if path.endswith(".py") and not _python_parses(candidate):
+            skipped += 1
+            continue
+
+        updated = candidate
+        applied += 1
+
+    if applied == 0:
+        raise AIFixError(
+            f"AI fix for {path}: no SEARCH block matched the file ({skipped} skipped)."
+        )
+    if skipped:
+        logger.info("ai_fix %s: applied %d edit(s), skipped %d", path, applied, skipped)
     return updated
+
+
+def _python_parses(content: str) -> bool:
+    try:
+        ast.parse(content)
+    except SyntaxError:
+        return False
+    return True
 
 
 def _match_ignoring_trailing_ws(content: str, search: str) -> str | None:

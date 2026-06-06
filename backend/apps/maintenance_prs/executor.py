@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from django.db import transaction
@@ -12,7 +14,7 @@ from apps.billing.services import (
 )
 from apps.common.models import AuditEvent
 from apps.github_app.client import GitHubAPIError, GitHubAppClient
-from apps.maintenance_prs.ai_fixes import ai_fixable_paths, apply_ai_fix
+from apps.maintenance_prs import ai_fixes
 from apps.maintenance_prs.docs_fixes import (
     apply_docs_maintenance_note,
     docs_actual_fix_paths,
@@ -24,6 +26,7 @@ from apps.triggers.models import RepositoryAutomationPolicy
 from apps.triggers.policy import autonomous_pr_execution_block_reason
 
 WORKER_AUDIT_SOURCE = "gardening_worker"
+DEFAULT_AI_FIX_WORKERS = 8
 
 
 class PRExecutionError(Exception):
@@ -232,10 +235,11 @@ def _apply_actual_file_fixes(
         paths = docs_actual_fix_paths(plan)
         opportunity = {}
     else:
-        paths = ai_fixable_paths(plan)
+        paths = ai_fixes.ai_fixable_paths(plan)
         opportunity = _lookup_opportunity(plan)
 
     existing_paths: list[str] = []
+    file_inputs: list[tuple[str, str]] = []
     for path in paths:
         try:
             content = client.get_file_contents(
@@ -253,23 +257,115 @@ def _apply_actual_file_fixes(
         existing_paths.append(path)
         if plan.category == "docs":
             updated = apply_docs_maintenance_note(content, plan)
-        else:
-            updated = apply_ai_fix(path, content, plan, opportunity, progress=progress)
-        if updated == content:
+            _write_updated_file(
+                client,
+                owner,
+                repo,
+                path=path,
+                original=content,
+                updated=updated,
+                branch=branch,
+                token=token,
+                plan=plan,
+            )
             continue
+        file_inputs.append((path, content))
 
-        sha = client.get_file_sha(owner, repo, path, branch=branch, token=token)
-        client.put_file_contents(
-            owner,
-            repo,
-            path,
-            message=plan.title,
-            content=updated,
-            branch=branch,
-            token=token,
-            sha=sha,
-        )
+    if plan.category != "docs" and file_inputs:
+        for path, original, updated in _author_ai_file_fixes(
+            file_inputs,
+            plan=plan,
+            opportunity=opportunity,
+            progress=progress,
+        ):
+            _write_updated_file(
+                client,
+                owner,
+                repo,
+                path=path,
+                original=original,
+                updated=updated,
+                branch=branch,
+                token=token,
+                plan=plan,
+            )
     return existing_paths
+
+
+def _author_ai_file_fixes(
+    file_inputs: list[tuple[str, str]],
+    *,
+    plan: MaintenancePRPlan,
+    opportunity: dict,
+    progress=None,
+) -> list[tuple[str, str, str]]:
+    workers = min(_ai_fix_worker_count(), len(file_inputs))
+    if workers <= 1:
+        return [
+            (
+                path,
+                content,
+                ai_fixes.apply_ai_fix(
+                    path, content, plan, opportunity, progress=progress
+                ),
+            )
+            for path, content in file_inputs
+        ]
+
+    results: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(
+                ai_fixes.apply_ai_fix,
+                path,
+                content,
+                plan,
+                opportunity,
+                progress,
+            ): path
+            for path, content in file_inputs
+        }
+        for future in as_completed(futures):
+            results[futures[future]] = future.result()
+
+    return [(path, content, results[path]) for path, content in file_inputs]
+
+
+def _ai_fix_worker_count() -> int:
+    raw = os.getenv("GARDENER_AI_FIX_WORKERS", str(DEFAULT_AI_FIX_WORKERS))
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_AI_FIX_WORKERS
+    return max(1, min(value, DEFAULT_AI_FIX_WORKERS))
+
+
+def _write_updated_file(
+    client: GitHubAppClient,
+    owner: str,
+    repo: str,
+    *,
+    path: str,
+    original: str,
+    updated: str,
+    branch: str,
+    token: str,
+    plan: MaintenancePRPlan,
+) -> None:
+    if updated == original:
+        return
+
+    sha = client.get_file_sha(owner, repo, path, branch=branch, token=token)
+    client.put_file_contents(
+        owner,
+        repo,
+        path,
+        message=plan.title,
+        content=updated,
+        branch=branch,
+        token=token,
+        sha=sha,
+    )
 
 
 def _risk_labels(plan: MaintenancePRPlan) -> list[str]:
