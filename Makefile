@@ -14,7 +14,8 @@ setup:
 
 services:
 	@if [ -n "$(COMPOSE)" ]; then \
-		$(COMPOSE) up -d --wait postgres redis; \
+		$(COMPOSE) up -d --wait postgres redis minio; \
+		$(COMPOSE) run --rm minio-setup; \
 	else \
 		DOCKER="$(DOCKER)" scripts/start_services_with_docker.sh; \
 	fi
