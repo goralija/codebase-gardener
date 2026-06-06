@@ -367,7 +367,7 @@ The three lanes move from fixture contracts to real end-to-end behavior.
 
 #### E05-T03 Ship first safe maintenance PR end-to-end
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Shared
 - Complexity: XL
