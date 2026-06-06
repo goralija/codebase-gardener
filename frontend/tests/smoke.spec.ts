@@ -70,7 +70,7 @@ test("loads the API-backed dashboard shell", async ({ page }) => {
     })
   })
 
-  await page.goto("/")
+  await page.goto("/report")
 
   await expect(
     page.getByRole("heading", { name: "First report" })
@@ -109,7 +109,7 @@ test("shows the first-report loading state", async ({ page }) => {
     })
   })
 
-  await page.goto("/")
+  await page.goto("/report")
 
   await expect(
     page.getByRole("heading", { name: "Loading first report" })
@@ -133,7 +133,7 @@ test("shows the first-report empty state", async ({ page }) => {
     })
   })
 
-  await page.goto("/")
+  await page.goto("/report")
 
   await expect(
     page.getByRole("heading", { name: "First report is not ready" })
@@ -153,7 +153,7 @@ test("shows the first-report error state", async ({ page }) => {
     })
   })
 
-  await page.goto("/")
+  await page.goto("/report")
 
   await expect(
     page.getByRole("heading", { name: "Could not load first report" })
@@ -192,7 +192,7 @@ test("loads GitHub onboarding with selected repositories", async ({ page }) => {
       },
     })
   })
-  await page.route(repositoriesApi, async (route) => {
+  await page.route(`${repositoriesApi}**`, async (route) => {
     await route.fulfill({
       headers: credentialCorsHeaders,
       json: {

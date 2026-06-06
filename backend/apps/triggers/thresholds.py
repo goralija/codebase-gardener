@@ -30,8 +30,8 @@ _COMMIT_THRESHOLD_KEYS = (
 )
 
 
-def commit_threshold(constitution: dict | None) -> int:
-    """Return the commit count that should trigger a session."""
+def configured_commit_threshold(constitution: dict | None) -> int | None:
+    """Return the source-truth commit threshold when one is configured."""
 
     constitution = constitution or {}
     risk_policies = constitution.get("risk_policies")
@@ -47,6 +47,15 @@ def commit_threshold(constitution: dict | None) -> int:
                 continue
             if isinstance(value, (int, float)) and value > 0:
                 return int(value)
+    return None
+
+
+def commit_threshold(constitution: dict | None) -> int:
+    """Return the commit count that should trigger a session."""
+
+    configured = configured_commit_threshold(constitution)
+    if configured is not None:
+        return configured
     return DEFAULT_COMMIT_THRESHOLD
 
 

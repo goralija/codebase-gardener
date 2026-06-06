@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from apps.repositories.models import ManagedRepository
 from apps.triggers import registry
+from apps.triggers.policy import TriggerNotPermittedError
 from apps.triggers.service import SessionEnqueueError, enqueue_session_for_trigger
 
 
@@ -21,6 +22,7 @@ def dispatch_scheduled_sessions() -> dict[str, int]:
     bucket = timezone.now().date().isoformat()
     dispatched = 0
     deduped = 0
+    disabled = 0
     failed = 0
 
     for repository in ManagedRepository.objects.active().iterator():
@@ -33,6 +35,9 @@ def dispatch_scheduled_sessions() -> dict[str, int]:
                 source="schedule",
                 extra={"bucket": bucket},
             )
+        except TriggerNotPermittedError:
+            disabled += 1
+            continue
         except SessionEnqueueError:
             failed += 1
             continue
@@ -41,4 +46,4 @@ def dispatch_scheduled_sessions() -> dict[str, int]:
         else:
             dispatched += 1
 
-    return {"dispatched": dispatched, "deduped": deduped, "failed": failed}
+    return {"dispatched": dispatched, "deduped": deduped, "disabled": disabled, "failed": failed}

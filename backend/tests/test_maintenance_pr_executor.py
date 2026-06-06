@@ -13,6 +13,8 @@ from apps.maintenance_prs.executor import (
 )
 from apps.maintenance_prs.docs_fixes import apply_docs_maintenance_note
 from apps.maintenance_prs.models import MaintenancePRPlan
+from apps.triggers.models import RepositoryAutomationPolicy
+from apps.triggers.policy import CONSERVATIVE_AUTONOMY_PR_BLOCK_REASON
 from tests.test_product_models import (
     create_installation,
     create_organization,
@@ -464,6 +466,23 @@ def test_disabled_autonomous_pr_add_on_blocks_existing_plan_execution():
         execute_maintenance_pr_plan(plan, client=client)
 
     assert str(exc_info.value) == AUTONOMOUS_PR_ADD_ON_DISABLED_REASON
+    assert client.calls == []
+    plan.refresh_from_db()
+    assert plan.execution_status == MaintenancePRPlan.ExecutionStatus.PENDING
+
+
+@pytest.mark.django_db
+def test_conservative_autonomy_mode_blocks_existing_plan_execution():
+    plan = make_plan()
+    policy = RepositoryAutomationPolicy.get_or_create_for_repository(plan.repository)
+    policy.autonomy_mode = RepositoryAutomationPolicy.AutonomyMode.CONSERVATIVE
+    policy.save(update_fields=["autonomy_mode", "updated_at"])
+    client = FakeGitHubClient()
+
+    with pytest.raises(PlanNotExecutableError) as exc_info:
+        execute_maintenance_pr_plan(plan, client=client)
+
+    assert str(exc_info.value) == CONSERVATIVE_AUTONOMY_PR_BLOCK_REASON
     assert client.calls == []
     plan.refresh_from_db()
     assert plan.execution_status == MaintenancePRPlan.ExecutionStatus.PENDING

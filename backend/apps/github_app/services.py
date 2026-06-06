@@ -36,6 +36,7 @@ from apps.triggers.service import (
 
 
 WEBHOOK_AUDIT_SOURCE = "github_webhook"
+REPOSITORY_REFRESH_AUDIT_SOURCE = "github_repository_refresh"
 PR_TRIGGER_ACTIONS = {"opened", "reopened", "synchronize"}
 PR_OUTCOME_ACTIONS = {"closed", "edited"}
 REVIEW_STATE_OUTCOMES = {
@@ -216,6 +217,56 @@ def sync_installation_from_github_payloads(
         organization=organization,
         repository_count=repository_sync.repository_count,
     )
+
+
+def refresh_installation_repositories_from_github(
+    *,
+    installation: GitHubInstallation,
+    actor: Any | None = None,
+    client: GitHubAppClient | None = None,
+) -> RepositorySyncResult:
+    github_client = client or GitHubAppClient()
+    try:
+        installation_payload = github_client.get_installation(
+            installation.github_installation_id
+        )
+        installation_token = github_client.create_installation_token(
+            installation.github_installation_id
+        )
+        repository_payloads = github_client.list_installation_repositories(
+            installation_token
+        )
+    except (GitHubAPIError, ImproperlyConfigured) as exc:
+        raise GitHubInstallationSyncError(
+            "GitHub installation repository refresh failed."
+        ) from exc
+
+    with transaction.atomic():
+        organization = _upsert_organization(installation_payload)
+        refreshed_installation = _upsert_installation(
+            organization,
+            installation_payload,
+        )
+        repository_sync = _sync_repositories(
+            actor=actor,
+            organization=organization,
+            installation=refreshed_installation,
+            repository_payloads=repository_payloads,
+            audit_source=REPOSITORY_REFRESH_AUDIT_SOURCE,
+        )
+        AuditEvent.objects.create(
+            actor=actor if getattr(actor, "pk", None) else None,
+            organization=organization,
+            github_installation=refreshed_installation,
+            event_type=AuditEvent.EventType.GITHUB_INSTALLATION_SYNCED,
+            source=REPOSITORY_REFRESH_AUDIT_SOURCE,
+            metadata={
+                "github_installation_id": refreshed_installation.github_installation_id,
+                "repository_count": repository_sync.repository_count,
+            },
+        )
+
+    return repository_sync
 
 
 def ingest_github_webhook_delivery(

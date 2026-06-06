@@ -19,6 +19,7 @@ FIXTURE_SCHEMAS = {
     "maintenance_opportunity.json": "maintenance_opportunity.schema.json",
     "gardening_session_result.json": "gardening_session_result.schema.json",
     "maintenance_pr_plan.json": "maintenance_pr_plan.schema.json",
+    "repository_automation_settings.json": "repository_automation_settings.schema.json",
     "first_report_fixture.json": "first_report_fixture.schema.json",
 }
 

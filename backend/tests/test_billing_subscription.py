@@ -1,5 +1,6 @@
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import Client
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -9,6 +10,9 @@ from apps.billing.services import billing_summary_payload
 from apps.common.models import AuditEvent
 from apps.github_app.models import GitHubInstallation
 from apps.repositories.models import ManagedRepository
+
+
+FRONTEND_ORIGIN = "http://localhost:5173"
 
 
 @pytest.mark.django_db
@@ -78,6 +82,29 @@ def test_owner_can_view_and_toggle_autonomous_pr_add_on():
     assert AuditEvent.objects.get(
         event_type=AuditEvent.EventType.BILLING_SUBSCRIPTION_UPDATED
     ).metadata["changed_fields"] == ["autonomous_pr_add_on_enabled"]
+
+
+@pytest.mark.django_db
+def test_owner_can_toggle_add_on_from_frontend_origin_with_session_csrf():
+    owner = get_user_model().objects.create_user("owner@example.com", password="secret")
+    organization = create_organization(1)
+    Membership.objects.create(user=owner, organization=organization, role=Membership.Role.OWNER)
+
+    client = Client(enforce_csrf_checks=True, HTTP_HOST="localhost")
+    client.force_login(owner)
+    csrf_response = client.get("/api/v1/github-app/installations/start/")
+    csrf_token = csrf_response.cookies["csrftoken"].value
+
+    response = client.patch(
+        f"/api/v1/organizations/{organization.id}/billing/",
+        '{"autonomous_pr_add_on_enabled": true}',
+        content_type="application/json",
+        HTTP_ORIGIN=FRONTEND_ORIGIN,
+        HTTP_X_CSRFTOKEN=csrf_token,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["subscription"]["autonomous_pr_add_on_enabled"] is True
 
 
 @pytest.mark.django_db

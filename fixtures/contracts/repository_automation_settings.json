@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0",
+  "repository": {
+    "id": "repo_demo",
+    "full_name": "acme/api",
+    "default_branch": "main",
+    "html_url": "https://github.com/acme/api"
+  },
+  "policy": {
+    "id": "policy_demo",
+    "autonomy_mode": "autonomous",
+    "manual_trigger_enabled": true,
+    "scheduled_trigger_enabled": true,
+    "commit_trigger_enabled": true,
+    "risky_module_trigger_enabled": true,
+    "pr_opened_trigger_enabled": true,
+    "ci_failure_trigger_enabled": true,
+    "commit_threshold": 10,
+    "created_at": "2026-06-06T08:00:00Z",
+    "updated_at": "2026-06-06T08:00:00Z"
+  },
+  "effective": {
+    "autonomous_pr_add_on_enabled": true,
+    "can_create_autonomous_prs": true,
+    "pr_creation_status": "Autonomous PR creation is enabled.",
+    "default_commit_threshold": 10,
+    "confidence_threshold": 0.9
+  },
+  "permissions": {
+    "can_edit": true,
+    "can_trigger_manual_session": true
+  },
+  "recent_sessions": [
+    {
+      "id": "session_demo",
+      "status": "completed",
+      "trigger": {
+        "type": "manual",
+        "actor": "user_demo"
+      },
+      "created_at": "2026-06-06T08:00:00Z",
+      "started_at": "2026-06-06T08:01:00Z",
+      "finished_at": "2026-06-06T08:08:00Z",
+      "last_error": ""
+    }
+  ],
+  "recent_pr_plans": [
+    {
+      "id": "pr_plan_demo_docs",
+      "title": "Archive stale seed specification",
+      "blocked": false,
+      "block_reason": null,
+      "approval_status": "approved",
+      "execution_status": "succeeded",
+      "created_pr_url": "https://github.com/acme/api/pull/12",
+      "confidence": 0.94,
+      "confidence_threshold": 0.9,
+      "created_at": "2026-06-06T08:08:00Z"
+    }
+  ]
+}

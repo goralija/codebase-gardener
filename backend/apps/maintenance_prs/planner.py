@@ -18,6 +18,7 @@ from apps.maintenance_prs.policy import (
     confidence_threshold_for_opportunity,
 )
 from apps.maintenance_prs.roi import estimate_roi
+from apps.triggers.policy import autonomous_pr_execution_block_reason
 
 
 CONFIDENCE_THRESHOLD = DEFAULT_CONFIDENCE_THRESHOLD
@@ -101,6 +102,7 @@ def plan_maintenance_prs(
             gardening_session_id=gardening_session_id,
         ).values_list("branch_name", flat=True)
     )
+    automation_decision = _automation_decision(repository)
     billing_decision = _billing_decision(repository)
 
     with transaction.atomic():
@@ -109,6 +111,8 @@ def plan_maintenance_prs(
             forced_reason = forced_block_reasons.get(group[0]["maintenance_opportunity_id"])
             if forced_reason:
                 decision = PolicyDecision(True, forced_reason)
+            if automation_decision.blocked and not decision.blocked:
+                decision = automation_decision
             if billing_decision.blocked and not decision.blocked:
                 decision = billing_decision
             branch_name = _unique_branch_name(_base_branch_name(group), used_branch_names)
@@ -213,6 +217,13 @@ def _billing_decision(repository) -> PolicyDecision:
     if autonomous_pr_add_on_enabled(repository.organization):
         return PolicyDecision(False)
     return PolicyDecision(True, AUTONOMOUS_PR_ADD_ON_DISABLED_REASON)
+
+
+def _automation_decision(repository) -> PolicyDecision:
+    reason = autonomous_pr_execution_block_reason(repository)
+    if reason:
+        return PolicyDecision(True, reason)
+    return PolicyDecision(False)
 
 
 def _effective_threshold(

@@ -63,6 +63,10 @@ class AuditEvent(UUIDTimestampedModel):
             "billing_subscription_updated",
             "Billing subscription updated",
         )
+        AUTOMATION_POLICY_UPDATED = (
+            "automation_policy_updated",
+            "Automation policy updated",
+        )
         SESSION_TRIGGER_ENQUEUED = (
             "session_trigger_enqueued",
             "Session trigger enqueued",

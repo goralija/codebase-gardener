@@ -105,6 +105,10 @@ type FetchOptions = {
   fetcher?: typeof fetch
 }
 
+type RepositoryFetchOptions = FetchOptions & {
+  refresh?: boolean
+}
+
 type BillingUpdatePayload = {
   autonomous_pr_add_on_enabled?: boolean
   plan_code?: string
@@ -184,10 +188,11 @@ export async function fetchOrganizations({
 
 export async function fetchOrganizationRepositories(
   organizationId: string,
-  { apiBaseUrl, fetcher = fetch }: FetchOptions = {}
+  { apiBaseUrl, fetcher = fetch, refresh = false }: RepositoryFetchOptions = {}
 ) {
+  const refreshQuery = refresh ? "?refresh=1" : ""
   return requestJson(
-    `/organizations/${organizationId}/repositories/`,
+    `/organizations/${organizationId}/repositories/${refreshQuery}`,
     parseRepositoriesResponse,
     { apiBaseUrl, fetcher }
   )

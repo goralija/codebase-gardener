@@ -2,14 +2,16 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
-  Outlet,
 } from "@tanstack/react-router"
 
 import App from "@/App.tsx"
+import { AppShell } from "@/components/app-shell"
+import { AutomationPage } from "@/features/automation"
+import { FirstReportPage } from "@/features/first-report"
 import { GithubOnboardingPage } from "@/features/github-onboarding"
 
 const rootRoute = createRootRoute({
-  component: () => <Outlet />,
+  component: AppShell,
 })
 
 const indexRoute = createRoute({
@@ -24,7 +26,24 @@ const githubOnboardingRoute = createRoute({
   component: GithubOnboardingPage,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, githubOnboardingRoute])
+const automationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/automation",
+  component: AutomationPage,
+})
+
+const reportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/report",
+  component: FirstReportPage,
+})
+
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  automationRoute,
+  githubOnboardingRoute,
+  reportRoute,
+])
 
 export const router = createRouter({ routeTree })
 

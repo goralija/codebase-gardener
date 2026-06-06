@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codebase-gardener.dev/schemas/repository_automation_settings.schema.json",
+  "type": "object",
+  "required": ["schema_version", "repository", "policy", "effective", "permissions", "recent_sessions", "recent_pr_plans"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "repository": {
+      "type": "object",
+      "required": ["id", "full_name", "default_branch", "html_url"],
+      "properties": {
+        "id": { "type": "string" },
+        "full_name": { "type": "string" },
+        "default_branch": { "type": "string" },
+        "html_url": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "policy": {
+      "type": "object",
+      "required": ["id", "autonomy_mode", "manual_trigger_enabled", "scheduled_trigger_enabled", "commit_trigger_enabled", "risky_module_trigger_enabled", "pr_opened_trigger_enabled", "ci_failure_trigger_enabled", "commit_threshold", "created_at", "updated_at"],
+      "properties": {
+        "id": { "type": "string" },
+        "autonomy_mode": {
+          "type": "string",
+          "enum": ["conservative", "assisted", "autonomous"]
+        },
+        "manual_trigger_enabled": { "type": "boolean" },
+        "scheduled_trigger_enabled": { "type": "boolean" },
+        "commit_trigger_enabled": { "type": "boolean" },
+        "risky_module_trigger_enabled": { "type": "boolean" },
+        "pr_opened_trigger_enabled": { "type": "boolean" },
+        "ci_failure_trigger_enabled": { "type": "boolean" },
+        "commit_threshold": { "type": "integer", "minimum": 1, "maximum": 500 },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "effective": {
+      "type": "object",
+      "required": ["autonomous_pr_add_on_enabled", "can_create_autonomous_prs", "pr_creation_status", "default_commit_threshold", "confidence_threshold"],
+      "properties": {
+        "autonomous_pr_add_on_enabled": { "type": "boolean" },
+        "can_create_autonomous_prs": { "type": "boolean" },
+        "pr_creation_status": { "type": "string" },
+        "default_commit_threshold": { "type": "integer", "minimum": 1 },
+        "confidence_threshold": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "object",
+      "required": ["can_edit", "can_trigger_manual_session"],
+      "properties": {
+        "can_edit": { "type": "boolean" },
+        "can_trigger_manual_session": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "recent_sessions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "trigger", "created_at", "started_at", "finished_at", "last_error"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string" },
+          "trigger": { "type": "object" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "started_at": { "type": ["string", "null"], "format": "date-time" },
+          "finished_at": { "type": ["string", "null"], "format": "date-time" },
+          "last_error": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "recent_pr_plans": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "blocked", "block_reason", "approval_status", "execution_status", "created_pr_url", "confidence", "confidence_threshold", "created_at"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "blocked": { "type": "boolean" },
+          "block_reason": { "type": ["string", "null"] },
+          "approval_status": { "type": "string" },
+          "execution_status": { "type": "string" },
+          "created_pr_url": { "type": ["string", "null"] },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "confidence_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+          "created_at": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -279,6 +279,53 @@ Produced by Lane C. Executed through Lane A's GitHub integration.
 `confidence_threshold` is optional for `schema_version` 1.0 compatibility. Consumers that do
 not receive it must apply the default autonomous PR threshold of `0.9`.
 
+## RepositoryAutomationSettings
+
+Produced by Lane A backend. Displayed and edited by Lane A dashboard.
+
+```json
+{
+  "schema_version": "1.0",
+  "repository": {
+    "id": "repo_123",
+    "full_name": "acme/api",
+    "default_branch": "main",
+    "html_url": "https://github.com/acme/api"
+  },
+  "policy": {
+    "id": "policy_123",
+    "autonomy_mode": "autonomous",
+    "manual_trigger_enabled": true,
+    "scheduled_trigger_enabled": true,
+    "commit_trigger_enabled": true,
+    "risky_module_trigger_enabled": true,
+    "pr_opened_trigger_enabled": true,
+    "ci_failure_trigger_enabled": true,
+    "commit_threshold": 10,
+    "created_at": "2026-06-06T08:00:00Z",
+    "updated_at": "2026-06-06T08:00:00Z"
+  },
+  "effective": {
+    "autonomous_pr_add_on_enabled": true,
+    "can_create_autonomous_prs": true,
+    "pr_creation_status": "Autonomous PR creation is enabled.",
+    "default_commit_threshold": 10,
+    "confidence_threshold": 0.9
+  },
+  "permissions": {
+    "can_edit": true,
+    "can_trigger_manual_session": true
+  },
+  "recent_sessions": [],
+  "recent_pr_plans": []
+}
+```
+
+`autonomy_mode` values are `conservative`, `assisted`, and `autonomous`.
+`commit_threshold` must be between 1 and 500. Owner, admin, and maintainer roles
+may update repository automation policy and trigger manual sessions. Viewer and
+reviewer roles may view settings but may not update them.
+
 ## FirstReportFixture
 
 Lane A should be able to build the first dashboard before the real analysis pipeline exists by consuming:
