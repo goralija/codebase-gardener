@@ -72,7 +72,9 @@ def plan_maintenance_prs(
         if decision.blocked:
             groups.append([opportunity])
             continue
-        if _conflicts_with_unblocked_groups(groups, opportunity, constitution, profile):
+        if _conflicts_with_unblocked_groups(
+            groups, opportunity, constitution, profile, forced_block_reasons
+        ):
             forced_block_reasons[opportunity_id] = (
                 "Opportunity conflicts with another selected PR plan in this session."
             )
@@ -80,7 +82,7 @@ def plan_maintenance_prs(
             continue
 
         for group in groups:
-            if _group_decision(group, constitution, profile).blocked:
+            if _group_is_blocked(group, constitution, profile, forced_block_reasons):
                 continue
             if _compatible(group, opportunity):
                 group.append(opportunity)
@@ -255,17 +257,38 @@ def _conflicts_with_unblocked_groups(
     opportunity: dict,
     constitution: dict,
     profile: dict | None = None,
+    forced_block_reasons: dict[str, str] | None = None,
 ) -> bool:
     new_paths = set(opportunity.get("affected_paths", []))
     if not new_paths:
         return False
     for group in groups:
-        if _group_decision(group, constitution, profile).blocked:
+        if _group_is_blocked(group, constitution, profile, forced_block_reasons):
             continue
         existing_paths = {path for item in group for path in item.get("affected_paths", [])}
         if not existing_paths.isdisjoint(new_paths):
             return True
     return False
+
+
+def _group_is_blocked(
+    group: list[dict],
+    constitution: dict,
+    profile: dict | None = None,
+    forced_block_reasons: dict[str, str] | None = None,
+) -> bool:
+    """A group is unusable as a merge target / conflict source when it is blocked.
+
+    Force-blocked groups (path-conflict blocks recorded in ``forced_block_reasons``)
+    are invisible to :func:`_group_decision`, which only re-derives policy blocks.
+    Treating both kinds as blocked stops a later opportunity from being merged into,
+    or falsely conflicting with, a group that will never produce a PR. Forced groups
+    are always single-item, so ``group[0]`` identifies them reliably.
+    """
+
+    if forced_block_reasons and group[0]["maintenance_opportunity_id"] in forced_block_reasons:
+        return True
+    return _group_decision(group, constitution, profile).blocked
 
 
 def _protected_path_reason(paths: list[str], constitution: dict) -> str | None:

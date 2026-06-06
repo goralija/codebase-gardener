@@ -7,6 +7,7 @@ import yaml
 from apps.common.models import AuditEvent
 from apps.github_app.client import GitHubAPIError, GitHubAppClient
 from apps.maintenance_prs.executor import _create_or_find_pull_request
+from apps.profiles.learning import OUTCOME_CATEGORY_BUCKET
 from apps.profiles.models import GardenerProfile
 
 PROFILE_FILE_PATH = ".gardener/profile.yaml"
@@ -16,17 +17,6 @@ SYNC_AUDIT_SOURCE = "gardening_worker"
 # Cap rendered notes so an append-only outcome history does not bloat the file
 # (and its diffs) without bound; aggregated counts retain the full signal.
 PROFILE_NOTES_LIMIT = 20
-
-# outcome -> doc-16 outcomes.<bucket>_categories field. Mirrors the learning
-# module's category buckets so the proposed file matches the DB signals.
-_OUTCOME_BUCKET = {
-    "merged": "accepted_categories",
-    "accepted": "accepted_categories",
-    "rejected": "rejected_categories",
-    "closed": "rejected_categories",
-    "reverted": "reverted_categories",
-}
-
 
 def build_profile_document(profile: GardenerProfile) -> dict[str, Any]:
     """Build the doc-16 ``.gardener/profile.yaml`` document (pre-serialization).
@@ -68,7 +58,7 @@ def _outcome_counts(entries: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
         "reverted_categories": {},
     }
     for entry in entries:
-        bucket = _OUTCOME_BUCKET.get(entry.get("outcome"))
+        bucket = OUTCOME_CATEGORY_BUCKET.get(entry.get("outcome"))
         category = entry.get("category")
         if not bucket or not category:
             continue
