@@ -83,3 +83,41 @@ class GitHubInstallation(UUIDTimestampedModel):
 
     def __str__(self) -> str:
         return f"{self.github_account_login} ({self.github_installation_id})"
+
+
+class GitHubWebhookEvent(UUIDTimestampedModel):
+    class Status(models.TextChoices):
+        RECEIVED = "received", "Received"
+        QUEUED = "queued", "Queued"
+        PROCESSING = "processing", "Processing"
+        PROCESSED = "processed", "Processed"
+        IGNORED = "ignored", "Ignored"
+        FAILED = "failed", "Failed"
+
+    delivery_id = models.CharField(max_length=255, unique=True)
+    event = models.CharField(max_length=64)
+    action = models.CharField(max_length=64, blank=True)
+    github_installation_id = models.PositiveBigIntegerField(null=True, blank=True)
+    github_repository_id = models.PositiveBigIntegerField(null=True, blank=True)
+    repository_full_name = models.CharField(max_length=512, blank=True)
+    payload = models.JSONField(default=dict)
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.RECEIVED,
+    )
+    result = models.JSONField(default=dict, blank=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["event", "action"]),
+            models.Index(fields=["status", "created_at"]),
+            models.Index(fields=["github_installation_id"]),
+            models.Index(fields=["github_repository_id"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.event}:{self.delivery_id}"
