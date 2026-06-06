@@ -2,7 +2,6 @@ import type { ReactNode } from "react"
 import { useQuery } from "@tanstack/react-query"
 import {
   AlertTriangle,
-  Bot,
   CheckCircle2,
   CircleDashed,
   CircleOff,
@@ -12,6 +11,7 @@ import {
   Zap,
 } from "lucide-react"
 
+import { GardenerLogo, GardenerMascot } from "@/components/brand"
 import { Button } from "@/components/ui/button"
 import {
   fetchOrganizationBilling,
@@ -88,17 +88,20 @@ export function App() {
   return (
     <main className="min-h-svh bg-background text-foreground">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-5 py-6 sm:px-6 lg:px-8">
-        <header className="flex flex-col gap-2 border-b pb-5">
-          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-            <Bot className="size-4" />
-            Overview
+        <header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <GardenerLogo className="size-5" />
+              Overview
+            </div>
+            <h1 className="mt-2 text-3xl font-semibold tracking-normal">
+              Gardener operations
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {selectedOrganization.github_login}
+            </p>
           </div>
-          <h1 className="text-3xl font-semibold tracking-normal">
-            Gardener operations
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {selectedOrganization.github_login}
-          </p>
+          <GardenerMascot className="size-20 shrink-0 sm:size-24" />
         </header>
 
         <section className="grid gap-4 md:grid-cols-3">
@@ -247,9 +250,12 @@ function OverviewState({
     <main className="min-h-svh bg-background text-foreground">
       <div className="mx-auto flex min-h-svh w-full max-w-3xl items-center justify-center px-5 py-10">
         <section className="w-full rounded-md border bg-card p-6 text-card-foreground">
-          <div className="flex items-center gap-3">
-            {icon}
-            <h1 className="text-xl font-semibold tracking-normal">{title}</h1>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              {icon}
+              <h1 className="text-xl font-semibold tracking-normal">{title}</h1>
+            </div>
+            <GardenerMascot className="size-20 shrink-0" />
           </div>
           {action ? <div className="mt-5">{action}</div> : null}
         </section>

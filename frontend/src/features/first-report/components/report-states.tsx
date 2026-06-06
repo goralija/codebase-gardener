@@ -6,6 +6,7 @@ import {
 } from "lucide-react"
 import type { ReactNode } from "react"
 
+import { GardenerMascot } from "@/components/brand"
 import { Button } from "@/components/ui/button"
 
 type ReportStateLayoutProps = {
@@ -42,6 +43,7 @@ function ReportStateLayout({
                 </p>
               </div>
             </div>
+            <GardenerMascot className="size-24 shrink-0" />
             {children}
           </div>
         </section>

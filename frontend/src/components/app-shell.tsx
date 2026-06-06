@@ -1,9 +1,11 @@
 import { Link, Outlet } from "@tanstack/react-router"
-import { Bot, FileText, GitBranch, Gauge } from "lucide-react"
+import { FileText, GitBranch, Gauge, Workflow } from "lucide-react"
+
+import { GardenerLogo } from "@/components/brand"
 
 const NAV_ITEMS = [
   { icon: Gauge, label: "Overview", to: "/" },
-  { icon: Bot, label: "Automation", to: "/automation" },
+  { icon: Workflow, label: "Automation", to: "/automation" },
   { icon: GitBranch, label: "GitHub", to: "/onboarding/github" },
   { icon: FileText, label: "Report", to: "/report" },
 ]
@@ -17,9 +19,7 @@ export function AppShell() {
             className="flex items-center gap-2 text-sm font-semibold"
             to="/"
           >
-            <span className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <Bot className="size-4" />
-            </span>
+            <GardenerLogo className="size-8" />
             Codebase Gardener
           </Link>
           <nav aria-label="Primary" className="flex flex-wrap items-center gap-1">

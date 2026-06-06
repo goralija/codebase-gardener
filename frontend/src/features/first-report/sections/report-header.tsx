@@ -1,5 +1,6 @@
-import { CheckCircle2, CircleDashed, Sprout } from "lucide-react"
+import { CheckCircle2, CircleDashed } from "lucide-react"
 
+import { GardenerLogo, GardenerMascot } from "@/components/brand"
 import type { FirstReportViewModel } from "../first-report-view-model"
 
 type ReportHeaderProps = {
@@ -21,20 +22,23 @@ export function ReportHeader({
   return (
     <header className="border-b pb-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div className="flex max-w-3xl flex-col gap-3">
-          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-            <Sprout className="size-4" />
-            Repository report
-          </div>
-          <div>
-            <h1 className="text-3xl font-semibold tracking-normal">
-              First report
-            </h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              {repository.id} at commit {repository.shortCommitSha}. The latest
-              session is {session.status.toLowerCase()} with{" "}
-              {focusedPrPlanLabel}.
-            </p>
+        <div className="flex max-w-3xl gap-4">
+          <GardenerMascot className="size-16 shrink-0 sm:size-20" />
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <GardenerLogo className="size-5" />
+              Repository report
+            </div>
+            <div>
+              <h1 className="text-3xl font-semibold tracking-normal">
+                First report
+              </h1>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                {repository.id} at commit {repository.shortCommitSha}. The
+                latest session is {session.status.toLowerCase()} with{" "}
+                {focusedPrPlanLabel}.
+              </p>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
