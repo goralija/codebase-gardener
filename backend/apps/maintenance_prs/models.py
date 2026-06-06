@@ -1,16 +1,56 @@
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models import F, Q
+from django.utils import timezone
 
 from apps.common.models import UUIDTimestampedModel
+from apps.maintenance_prs.policy import DEFAULT_CONFIDENCE_THRESHOLD, STALE_RUNNING_TIMEOUT
 
 
 class MaintenancePRPlanQuerySet(models.QuerySet):
     def for_session(self, gardening_session_id: str):
         return self.filter(gardening_session_id=gardening_session_id)
 
+    def executable(self):
+        stale_running_cutoff = timezone.now() - STALE_RUNNING_TIMEOUT
+        return self.filter(
+            blocked=False,
+            approval_status=MaintenancePRPlan.ApprovalStatus.APPROVED,
+            risk_tier="tier_1_autonomous",
+            confidence__gte=F("confidence_threshold"),
+            repository__unselected_at__isnull=True,
+            repository__deleted_at__isnull=True,
+            repository__organization__deactivated_at__isnull=True,
+            repository__github_installation__suspended_at__isnull=True,
+            repository__github_installation__deleted_at__isnull=True,
+            repository__github_installation__organization_id=F("repository__organization_id"),
+        ).filter(
+            Q(
+                execution_status__in=[
+                    MaintenancePRPlan.ExecutionStatus.PENDING,
+                    MaintenancePRPlan.ExecutionStatus.FAILED,
+                ]
+            )
+            | Q(
+                execution_status=MaintenancePRPlan.ExecutionStatus.RUNNING,
+                updated_at__lt=stale_running_cutoff,
+            )
+        )
+
 
 class MaintenancePRPlan(UUIDTimestampedModel):
+    class ApprovalStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    class ExecutionStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+
     repository = models.ForeignKey(
         "repositories.ManagedRepository",
         on_delete=models.CASCADE,
@@ -21,11 +61,31 @@ class MaintenancePRPlan(UUIDTimestampedModel):
     title = models.CharField(max_length=255)
     risk_tier = models.CharField(max_length=64, db_index=True)
     confidence = models.FloatField(validators=[MinValueValidator(0), MaxValueValidator(1)])
+    confidence_threshold = models.FloatField(
+        default=DEFAULT_CONFIDENCE_THRESHOLD,
+        validators=[MinValueValidator(0), MaxValueValidator(1)],
+    )
     changed_paths = models.JSONField(default=list, blank=True)
     pr_body_sections = models.JSONField(default=dict, blank=True)
     required_checks = models.JSONField(default=list, blank=True)
     blocked = models.BooleanField(default=False, db_index=True)
     block_reason = models.TextField(null=True, blank=True)
+    approval_status = models.CharField(
+        max_length=16,
+        choices=ApprovalStatus.choices,
+        default=ApprovalStatus.PENDING,
+        db_index=True,
+    )
+    execution_status = models.CharField(
+        max_length=16,
+        choices=ExecutionStatus.choices,
+        default=ExecutionStatus.PENDING,
+        db_index=True,
+    )
+    created_pr_number = models.PositiveIntegerField(null=True, blank=True)
+    created_pr_url = models.URLField(blank=True)
+    created_branch_ref = models.CharField(max_length=255, blank=True)
+    execution_error = models.TextField(blank=True)
 
     objects = MaintenancePRPlanQuerySet.as_manager()
 
@@ -78,11 +138,23 @@ class MaintenancePRPlan(UUIDTimestampedModel):
             "title": self.title,
             "risk_tier": self.risk_tier,
             "confidence": self.confidence,
+            "confidence_threshold": self.confidence_threshold,
             "changed_paths": self.changed_paths,
             "pr_body_sections": self.pr_body_sections,
             "required_checks": self.required_checks,
             "blocked": self.blocked,
             "block_reason": self.block_reason,
+        }
+
+    def to_execution_status(self) -> dict:
+        return {
+            "maintenance_pr_plan_id": str(self.id),
+            "approval_status": self.approval_status,
+            "execution_status": self.execution_status,
+            "created_pr_number": self.created_pr_number,
+            "created_pr_url": self.created_pr_url or None,
+            "created_branch_ref": self.created_branch_ref or None,
+            "execution_error": self.execution_error or None,
         }
 
     def __str__(self) -> str:

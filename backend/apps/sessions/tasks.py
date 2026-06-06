@@ -1,10 +1,12 @@
 from celery import shared_task
 from django.utils import timezone
 
+from apps.github_app.client import RETRYABLE_STATUS_CODES, GitHubAPIError
 from apps.sessions.lifecycle import (
     SessionLifecycleError,
     build_failed_gardening_session_result,
     build_gardening_session_result,
+    execute_session_pr_plans,
 )
 from apps.sessions.models import GardeningSession
 
@@ -34,9 +36,12 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
 
     try:
         _run_foundation_placeholder(session)
+        executed_plan_ids, execution_errors = execute_session_pr_plans(session)
         session.result = build_gardening_session_result(
             session,
             started_at=session.started_at,
+            executed_plan_ids=executed_plan_ids,
+            execution_errors=execution_errors,
         )
     except SessionLifecycleError as exc:
         session.status = GardeningSession.Status.FAILED
@@ -89,6 +94,26 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
         session.last_error = str(exc)
         session.save(update_fields=["status", "retry_count", "last_error", "updated_at"])
         raise self.retry(exc=exc, countdown=0)
+    except GitHubAPIError as exc:
+        if exc.status_code in RETRYABLE_STATUS_CODES and self.request.retries < self.max_retries:
+            session.status = GardeningSession.Status.QUEUED
+            session.retry_count = self.request.retries + 1
+            session.last_error = str(exc)
+            session.save(update_fields=["status", "retry_count", "last_error", "updated_at"])
+            raise self.retry(exc=exc, countdown=0)
+
+        session.status = GardeningSession.Status.FAILED
+        session.finished_at = timezone.now()
+        session.last_error = str(exc)
+        session.result = build_failed_gardening_session_result(
+            session,
+            phase="execute",
+            message=str(exc),
+            started_at=session.started_at,
+            finished_at=session.finished_at,
+        )
+        session.save(update_fields=["status", "finished_at", "result", "last_error", "updated_at"])
+        raise
     except Exception as exc:
         session.status = GardeningSession.Status.FAILED
         session.finished_at = timezone.now()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from base64 import b64decode, b64encode
 from datetime import UTC, datetime, timedelta
 from time import sleep
 from typing import Any
@@ -106,6 +107,156 @@ class GitHubAppClient:
             token=installation_token,
         )
 
+    def get_branch_ref(
+        self,
+        owner: str,
+        repo: str,
+        branch: str,
+        *,
+        token: str,
+    ) -> str:
+        payload = self._api_request(
+            "GET",
+            f"/repos/{quote(owner)}/{quote(repo)}/git/ref/heads/{quote(branch)}",
+            token=token,
+        )
+        sha = payload.get("object", {}).get("sha")
+        if not isinstance(sha, str) or not sha:
+            raise GitHubAPIError("GitHub branch ref response did not include a sha.")
+        return sha
+
+    def create_branch_ref(
+        self,
+        owner: str,
+        repo: str,
+        *,
+        branch: str,
+        sha: str,
+        token: str,
+    ) -> dict[str, Any]:
+        return self._api_request(
+            "POST",
+            f"/repos/{quote(owner)}/{quote(repo)}/git/refs",
+            token=token,
+            json={"ref": f"refs/heads/{branch}", "sha": sha},
+        )
+
+    def put_file_contents(
+        self,
+        owner: str,
+        repo: str,
+        path: str,
+        *,
+        message: str,
+        content: str,
+        branch: str,
+        token: str,
+        sha: str | None = None,
+    ) -> dict[str, Any]:
+        encoded_content = b64encode(content.encode("utf-8")).decode("ascii")
+        segments = "/".join(quote(part) for part in path.split("/"))
+        payload = {"message": message, "content": encoded_content, "branch": branch}
+        if sha:
+            payload["sha"] = sha
+        return self._api_request(
+            "PUT",
+            f"/repos/{quote(owner)}/{quote(repo)}/contents/{segments}",
+            token=token,
+            json=payload,
+        )
+
+    def get_file_sha(
+        self,
+        owner: str,
+        repo: str,
+        path: str,
+        *,
+        branch: str,
+        token: str,
+    ) -> str | None:
+        segments = "/".join(quote(part) for part in path.split("/"))
+        try:
+            payload = self._api_request(
+                "GET",
+                f"/repos/{quote(owner)}/{quote(repo)}/contents/{segments}",
+                token=token,
+                params={"ref": branch},
+            )
+        except GitHubAPIError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        sha = payload.get("sha")
+        if sha is not None and not isinstance(sha, str):
+            raise GitHubAPIError("GitHub contents response included an invalid sha.")
+        return sha
+
+    def get_file_contents(
+        self,
+        owner: str,
+        repo: str,
+        path: str,
+        *,
+        branch: str,
+        token: str,
+    ) -> str:
+        segments = "/".join(quote(part) for part in path.split("/"))
+        payload = self._api_request(
+            "GET",
+            f"/repos/{quote(owner)}/{quote(repo)}/contents/{segments}",
+            token=token,
+            params={"ref": branch},
+        )
+        encoded_content = payload.get("content")
+        encoding = payload.get("encoding")
+        if not isinstance(encoded_content, str) or encoding != "base64":
+            raise GitHubAPIError("GitHub contents response did not include base64 content.")
+        try:
+            return b64decode(encoded_content).decode("utf-8")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise GitHubAPIError("GitHub contents response could not be decoded.") from exc
+
+    def create_pull_request(
+        self,
+        owner: str,
+        repo: str,
+        *,
+        title: str,
+        head: str,
+        base: str,
+        body: str,
+        token: str,
+    ) -> dict[str, Any]:
+        return self._api_request(
+            "POST",
+            f"/repos/{quote(owner)}/{quote(repo)}/pulls",
+            token=token,
+            json={"title": title, "head": head, "base": base, "body": body},
+        )
+
+    def find_pull_request(
+        self,
+        owner: str,
+        repo: str,
+        *,
+        head: str,
+        base: str,
+        token: str,
+    ) -> dict[str, Any] | None:
+        payload = self._json_request(
+            "GET",
+            self._api_url(f"/repos/{quote(owner)}/{quote(repo)}/pulls"),
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {token}",
+                "X-GitHub-Api-Version": settings.GITHUB_API_VERSION,
+            },
+            params={"head": f"{owner}:{head}", "base": base, "state": "open"},
+            expect_list=True,
+        )
+        pulls = payload.get("items", [])
+        return pulls[0] if pulls else None
+
     def create_app_jwt(self) -> str:
         app_id = self._required_setting("GITHUB_APP_ID")
         private_key = self._required_setting("GITHUB_APP_PRIVATE_KEY").replace("\\n", "\n")
@@ -152,6 +303,7 @@ class GitHubAppClient:
         path: str,
         *,
         params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
         token: str,
     ) -> dict[str, Any]:
         return self._json_request(
@@ -163,6 +315,7 @@ class GitHubAppClient:
                 "X-GitHub-Api-Version": settings.GITHUB_API_VERSION,
             },
             params=params,
+            json=json,
         )
 
     def _json_request(
@@ -171,8 +324,10 @@ class GitHubAppClient:
         url: str,
         *,
         data: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         params: dict[str, Any] | None = None,
+        expect_list: bool = False,
     ) -> dict[str, Any]:
         response: httpx.Response | None = None
         for attempt in range(self.max_retries + 1):
@@ -181,6 +336,7 @@ class GitHubAppClient:
                     method,
                     url,
                     data=data,
+                    json=json,
                     headers=headers,
                     params=params,
                     timeout=self.timeout,
@@ -212,6 +368,11 @@ class GitHubAppClient:
             payload = response.json()
         except ValueError as exc:
             raise GitHubAPIError("GitHub response was not valid JSON.") from exc
+
+        if expect_list:
+            if not isinstance(payload, list):
+                raise GitHubAPIError("GitHub response was not a JSON array.")
+            return {"items": payload}
 
         if not isinstance(payload, dict):
             raise GitHubAPIError("GitHub response was not a JSON object.")

@@ -8,11 +8,15 @@ from typing import Iterable
 from django.db import transaction
 
 from apps.maintenance_prs.models import MaintenancePRPlan, MaintenancePRPlanOpportunity
+from apps.maintenance_prs.policy import (
+    DEAD_CODE_CONFIDENCE_THRESHOLD,
+    DEFAULT_CONFIDENCE_THRESHOLD,
+    confidence_threshold_for_opportunity,
+)
 from apps.maintenance_prs.roi import estimate_roi
 
 
-CONFIDENCE_THRESHOLD = 0.90
-DEAD_CODE_CONFIDENCE_THRESHOLD = 0.95
+CONFIDENCE_THRESHOLD = DEFAULT_CONFIDENCE_THRESHOLD
 GROUP_SIZE_LIMIT = 3
 
 
@@ -94,10 +98,11 @@ def plan_maintenance_prs(
                 title=_plan_title(group),
                 risk_tier=_risk_tier(group),
                 confidence=min(float(item["confidence"]) for item in group),
+                confidence_threshold=_group_confidence_threshold(group, constitution),
                 changed_paths=_unique_values(
                     path for item in group for path in item.get("affected_paths", [])
                 ),
-                pr_body_sections=_pr_body_sections(group, decision),
+                pr_body_sections=_pr_body_sections(group, decision, constitution),
                 required_checks=_unique_values(
                     check for item in group for check in item.get("required_checks", [])
                 ),
@@ -128,10 +133,14 @@ def evaluate_policy(opportunity: dict, constitution: dict) -> PolicyDecision:
 
     confidence = float(opportunity.get("confidence", 0))
     category = opportunity.get("category", "")
+    threshold = confidence_threshold_for_opportunity(opportunity, constitution)
     if category == "dead_code" and confidence < DEAD_CODE_CONFIDENCE_THRESHOLD:
-        return PolicyDecision(True, "Dead-code removal requires confidence >= 0.95.")
-    if confidence < CONFIDENCE_THRESHOLD:
-        return PolicyDecision(True, "Confidence below 0.90 PR creation threshold.")
+        return PolicyDecision(
+            True,
+            f"Dead-code removal requires confidence >= {DEAD_CODE_CONFIDENCE_THRESHOLD:.2f}.",
+        )
+    if confidence < threshold:
+        return PolicyDecision(True, f"Confidence below {threshold:.2f} PR creation threshold.")
 
     allowed_fixes = constitution.get("allowed_fixes", {})
     if category in allowed_fixes.get("advisory", []):
@@ -241,7 +250,7 @@ def _risk_tier(group: list[dict]) -> str:
     return group[0].get("risk_tier", "unknown")
 
 
-def _pr_body_sections(group: list[dict], decision: PolicyDecision) -> dict:
+def _pr_body_sections(group: list[dict], decision: PolicyDecision, constitution: dict) -> dict:
     evidence = []
     for opportunity in group:
         for item in opportunity.get("evidence", []):
@@ -255,10 +264,11 @@ def _pr_body_sections(group: list[dict], decision: PolicyDecision) -> dict:
     entropy_delta = sum(float(item.get("expected_entropy_delta", 0)) for item in group)
     checks = _unique_values(check for item in group for check in item.get("required_checks", []))
     confidence = min(float(item.get("confidence", 0)) for item in group)
+    threshold = _group_confidence_threshold(group, constitution)
     changed_paths = _unique_values(path for item in group for path in item.get("affected_paths", []))
     categories = _unique_values(item.get("category", "unknown") for item in group)
     confidence_reasons = (
-        f"Minimum opportunity confidence {confidence:.2f}; threshold {CONFIDENCE_THRESHOLD:.2f}; "
+        f"Minimum opportunity confidence {confidence:.2f}; threshold {threshold:.2f}; "
         f"{'blocked by policy' if decision.blocked else 'meets autonomous PR threshold'}."
     )
     constitution_rules = (
@@ -295,6 +305,10 @@ def _unique_values(values: Iterable[str]) -> list[str]:
             seen.add(value)
             result.append(value)
     return result
+
+
+def _group_confidence_threshold(group: list[dict], constitution: dict) -> float:
+    return max(confidence_threshold_for_opportunity(item, constitution) for item in group)
 
 
 def _slug(value: str) -> str:

@@ -13,6 +13,13 @@
     "title": { "type": "string" },
     "risk_tier": { "type": "string" },
     "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "confidence_threshold": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.9,
+      "description": "Optional in schema_version 1.0 for backward compatibility; omitted values use the default autonomous PR threshold."
+    },
     "changed_paths": { "type": "array", "items": { "type": "string" } },
     "pr_body_sections": {
       "type": "object",

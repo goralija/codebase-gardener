@@ -242,6 +242,10 @@ Produced by Lane C. Displayed by Lane A.
 }
 ```
 
+`errors[]` entries include `phase` and `message`. Execute-phase errors for a
+specific PR plan may also include `maintenance_pr_plan_id` so the session can
+continue with other approved plans while reporting which plan failed.
+
 ## MaintenancePRPlan
 
 Produced by Lane C. Executed through Lane A's GitHub integration.
@@ -257,6 +261,7 @@ Produced by Lane C. Executed through Lane A's GitHub integration.
   "title": "Refresh architecture documentation",
   "risk_tier": "tier_1_autonomous",
   "confidence": 0.94,
+  "confidence_threshold": 0.9,
   "changed_paths": ["ARCHITECTURE.md"],
   "pr_body_sections": {
     "goal": "Refresh stale architecture docs.",
@@ -270,6 +275,9 @@ Produced by Lane C. Executed through Lane A's GitHub integration.
   "block_reason": null
 }
 ```
+
+`confidence_threshold` is optional for `schema_version` 1.0 compatibility. Consumers that do
+not receive it must apply the default autonomous PR threshold of `0.9`.
 
 ## FirstReportFixture
 

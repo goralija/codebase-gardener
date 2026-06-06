@@ -245,7 +245,7 @@ def test_github_client_retries_retryable_statuses(monkeypatch):
     ]
     requests = []
 
-    def fake_request(method, url, *, data=None, headers=None, params=None, timeout=None):
+    def fake_request(method, url, *, data=None, json=None, headers=None, params=None, timeout=None):
         requests.append(
             {
                 "method": method,
