@@ -32,6 +32,7 @@ def test_first_report_endpoint_allows_configured_frontend_origin():
 
     assert response.status_code == 200
     assert response["access-control-allow-origin"] == "http://localhost:5174"
+    assert response["access-control-allow-credentials"] == "true"
 
 
 def test_first_report_serializer_requires_top_level_contract_fields():

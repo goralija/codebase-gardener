@@ -18,5 +18,7 @@ def health(_request):
 
 urlpatterns = [
     path("api/v1/health/", health, name="health"),
+    path("api/v1/github-app/", include("apps.github_app.urls")),
+    path("api/v1/organizations/", include("apps.accounts.urls")),
     path("api/v1/reports/", include("apps.analysis.urls")),
 ]

@@ -5,6 +5,9 @@ const apiBaseUrl = (
   process.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api/v1"
 ).replace(/\/+$/, "")
 const firstReportApi = `${apiBaseUrl}/reports/first/`
+const githubInstallStartApi = `${apiBaseUrl}/github-app/installations/start/`
+const organizationsApi = `${apiBaseUrl}/organizations/`
+const repositoriesApi = `${apiBaseUrl}/organizations/org-1/repositories/`
 const firstReportFixture = JSON.parse(
   readFileSync(
     new URL(
@@ -17,6 +20,10 @@ const firstReportFixture = JSON.parse(
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
+}
+const credentialCorsHeaders = {
+  "access-control-allow-credentials": "true",
+  "access-control-allow-origin": "http://127.0.0.1:5174",
 }
 
 test("loads the API-backed dashboard shell", async ({ page }) => {
@@ -121,4 +128,93 @@ test("shows the first-report error state", async ({ page }) => {
   await expect(
     page.getByText(/does not match the shared contract/)
   ).toBeVisible()
+})
+
+test("loads GitHub onboarding with selected repositories", async ({ page }) => {
+  const installUrl =
+    "https://github.com/apps/codebase-gardener/installations/new?state=signed"
+  const settingsUrl =
+    "https://github.com/organizations/acme/settings/installations/2001"
+
+  await page.route(githubInstallStartApi, async (route) => {
+    await route.fulfill({
+      headers: credentialCorsHeaders,
+      json: {
+        install_url: installUrl,
+      },
+    })
+  })
+  await page.route(organizationsApi, async (route) => {
+    await route.fulfill({
+      headers: credentialCorsHeaders,
+      json: {
+        organizations: [
+          {
+            id: "org-1",
+            name: "Acme",
+            github_login: "acme",
+            github_account_type: "organization",
+          },
+        ],
+      },
+    })
+  })
+  await page.route(repositoriesApi, async (route) => {
+    await route.fulfill({
+      headers: credentialCorsHeaders,
+      json: {
+        organization: {
+          id: "org-1",
+          name: "Acme",
+          github_login: "acme",
+          github_account_type: "organization",
+        },
+        installation: {
+          id: "inst-1",
+          github_installation_id: 2001,
+          repository_selection: "selected",
+          html_url: settingsUrl,
+        },
+        repositories: [
+          {
+            id: "repo-1",
+            github_repository_id: 3001,
+            name: "api",
+            full_name: "acme/api",
+            owner_login: "acme",
+            private: true,
+            default_branch: "main",
+            html_url: "https://github.com/acme/api",
+            selected_at: "2026-06-06T08:00:00Z",
+          },
+          {
+            id: "repo-2",
+            github_repository_id: 3002,
+            name: "web",
+            full_name: "acme/web",
+            owner_login: "acme",
+            private: true,
+            default_branch: "main",
+            html_url: "https://github.com/acme/web",
+            selected_at: "2026-06-06T08:00:00Z",
+          },
+        ],
+      },
+    })
+  })
+
+  await page.goto("/onboarding/github?status=installed&organization_id=org-1")
+
+  await expect(
+    page.getByRole("link", { name: "Install GitHub App" })
+  ).toHaveAttribute("href", installUrl)
+  await expect(page.getByText("GitHub App installed")).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: "Selected repositories" })
+  ).toBeVisible()
+  await expect(page.getByRole("link", { name: "acme/api" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "acme/web" })).toBeVisible()
+  await expect(
+    page.getByRole("link", { name: /Edit repository access in GitHub/ })
+  ).toHaveAttribute("href", settingsUrl)
 })
