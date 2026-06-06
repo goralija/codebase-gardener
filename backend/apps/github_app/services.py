@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
 from datetime import UTC
@@ -11,6 +12,7 @@ from django.contrib.auth import get_user_model
 from django.core import signing
 from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -19,6 +21,12 @@ from apps.common.models import AuditEvent
 from apps.github_app.client import GitHubAPIError, GitHubAppClient
 from apps.github_app.models import GitHubInstallation, GitHubWebhookEvent
 from apps.github_app.state import create_install_state, load_install_state
+from apps.maintenance_prs.models import MaintenancePRPlan
+from apps.profiles.learning import (
+    Outcome,
+    find_plan_for_pull_request,
+    record_pr_outcome,
+)
 from apps.repositories.models import ManagedRepository
 from apps.triggers.service import (
     SessionEnqueueError,
@@ -29,6 +37,12 @@ from apps.triggers.service import (
 
 WEBHOOK_AUDIT_SOURCE = "github_webhook"
 PR_TRIGGER_ACTIONS = {"opened", "reopened", "synchronize"}
+PR_OUTCOME_ACTIONS = {"closed", "edited"}
+REVIEW_STATE_OUTCOMES = {
+    "approved": Outcome.ACCEPTED,
+    "changes_requested": Outcome.REJECTED,
+    "dismissed": Outcome.REJECTED,
+}
 FAILED_CI_CONCLUSIONS = {
     "action_required",
     "cancelled",
@@ -322,6 +336,8 @@ def _route_github_webhook_event(event: GitHubWebhookEvent) -> dict[str, Any]:
         return _process_push_webhook(event)
     if event.event == "pull_request":
         return _process_pull_request_webhook(event)
+    if event.event == "pull_request_review":
+        return _process_pull_request_review_webhook(event)
     if event.event in {"workflow_run", "check_suite"}:
         return _process_ci_webhook(event)
     return _ignored_result("unsupported_event", event=event.event)
@@ -540,6 +556,8 @@ def _process_push_webhook(event: GitHubWebhookEvent) -> dict[str, Any]:
             "commit_sha": event.payload.get("after") or "",
         },
     )
+    reverted_plan_ids = _record_reverted_gardener_plans(repository, event)
+
     sessions = [session]
     sessions.extend(
         evaluate_push_triggers(
@@ -554,19 +572,105 @@ def _process_push_webhook(event: GitHubWebhookEvent) -> dict[str, Any]:
             },
         )
     )
-    return _processed_result(sessions_created=sessions)
+    extra: dict[str, Any] = {}
+    if reverted_plan_ids:
+        extra["reverted_maintenance_pr_plan_ids"] = reverted_plan_ids
+    return _processed_result(sessions_created=sessions, **extra)
+
+
+_REVERT_SHA_RE = re.compile(r"reverts commit ([0-9a-f]{7,40})", re.IGNORECASE)
+
+
+def _record_reverted_gardener_plans(
+    repository: ManagedRepository,
+    event: GitHubWebhookEvent,
+) -> list[str]:
+    """Detect revert commits on the default branch that undo merged gardener PRs.
+
+    GitHub revert commit bodies read ``This reverts commit <sha>.``; we match
+    that SHA against the merge commit recorded when the plan's PR was merged.
+    Only merged plans carry ``merge_commit_sha``, so unmerged PRs cannot
+    false-positive. Returns recorded plan ids.
+    """
+
+    commits = event.payload.get("commits")
+    if not isinstance(commits, list) or not commits:
+        return []
+
+    reverted_shas: set[str] = set()
+    for commit in commits:
+        if not isinstance(commit, dict):
+            continue
+        message = str(commit.get("message") or "")
+        for match in _REVERT_SHA_RE.finditer(message):
+            reverted_shas.add(match.group(1).lower())
+
+    match_query = _merge_sha_match_query(reverted_shas)
+    if match_query is None:
+        return []
+
+    # Index-backed DB filter (merge_commit_sha is indexed) instead of scanning
+    # every merged gardener plan in Python on each default-branch push.
+    candidate_plans = (
+        MaintenancePRPlan.objects.filter(repository=repository)
+        .exclude(merge_commit_sha="")
+        .filter(match_query)
+    )
+    recorded: list[str] = []
+    for plan in candidate_plans:
+        result = record_pr_outcome(
+            plan=plan,
+            outcome=Outcome.REVERTED,
+            source_metadata={
+                "source": WEBHOOK_AUDIT_SOURCE,
+                "delivery_id": event.delivery_id,
+                "event": event.event,
+            },
+        )
+        if result.recorded:
+            recorded.append(result.maintenance_pr_plan_id)
+    return recorded
+
+
+def _merge_sha_match_query(reverted_shas: set[str]) -> Q | None:
+    """Build a filter matching a plan's merge SHA to any reverted SHA.
+
+    Full 40-char SHAs match exactly; abbreviated SHAs (``git revert`` emits
+    >= 7 hex chars) match as a case-insensitive prefix of the stored merge SHA.
+    Returns ``None`` when there is nothing to match.
+    """
+
+    full = {sha for sha in reverted_shas if len(sha) >= 40}
+    abbreviated = reverted_shas - full
+    query = Q()
+    has_clause = False
+    if full:
+        query |= Q(merge_commit_sha__in=full)
+        has_clause = True
+    for sha in abbreviated:
+        query |= Q(merge_commit_sha__istartswith=sha)
+        has_clause = True
+    return query if has_clause else None
 
 
 def _process_pull_request_webhook(event: GitHubWebhookEvent) -> dict[str, Any]:
-    if event.action not in PR_TRIGGER_ACTIONS:
-        return _ignored_result("unsupported_pull_request_action", action=event.action)
-
     repository = _active_repository_for_event(event)
     if repository is None:
         return _ignored_result("repository_not_found_or_inactive")
 
     pull_request = event.payload.get("pull_request") or {}
     pull_request_number = event.payload.get("number") or pull_request.get("number")
+
+    if event.action in PR_OUTCOME_ACTIONS:
+        return _record_pull_request_outcome(
+            event=event,
+            repository=repository,
+            pull_request=pull_request,
+            pull_request_number=pull_request_number,
+        )
+
+    if event.action not in PR_TRIGGER_ACTIONS:
+        return _ignored_result("unsupported_pull_request_action", action=event.action)
     if pull_request_number is None:
         return _ignored_result("missing_pull_request_number")
 
@@ -579,6 +683,92 @@ def _process_pull_request_webhook(event: GitHubWebhookEvent) -> dict[str, Any]:
         extra={"pull_request_number": int(pull_request_number)},
     )
     return _processed_result(sessions_created=[session])
+
+
+def _record_pull_request_outcome(
+    *,
+    event: GitHubWebhookEvent,
+    repository: ManagedRepository,
+    pull_request: dict[str, Any],
+    pull_request_number: Any,
+) -> dict[str, Any]:
+    branch_name = str((pull_request.get("head") or {}).get("ref") or "")
+    plan = find_plan_for_pull_request(
+        repository=repository,
+        pr_number=int(pull_request_number) if pull_request_number is not None else None,
+        branch_name=branch_name,
+    )
+    if plan is None:
+        return _ignored_result("pull_request_not_gardener_authored")
+
+    extra_metadata: dict[str, Any] = {}
+    if event.action == "closed":
+        if pull_request.get("merged"):
+            outcome = Outcome.MERGED
+            merge_commit_sha = pull_request.get("merge_commit_sha")
+            if merge_commit_sha:
+                extra_metadata["merge_commit_sha"] = str(merge_commit_sha)
+        else:
+            outcome = Outcome.CLOSED
+    else:  # edited
+        outcome = Outcome.EDITED
+
+    return _persist_pr_outcome(
+        plan=plan, outcome=outcome, event=event, extra_metadata=extra_metadata
+    )
+
+
+def _process_pull_request_review_webhook(event: GitHubWebhookEvent) -> dict[str, Any]:
+    if event.action != "submitted":
+        return _ignored_result("unsupported_pull_request_review_action", action=event.action)
+
+    repository = _active_repository_for_event(event)
+    if repository is None:
+        return _ignored_result("repository_not_found_or_inactive")
+
+    review = event.payload.get("review") or {}
+    state = str(review.get("state") or "").lower()
+    outcome = REVIEW_STATE_OUTCOMES.get(state)
+    if outcome is None:
+        return _ignored_result("unsupported_review_state", state=state)
+
+    pull_request = event.payload.get("pull_request") or {}
+    pull_request_number = pull_request.get("number")
+    branch_name = str((pull_request.get("head") or {}).get("ref") or "")
+    plan = find_plan_for_pull_request(
+        repository=repository,
+        pr_number=int(pull_request_number) if pull_request_number is not None else None,
+        branch_name=branch_name,
+    )
+    if plan is None:
+        return _ignored_result("pull_request_not_gardener_authored")
+
+    return _persist_pr_outcome(plan=plan, outcome=outcome, event=event)
+
+
+def _persist_pr_outcome(
+    *,
+    plan,
+    outcome: str,
+    event: GitHubWebhookEvent,
+    extra_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result = record_pr_outcome(
+        plan=plan,
+        outcome=outcome,
+        source_metadata={
+            "source": WEBHOOK_AUDIT_SOURCE,
+            "delivery_id": event.delivery_id,
+            "event": event.event,
+            "action": event.action,
+            **(extra_metadata or {}),
+        },
+    )
+    return _processed_result(
+        outcome=result.outcome,
+        maintenance_pr_plan_id=result.maintenance_pr_plan_id,
+        outcome_recorded=result.recorded,
+    )
 
 
 def _process_ci_webhook(event: GitHubWebhookEvent) -> dict[str, Any]:
@@ -598,6 +788,27 @@ def _process_ci_webhook(event: GitHubWebhookEvent) -> dict[str, Any]:
     if not subject_id:
         return _ignored_result("missing_ci_subject_id")
 
+    outcome_info: dict[str, Any] = {}
+    head_branch = str(ci_payload.get("head_branch") or "")
+    if head_branch:
+        plan = find_plan_for_pull_request(repository=repository, branch_name=head_branch)
+        if plan is not None:
+            result = record_pr_outcome(
+                plan=plan,
+                outcome=Outcome.FAILED,
+                source_metadata={
+                    "source": WEBHOOK_AUDIT_SOURCE,
+                    "delivery_id": event.delivery_id,
+                    "event": event.event,
+                    "conclusion": conclusion,
+                },
+            )
+            outcome_info = {
+                "outcome": result.outcome,
+                "maintenance_pr_plan_id": result.maintenance_pr_plan_id,
+                "outcome_recorded": result.recorded,
+            }
+
     session = _create_or_get_webhook_session(
         repository=repository,
         event=event,
@@ -606,7 +817,7 @@ def _process_ci_webhook(event: GitHubWebhookEvent) -> dict[str, Any]:
         subject_id=subject_id,
         extra={f"{event.event}_id": int(subject_id)},
     )
-    return _processed_result(sessions_created=[session])
+    return _processed_result(sessions_created=[session], **outcome_info)
 
 
 def _parse_installation_id(installation_id: str | int) -> int:

@@ -18,6 +18,9 @@ from apps.maintenance_prs.roi import estimate_roi
 
 CONFIDENCE_THRESHOLD = DEFAULT_CONFIDENCE_THRESHOLD
 GROUP_SIZE_LIMIT = 3
+# Categories whose prior PRs were reverted demand stronger evidence than the
+# ordinary autonomous threshold before Gardener tries the same category again.
+REVERTED_CONFIDENCE_THRESHOLD = 0.97
 
 
 @dataclass(frozen=True)
@@ -32,10 +35,15 @@ def plan_maintenance_prs(
     gardening_session_id: str,
     opportunities: Iterable[dict],
     constitution: dict,
+    profile: dict | None = None,
 ) -> list[MaintenancePRPlan]:
+    profile = profile or {}
+    accepted_categories = set(profile.get("accepted_categories") or [])
     ordered_opportunities = sorted(
         opportunities,
         key=lambda item: (
+            # Accepted categories rank ahead of equally-confident peers.
+            0 if item.get("category", "") in accepted_categories else 1,
             -float(item.get("confidence", 0)),
             item.get("category", ""),
             item.get("maintenance_opportunity_id", ""),
@@ -55,11 +63,11 @@ def plan_maintenance_prs(
         if opportunity_id in existing_opportunity_ids:
             continue
 
-        decision = evaluate_policy(opportunity, constitution)
+        decision = evaluate_policy(opportunity, constitution, profile)
         if decision.blocked:
             groups.append([opportunity])
             continue
-        if _conflicts_with_unblocked_groups(groups, opportunity, constitution):
+        if _conflicts_with_unblocked_groups(groups, opportunity, constitution, profile):
             forced_block_reasons[opportunity_id] = (
                 "Opportunity conflicts with another selected PR plan in this session."
             )
@@ -67,7 +75,7 @@ def plan_maintenance_prs(
             continue
 
         for group in groups:
-            if _group_decision(group, constitution).blocked:
+            if _group_decision(group, constitution, profile).blocked:
                 continue
             if _compatible(group, opportunity):
                 group.append(opportunity)
@@ -85,7 +93,7 @@ def plan_maintenance_prs(
 
     with transaction.atomic():
         for group in groups:
-            decision = _group_decision(group, constitution)
+            decision = _group_decision(group, constitution, profile)
             forced_reason = forced_block_reasons.get(group[0]["maintenance_opportunity_id"])
             if forced_reason:
                 decision = PolicyDecision(True, forced_reason)
@@ -96,13 +104,14 @@ def plan_maintenance_prs(
                 gardening_session_id=gardening_session_id,
                 branch_name=branch_name,
                 title=_plan_title(group),
+                category=_plan_category(group),
                 risk_tier=_risk_tier(group),
                 confidence=min(float(item["confidence"]) for item in group),
-                confidence_threshold=_group_confidence_threshold(group, constitution),
+                confidence_threshold=_group_confidence_threshold(group, constitution, profile),
                 changed_paths=_unique_values(
                     path for item in group for path in item.get("affected_paths", [])
                 ),
-                pr_body_sections=_pr_body_sections(group, decision, constitution),
+                pr_body_sections=_pr_body_sections(group, decision, constitution, profile),
                 required_checks=_unique_values(
                     check for item in group for check in item.get("required_checks", [])
                 ),
@@ -123,7 +132,12 @@ def serialize_maintenance_pr_plan(plan: MaintenancePRPlan) -> dict:
     return plan.to_contract()
 
 
-def evaluate_policy(opportunity: dict, constitution: dict) -> PolicyDecision:
+def evaluate_policy(
+    opportunity: dict,
+    constitution: dict,
+    profile: dict | None = None,
+) -> PolicyDecision:
+    profile = profile or {}
     if _has_blocking_open_questions(constitution):
         return PolicyDecision(True, "Repository constitution has unresolved open questions.")
 
@@ -133,7 +147,7 @@ def evaluate_policy(opportunity: dict, constitution: dict) -> PolicyDecision:
 
     confidence = float(opportunity.get("confidence", 0))
     category = opportunity.get("category", "")
-    threshold = confidence_threshold_for_opportunity(opportunity, constitution)
+    threshold = _effective_threshold(opportunity, constitution, profile)
     if category == "dead_code" and confidence < DEAD_CODE_CONFIDENCE_THRESHOLD:
         return PolicyDecision(
             True,
@@ -157,15 +171,41 @@ def evaluate_policy(opportunity: dict, constitution: dict) -> PolicyDecision:
     if protected_reason:
         return PolicyDecision(True, protected_reason)
 
+    # Learned profile signals are advisory and never override the constitution:
+    # every constitution check above runs first, so this only adds a soft block
+    # for categories reviewers have previously rejected.
+    if category and category in set(profile.get("rejected_categories") or []):
+        return PolicyDecision(
+            True,
+            "Category previously rejected by reviewers; deferred by learned profile.",
+        )
+
     return PolicyDecision(False)
 
 
-def _group_decision(group: list[dict], constitution: dict) -> PolicyDecision:
-    decisions = [evaluate_policy(opportunity, constitution) for opportunity in group]
+def _group_decision(
+    group: list[dict],
+    constitution: dict,
+    profile: dict | None = None,
+) -> PolicyDecision:
+    decisions = [evaluate_policy(opportunity, constitution, profile) for opportunity in group]
     for decision in decisions:
         if decision.blocked:
             return decision
     return PolicyDecision(False)
+
+
+def _effective_threshold(
+    opportunity: dict,
+    constitution: dict,
+    profile: dict | None = None,
+) -> float:
+    profile = profile or {}
+    threshold = confidence_threshold_for_opportunity(opportunity, constitution)
+    category = opportunity.get("category", "")
+    if category and category in set(profile.get("reverted_categories") or []):
+        threshold = max(threshold, REVERTED_CONFIDENCE_THRESHOLD)
+    return threshold
 
 
 def _has_blocking_open_questions(constitution: dict) -> bool:
@@ -193,12 +233,13 @@ def _conflicts_with_unblocked_groups(
     groups: list[list[dict]],
     opportunity: dict,
     constitution: dict,
+    profile: dict | None = None,
 ) -> bool:
     new_paths = set(opportunity.get("affected_paths", []))
     if not new_paths:
         return False
     for group in groups:
-        if _group_decision(group, constitution).blocked:
+        if _group_decision(group, constitution, profile).blocked:
             continue
         existing_paths = {path for item in group for path in item.get("affected_paths", [])}
         if not existing_paths.isdisjoint(new_paths):
@@ -250,7 +291,16 @@ def _risk_tier(group: list[dict]) -> str:
     return group[0].get("risk_tier", "unknown")
 
 
-def _pr_body_sections(group: list[dict], decision: PolicyDecision, constitution: dict) -> dict:
+def _plan_category(group: list[dict]) -> str:
+    return str(group[0].get("category") or "")
+
+
+def _pr_body_sections(
+    group: list[dict],
+    decision: PolicyDecision,
+    constitution: dict,
+    profile: dict | None = None,
+) -> dict:
     evidence = []
     for opportunity in group:
         for item in opportunity.get("evidence", []):
@@ -264,7 +314,7 @@ def _pr_body_sections(group: list[dict], decision: PolicyDecision, constitution:
     entropy_delta = sum(float(item.get("expected_entropy_delta", 0)) for item in group)
     checks = _unique_values(check for item in group for check in item.get("required_checks", []))
     confidence = min(float(item.get("confidence", 0)) for item in group)
-    threshold = _group_confidence_threshold(group, constitution)
+    threshold = _group_confidence_threshold(group, constitution, profile)
     changed_paths = _unique_values(path for item in group for path in item.get("affected_paths", []))
     categories = _unique_values(item.get("category", "unknown") for item in group)
     confidence_reasons = (
@@ -307,8 +357,12 @@ def _unique_values(values: Iterable[str]) -> list[str]:
     return result
 
 
-def _group_confidence_threshold(group: list[dict], constitution: dict) -> float:
-    return max(confidence_threshold_for_opportunity(item, constitution) for item in group)
+def _group_confidence_threshold(
+    group: list[dict],
+    constitution: dict,
+    profile: dict | None = None,
+) -> float:
+    return max(_effective_threshold(item, constitution, profile) for item in group)
 
 
 def _slug(value: str) -> str:

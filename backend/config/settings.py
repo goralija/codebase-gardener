@@ -44,7 +44,7 @@ FRONTEND_REDIRECT_BASE_URL = env(
 # S3-compatible object storage (MinIO locally, Cloudflare R2 in production).
 # Same code path; only endpoint + credentials differ between environments.
 OBJECT_STORAGE_ENDPOINT_URL = env(
-    "OBJECT_STORAGE_ENDPOINT_URL", default="http://localhost:9000"
+    "OBJECT_STORAGE_ENDPOINT_URL", default="http://localhost:19000"
 )
 OBJECT_STORAGE_ACCESS_KEY = env("OBJECT_STORAGE_ACCESS_KEY", default="local")
 OBJECT_STORAGE_SECRET_KEY = env("OBJECT_STORAGE_SECRET_KEY", default="localpass123")
@@ -76,6 +76,7 @@ INSTALLED_APPS = [
     "apps.entropy.apps.EntropyConfig",
     "apps.sessions.apps.SessionsConfig",
     "apps.maintenance_prs.apps.MaintenancePRsConfig",
+    "apps.profiles.apps.ProfilesConfig",
     "apps.triggers.apps.TriggersConfig",
     "apps.billing.apps.BillingConfig",
 ]

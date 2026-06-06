@@ -16,7 +16,7 @@ Use:
 ## Foundation commands
 
 - `make setup`: install Python and frontend dependencies and Playwright Chromium.
-- `make services`: start local PostgreSQL 16 and Redis 7 through Docker Compose.
+- `make services`: start local PostgreSQL 16, Redis 7, and MinIO object storage through Docker Compose.
 - `make runtime-check`: start services, apply Django migrations, and run Django system checks.
 - `make check`: run fixture validation, docs/skills validation, backend checks/tests, analysis tests, frontend lint/Vitest/build, and Playwright smoke.
 

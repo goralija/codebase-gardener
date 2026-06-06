@@ -59,6 +59,7 @@ class MaintenancePRPlan(UUIDTimestampedModel):
     gardening_session_id = models.CharField(max_length=255, db_index=True)
     branch_name = models.CharField(max_length=255)
     title = models.CharField(max_length=255)
+    category = models.CharField(max_length=64, blank=True, db_index=True)
     risk_tier = models.CharField(max_length=64, db_index=True)
     confidence = models.FloatField(validators=[MinValueValidator(0), MaxValueValidator(1)])
     confidence_threshold = models.FloatField(
@@ -85,6 +86,7 @@ class MaintenancePRPlan(UUIDTimestampedModel):
     created_pr_number = models.PositiveIntegerField(null=True, blank=True)
     created_pr_url = models.URLField(blank=True)
     created_branch_ref = models.CharField(max_length=255, blank=True)
+    merge_commit_sha = models.CharField(max_length=64, blank=True, db_index=True)
     execution_error = models.TextField(blank=True)
 
     objects = MaintenancePRPlanQuerySet.as_manager()
