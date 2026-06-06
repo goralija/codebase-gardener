@@ -319,6 +319,38 @@ def test_push_webhook_creates_session_for_default_branch_only(monkeypatch):
 
 
 @pytest.mark.django_db
+def test_push_webhook_derives_n_commits_and_risky_module_sessions(monkeypatch):
+    queued_sessions = patch_session_enqueue(monkeypatch)
+    repository = create_repository()
+    # No constitution wired -> fallback: default protected segment "auth" and
+    # default commit threshold (10). One commit touches a protected path; total
+    # commit count crosses the threshold.
+    commits = [{"added": [], "modified": ["src/auth/login.py"], "removed": []}]
+    commits += [
+        {"added": [], "modified": [f"src/feature_{i}.py"], "removed": []}
+        for i in range(10)
+    ]
+    event = create_webhook_event(
+        event_name="push",
+        payload=push_payload(
+            repository, ref="refs/heads/main", after="abc123", commits=commits
+        ),
+        delivery_id="push-derived-triggers",
+    )
+
+    process_stored_github_webhook_event(str(event.id))
+
+    triggers = {
+        session.trigger["type"]: session
+        for session in GardeningSession.objects.filter(repository=repository)
+    }
+    assert set(triggers) == {"push", "n_commits", "risky_module"}
+    assert "src/auth/login.py" in triggers["risky_module"].trigger["reason"]
+    # Every derived session is enqueued to the worker.
+    assert len(queued_sessions) == 3
+
+
+@pytest.mark.django_db
 def test_failed_session_enqueue_does_not_block_followup_webhook_session(monkeypatch):
     queued_sessions = []
 
@@ -328,7 +360,7 @@ def test_failed_session_enqueue_does_not_block_followup_webhook_session(monkeypa
             raise RuntimeError("broker unavailable")
         return SimpleNamespace(id="task-2")
 
-    monkeypatch.setattr("apps.github_app.services.run_gardening_session.delay", flaky_delay)
+    monkeypatch.setattr("apps.triggers.service.run_gardening_session.delay", flaky_delay)
     repository = create_repository()
     first_event = create_webhook_event(
         event_name="push",
@@ -379,7 +411,7 @@ def test_failed_session_enqueue_keeps_same_webhook_delivery_retryable(monkeypatc
             raise RuntimeError("broker unavailable")
         return SimpleNamespace(id="task-2")
 
-    monkeypatch.setattr("apps.github_app.services.run_gardening_session.delay", flaky_delay)
+    monkeypatch.setattr("apps.triggers.service.run_gardening_session.delay", flaky_delay)
     repository = create_repository()
     event = create_webhook_event(
         event_name="push",
@@ -659,7 +691,7 @@ def patch_session_enqueue(monkeypatch):
         queued_sessions.append(session_id)
         return SimpleNamespace(id=f"task-{len(queued_sessions)}")
 
-    monkeypatch.setattr("apps.github_app.services.run_gardening_session.delay", fake_delay)
+    monkeypatch.setattr("apps.triggers.service.run_gardening_session.delay", fake_delay)
     return queued_sessions
 
 
@@ -744,12 +776,19 @@ def repository_payload(identifier: int, name: str) -> dict:
     }
 
 
-def push_payload(repository: ManagedRepository, *, ref: str, after: str) -> dict:
+def push_payload(
+    repository: ManagedRepository,
+    *,
+    ref: str,
+    after: str,
+    commits: list[dict] | None = None,
+) -> dict:
     return {
         "ref": ref,
         "before": "0000000",
         "after": after,
         "deleted": False,
+        "commits": commits if commits is not None else [],
         "installation": {"id": repository.github_installation.github_installation_id},
         "repository": repository_payload(repository.github_repository_id, repository.name),
     }
