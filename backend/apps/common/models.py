@@ -35,6 +35,14 @@ class AuditEvent(UUIDTimestampedModel):
             "maintenance_pr_creation_failed",
             "Maintenance PR creation failed",
         )
+        MAINTENANCE_PR_OUTCOME_RECORDED = (
+            "maintenance_pr_outcome_recorded",
+            "Maintenance PR outcome recorded",
+        )
+        GARDENER_PROFILE_UPDATED = (
+            "gardener_profile_updated",
+            "Gardener profile updated",
+        )
         SESSION_TRIGGER_ENQUEUED = (
             "session_trigger_enqueued",
             "Session trigger enqueued",

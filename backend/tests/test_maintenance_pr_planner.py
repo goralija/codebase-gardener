@@ -259,6 +259,106 @@ def test_opportunity_link_rejects_duplicate_session_opportunity():
         )
 
 
+@pytest.mark.django_db
+def test_profile_rejected_category_defers_opportunity():
+    repository = demo_repository()
+    profile = {
+        "schema_version": "1.0",
+        "repository_id": "repo_demo",
+        "rejected_categories": ["docs"],
+    }
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_profile_rejected",
+        opportunities=[opportunity("opp_docs", "Refresh docs", ["docs/a.md"])],
+        constitution=constitution(),
+        profile=profile,
+    )
+
+    assert plans[0].blocked
+    assert plans[0].block_reason == (
+        "Category previously rejected by reviewers; deferred by learned profile."
+    )
+
+
+@pytest.mark.django_db
+def test_profile_reverted_category_raises_confidence_threshold():
+    repository = demo_repository()
+    profile = {
+        "schema_version": "1.0",
+        "repository_id": "repo_demo",
+        "reverted_categories": ["docs"],
+    }
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_profile_reverted",
+        opportunities=[opportunity("opp_docs", "Refresh docs", ["docs/a.md"], confidence=0.94)],
+        constitution=constitution(),
+        profile=profile,
+    )
+
+    assert plans[0].blocked
+    assert plans[0].confidence_threshold == 0.97
+    assert plans[0].block_reason == "Confidence below 0.97 PR creation threshold."
+
+
+@pytest.mark.django_db
+def test_profile_accepted_category_ranks_ahead_of_peers():
+    repository = demo_repository()
+    profile = {
+        "schema_version": "1.0",
+        "repository_id": "repo_demo",
+        "accepted_categories": ["lint_format"],
+    }
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_profile_accepted",
+        opportunities=[
+            opportunity("opp_docs", "Refresh docs", ["docs/a.md"], confidence=0.94),
+            opportunity(
+                "opp_lint",
+                "Format module",
+                ["src/app.py"],
+                category="lint_format",
+                confidence=0.94,
+            ),
+        ],
+        constitution=constitution(),
+        profile=profile,
+    )
+
+    # Accepted category is planned first despite equal confidence.
+    assert plans[0].category == "lint_format"
+
+
+@pytest.mark.django_db
+def test_constitution_block_reason_wins_over_profile_rejection():
+    repository = demo_repository()
+    profile = {
+        "schema_version": "1.0",
+        "repository_id": "repo_demo",
+        "rejected_categories": ["docs"],
+    }
+    blocking_constitution = constitution()
+    blocking_constitution["open_questions"] = [
+        {"question_id": "q_blocking", "severity": "blocking", "question": "Protected paths?"}
+    ]
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_constitution_wins",
+        opportunities=[opportunity("opp_docs", "Refresh docs", ["docs/a.md"])],
+        constitution=blocking_constitution,
+        profile=profile,
+    )
+
+    assert plans[0].blocked
+    assert plans[0].block_reason == "Repository constitution has unresolved open questions."
+
+
 def demo_repository():
     organization = create_organization(900)
     installation = create_installation(organization, 900)

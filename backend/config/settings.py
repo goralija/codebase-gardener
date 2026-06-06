@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     "apps.entropy.apps.EntropyConfig",
     "apps.sessions.apps.SessionsConfig",
     "apps.maintenance_prs.apps.MaintenancePRsConfig",
+    "apps.profiles.apps.ProfilesConfig",
     "apps.triggers.apps.TriggersConfig",
     "apps.billing.apps.BillingConfig",
 ]
