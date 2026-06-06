@@ -273,7 +273,7 @@ Hosted Celery workers run gardening sessions, plan safe PRs, and learn from outc
 
 #### E04-T02 Implement session trigger system
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane C
 - Complexity: L
@@ -306,7 +306,7 @@ Hosted Celery workers run gardening sessions, plan safe PRs, and learn from outc
 
 #### E04-T05 Implement GitHub branch and PR execution
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane C
 - Complexity: XL
