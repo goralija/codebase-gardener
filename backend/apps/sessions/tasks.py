@@ -1,6 +1,9 @@
 from celery import shared_task
 from django.utils import timezone
 
+from apps.analysis import storage_service
+from apps.analysis.constitution_pr import maybe_open_constitution_pr
+from apps.analysis.runner import AnalysisRunError, run_repository_analysis
 from apps.github_app.client import RETRYABLE_STATUS_CODES, GitHubAPIError
 from apps.sessions.lifecycle import (
     SessionLifecycleError,
@@ -35,14 +38,45 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
     )
 
     try:
+        current_phase = "observe"
         _run_foundation_placeholder(session)
+        analysis_result = run_repository_analysis(repository=session.repository)
+        current_phase = "plan"
+        maybe_open_constitution_pr(
+            repository=session.repository,
+            artifacts=analysis_result.artifacts,
+        )
+        first_report = storage_service.load_first_report(analysis_result.analysis)
+        current_phase = "execute"
         executed_plan_ids, execution_errors = execute_session_pr_plans(session)
         session.result = build_gardening_session_result(
             session,
             started_at=session.started_at,
             executed_plan_ids=executed_plan_ids,
             execution_errors=execution_errors,
+            first_report=first_report,
         )
+    except AnalysisRunError as exc:
+        session.status = GardeningSession.Status.FAILED
+        session.finished_at = timezone.now()
+        session.result = build_failed_gardening_session_result(
+            session,
+            phase=exc.phase,
+            message=str(exc),
+            started_at=session.started_at,
+            finished_at=session.finished_at,
+        )
+        session.last_error = str(exc)
+        session.save(
+            update_fields=[
+                "status",
+                "finished_at",
+                "result",
+                "last_error",
+                "updated_at",
+            ]
+        )
+        raise
     except SessionLifecycleError as exc:
         session.status = GardeningSession.Status.FAILED
         session.finished_at = timezone.now()
@@ -107,7 +141,7 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
         session.last_error = str(exc)
         session.result = build_failed_gardening_session_result(
             session,
-            phase="execute",
+            phase=current_phase,
             message=str(exc),
             started_at=session.started_at,
             finished_at=session.finished_at,

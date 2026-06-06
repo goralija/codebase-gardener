@@ -46,6 +46,9 @@ Exact numeric thresholds are implementation details and should be validated agai
 - central modules with rising churn
 - monorepo logical-system leakage
 
+V1 extraction uses Repowise health findings plus import cycles detected from the
+Repowise knowledge graph.
+
 ## Maintainability entropy signals
 
 - cyclomatic complexity
@@ -67,6 +70,9 @@ Exact numeric thresholds are implementation details and should be validated agai
 - missing ADRs or architecture docs
 - repeated PR edits/rejections in same area
 
+V1 extraction uses recent git history from the worker clone to detect low bus
+factor and per-file ownership concentration.
+
 ## Testing entropy signals
 
 - coverage gaps
@@ -85,6 +91,9 @@ Exact numeric thresholds are implementation details and should be validated agai
 - lockfile drift
 - known advisories when available from light security sources
 
+V1 extraction detects dependency manifests without nearby lockfiles and
+dependency/package-related Repowise health findings.
+
 ## Operational entropy signals
 
 - CI failure frequency
@@ -93,6 +102,9 @@ Exact numeric thresholds are implementation details and should be validated agai
 - long-running checks
 - failed Gardener sessions
 - PRs blocked by unclear source truth
+
+V1 extraction detects missing CI configuration, CI configurations that do not
+appear to run tests, and CI/pipeline-related Repowise health findings.
 
 ## Forecast rules
 

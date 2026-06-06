@@ -71,8 +71,12 @@ Hosted workers must:
 - create branches with deterministic names
 - avoid conflicting PRs in the same session
 - persist analysis results and audit events
+- open a draft `GARDENER.md` proposal PR when analysis finds no Repository Constitution
 - fail safely and visibly
 
 ## Shared contracts
 
-The first API implementation should expose fixture-backed responses matching `docs/19-shared-json-contracts.md` so the dashboard can be built before real analysis and session execution are complete.
+Report APIs expose responses matching `docs/19-shared-json-contracts.md`. Hosted
+Gardening Sessions refresh real repository analysis and persist it for first
+report serving; fixture fallback remains a local/demo affordance when no stored
+analysis exists.

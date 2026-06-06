@@ -1,11 +1,13 @@
 import copy
+from types import SimpleNamespace
 
 import pytest
-from django.core.exceptions import ImproperlyConfigured, ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 
 from apps.analysis.fixtures import load_first_report_fixture
+from apps.analysis.runner import AnalysisRunError
 from apps.accounts.models import CustomerOrganization
 from apps.github_app.client import GitHubAPIError
 from apps.github_app.models import GitHubInstallation
@@ -14,6 +16,22 @@ from apps.maintenance_prs.models import MaintenancePRPlan
 from apps.repositories.models import ManagedRepository
 from apps.sessions.models import GardeningSession
 from apps.sessions.tasks import RetryableSessionError, run_gardening_session
+
+
+@pytest.fixture(autouse=True)
+def _stub_real_analysis(monkeypatch):
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository: analysis_result(),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.storage_service.load_first_report",
+        lambda _analysis: load_first_report_fixture(),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.maybe_open_constitution_pr",
+        lambda **_kwargs: {"created": False},
+    )
 
 
 @pytest.mark.django_db
@@ -72,6 +90,75 @@ def test_run_gardening_session_marks_session_completed(settings):
 
 
 @pytest.mark.django_db
+def test_run_gardening_session_uses_analysis_report(settings, monkeypatch):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "first_scan"},
+    )
+    report = copy.deepcopy(load_first_report_fixture())
+    report["repository_constitution"]["repository_id"] = str(repository.id)
+    report["maintenance_opportunities"] = []
+    report["maintenance_pr_plans"] = []
+
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository: analysis_result(),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.storage_service.load_first_report",
+        lambda _analysis: report,
+    )
+
+    run_gardening_session.delay(str(session.id)).get()
+
+    session.refresh_from_db()
+    assert session.status == GardeningSession.Status.COMPLETED
+    assert session.result["repository_id"] == str(repository.id)
+    assert session.result["opportunities_selected"] == []
+
+
+@pytest.mark.django_db
+def test_run_gardening_session_offers_constitution_pr_from_analysis_artifacts(
+    settings,
+    monkeypatch,
+):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "first_scan"},
+    )
+    artifacts = {
+        "constitution": {
+            "open_questions": [
+                {
+                    "severity": "blocking",
+                    "question": "No repository constitution (GARDENER.md) found.",
+                }
+            ]
+        }
+    }
+    calls = []
+
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository: SimpleNamespace(analysis=object(), artifacts=artifacts),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.maybe_open_constitution_pr",
+        lambda **kwargs: calls.append(kwargs) or {"created": True},
+    )
+
+    run_gardening_session.delay(str(session.id)).get()
+
+    assert calls == [{"repository": repository, "artifacts": artifacts}]
+
+
+@pytest.mark.django_db
 def test_run_gardening_session_marks_session_failed_with_partial_result(settings):
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = False
@@ -122,7 +209,10 @@ def test_run_gardening_session_defers_fixture_opportunities_without_ready_plan(
             "blocked_by": [],
         }
     )
-    monkeypatch.setattr("apps.sessions.lifecycle.load_first_report_fixture", lambda: fixture)
+    monkeypatch.setattr(
+        "apps.sessions.tasks.storage_service.load_first_report",
+        lambda _analysis: fixture,
+    )
 
     session = GardeningSession.objects.create(
         repository=create_repository(1),
@@ -378,7 +468,7 @@ def test_run_gardening_session_retries_retryable_github_plan_failure(settings, m
 
 
 @pytest.mark.django_db
-def test_run_gardening_session_persists_failed_result_for_fixture_errors(
+def test_run_gardening_session_persists_failed_result_for_analysis_errors(
     settings,
     monkeypatch,
 ):
@@ -389,23 +479,30 @@ def test_run_gardening_session_persists_failed_result_for_fixture_errors(
         trigger={"type": "manual"},
     )
     monkeypatch.setattr(
-        "apps.sessions.lifecycle.load_first_report_fixture",
-        lambda: (_ for _ in ()).throw(ImproperlyConfigured("bad fixture")),
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository: (_ for _ in ()).throw(
+            AnalysisRunError("diagnose", "Repowise failed")
+        ),
     )
 
     result = run_gardening_session.apply(args=[str(session.id)], throw=False)
 
     session.refresh_from_db()
     assert result.failed()
-    assert isinstance(result.result, ImproperlyConfigured)
+    assert isinstance(result.result, AnalysisRunError)
     assert session.status == GardeningSession.Status.FAILED
-    assert session.last_error == "bad fixture"
+    assert session.last_error == "Repowise failed"
     assert session.result["repository_id"] == str(session.repository_id)
     assert session.result["status"] == "failed"
     assert session.result["phase_results"] == [
-        {"phase": "observe", "status": "failed", "summary": "bad fixture"}
+        {
+            "phase": "observe",
+            "status": "completed",
+            "summary": "Loaded shared fixture repository state.",
+        },
+        {"phase": "diagnose", "status": "failed", "summary": "Repowise failed"},
     ]
-    assert session.result["errors"] == [{"phase": "observe", "message": "bad fixture"}]
+    assert session.result["errors"] == [{"phase": "diagnose", "message": "Repowise failed"}]
     assert_gardening_session_result_contract(session.result)
 
 
@@ -448,6 +545,10 @@ def repo_root():
     from pathlib import Path
 
     return Path(__file__).resolve().parents[2]
+
+
+def analysis_result():
+    return SimpleNamespace(analysis=object(), artifacts={"constitution": {"open_questions": []}})
 
 
 def create_repository(identifier: int) -> ManagedRepository:
