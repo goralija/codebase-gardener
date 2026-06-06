@@ -76,6 +76,7 @@ _CATEGORY_GUIDANCE = {
 # Reject whole-file rewrites: fraction of lines allowed to change (except tests).
 _MAX_CHANGE_RATIO = 0.6
 
+<<<<<<< HEAD
 # Files at/under this size are edited in a single pass with full context.
 _SINGLE_PASS_CHARS = 40_000
 
@@ -86,6 +87,13 @@ _MAX_CHUNKS = 40
 _MAX_FILE_CHARS = _CHUNK_CHARS * _MAX_CHUNKS
 _DEFAULT_CHUNK_WORKERS = 8
 
+=======
+# Largest file we send for AI editing (chars). Edit blocks keep the OUTPUT small
+# regardless of size; this bounds the INPUT so it fits the model context. Files
+# beyond this are skipped cleanly (would need chunking).
+_MAX_FILE_CHARS = 200_000
+
+>>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
 # Upper bound on requested completion tokens. Edit blocks are small, so this is
 # headroom, not sized to the file.
 _MODEL_OUTPUT_TOKEN_CAP = 16_000
@@ -121,6 +129,7 @@ def apply_ai_fix(
     """Return the LLM-edited file content, validated. Raises AIFixError on failure.
 
     Uses SEARCH/REPLACE edit blocks: the model returns only the changed regions,
+<<<<<<< HEAD
     so output stays small. Files larger than a single safe context window are
     split into chunks and analyzed concurrently; the merged result is still
     rejected unless it validates.
@@ -161,6 +170,32 @@ def apply_ai_fix(
     else:
         raise AIFixError(f"AI fix for {path} produced no applicable edits.")
 
+=======
+    so output stays small and the approach scales to large files. Falls back to a
+    whole-file fenced block if the model returns one instead.
+    """
+    if len(content) > _MAX_FILE_CHARS:
+        raise AIFixError(
+            f"{path} is too large ({len(content)} chars) for AI editing; skipped."
+        )
+
+    prompt = _build_prompt(path, content, plan, opportunity or {})
+    try:
+        raw = complete(prompt, system=_SYSTEM_PROMPT, max_tokens=_MODEL_OUTPUT_TOKEN_CAP)
+    except LLMError as exc:
+        raise AIFixError(f"LLM fix failed for {path}: {exc}") from exc
+
+    blocks = _parse_edit_blocks(raw)
+    if blocks:
+        updated = _apply_edit_blocks(path, content, blocks)
+    else:
+        # Fallback: model returned the whole file in a fenced block.
+        fenced = _FENCE_RE.search(raw)
+        if not fenced:
+            raise AIFixError(f"AI fix for {path} returned no edit blocks or file.")
+        updated = fenced.group(1).strip("\n") + "\n"
+
+>>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
     _validate(path, content, updated, plan.category)
     _report(progress, 100, "done", f"{path}: fix ready")
     return updated
@@ -322,9 +357,14 @@ def _build_prompt(
         f"Finding: {summary}\n"
         f"Evidence:\n{evidence_lines}\n\n"
         f"Instruction: {guidance}\n"
+<<<<<<< HEAD
         f"{scope}"
         "Respond with SEARCH/REPLACE edit blocks only; do not return the whole file.\n\n"
         f"{label}:\n```\n{content}\n```"
+=======
+        "Respond with SEARCH/REPLACE edit blocks only; do not return the whole file.\n\n"
+        f"Current file content:\n```\n{content}\n```"
+>>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
     )
 
 
@@ -339,6 +379,7 @@ def _parse_edit_blocks(text: str) -> list[tuple[str, str]]:
 
 
 def _apply_edit_blocks(path: str, content: str, blocks: list[tuple[str, str]]) -> str:
+<<<<<<< HEAD
     """Apply edit blocks best-effort.
 
     Blocks whose SEARCH no longer matches (model mis-quote, or a region already
@@ -386,6 +427,25 @@ def _python_parses(content: str) -> bool:
     return True
 
 
+=======
+    updated = content
+    for search, replace in blocks:
+        if not search.strip():
+            raise AIFixError(f"AI fix for {path} had an empty SEARCH block.")
+        if search in updated:
+            updated = updated.replace(search, replace, 1)
+            continue
+        # Tolerate trailing-whitespace / line-ending differences.
+        normalized = _match_ignoring_trailing_ws(updated, search)
+        if normalized is None:
+            raise AIFixError(
+                f"AI fix for {path}: a SEARCH block did not match the file exactly."
+            )
+        updated = updated.replace(normalized, replace, 1)
+    return updated
+
+
+>>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
 def _match_ignoring_trailing_ws(content: str, search: str) -> str | None:
     """Return the substring of *content* matching *search* ignoring trailing
     whitespace per line, or None if not found."""

@@ -45,6 +45,7 @@ def test_apply_ai_fix_applies_search_replace_block(monkeypatch):
     assert "def used()" in result
 
 
+<<<<<<< HEAD
 def test_apply_ai_fix_chunks_large_file_and_applies_edits(monkeypatch):
     from apps.maintenance_prs import ai_fixes
 
@@ -71,6 +72,8 @@ def test_apply_ai_fix_chunks_large_file_and_applies_edits(monkeypatch):
     assert "def used_0()" in result
 
 
+=======
+>>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
 def test_apply_ai_fix_rejects_unmatched_search_block(monkeypatch):
     block = (
         "<<<<<<< SEARCH\n"
@@ -85,6 +88,7 @@ def test_apply_ai_fix_rejects_unmatched_search_block(monkeypatch):
         apply_ai_fix("core/util.py", ORIGINAL, _Plan(), {})
 
 
+<<<<<<< HEAD
 def test_apply_ai_fix_skips_invalid_python_block_but_keeps_valid_edit(monkeypatch):
     bad_block = (
         "<<<<<<< SEARCH\n"
@@ -125,6 +129,8 @@ def test_apply_ai_fix_reports_progress(monkeypatch):
     assert "done" in phases
 
 
+=======
+>>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
 def test_apply_ai_fix_rejects_invalid_python(monkeypatch):
     _patch_llm(monkeypatch, "```python\ndef broken(:\n    pass\n```")
 
