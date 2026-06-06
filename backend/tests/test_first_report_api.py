@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
+from django.test import override_settings
 from rest_framework.test import APIClient
 
 from apps.analysis.fixtures import validate_first_report_fixture_contract
@@ -20,6 +21,17 @@ def test_first_report_endpoint_returns_fixture_contract():
 
     assert response.status_code == 200
     assert response.json() == load_first_report_fixture()
+
+
+@override_settings(CORS_ALLOWED_ORIGINS=["http://localhost:5174"])
+def test_first_report_endpoint_allows_configured_frontend_origin():
+    response = APIClient().get(
+        "/api/v1/reports/first/",
+        HTTP_ORIGIN="http://localhost:5174",
+    )
+
+    assert response.status_code == 200
+    assert response["access-control-allow-origin"] == "http://localhost:5174"
 
 
 def test_first_report_serializer_requires_top_level_contract_fields():

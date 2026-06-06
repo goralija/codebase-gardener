@@ -1,42 +1,6 @@
-import firstReportFixture from "../../../../fixtures/contracts/first_report_fixture.json"
+import type { FirstReport } from "./first-report-contract"
 
-type EvidenceReference = {
-  path: string
-  summary: string
-}
-
-type OpenQuestion = {
-  question_id: string
-  severity: string
-  question: string
-  evidence: EvidenceReference[]
-}
-
-type EntropyContributor = {
-  kind: string
-  summary: string
-  impact: number
-  evidence: EvidenceReference[]
-}
-
-export type FirstReportFixture = Omit<
-  typeof firstReportFixture,
-  "repository_constitution" | "entropy_report"
-> & {
-  repository_constitution: Omit<
-    (typeof firstReportFixture)["repository_constitution"],
-    "architecture_boundaries" | "open_questions"
-  > & {
-    architecture_boundaries: unknown[]
-    open_questions: OpenQuestion[]
-  }
-  entropy_report: Omit<
-    (typeof firstReportFixture)["entropy_report"],
-    "top_contributors"
-  > & {
-    top_contributors: EntropyContributor[]
-  }
-}
+export type FirstReportFixture = FirstReport
 
 function titleCase(value: string) {
   return value
@@ -86,7 +50,7 @@ export function formatDuration(startedAt: string, finishedAt: string) {
   return `${minutes} min`
 }
 
-export function buildFirstReportViewModel(report: FirstReportFixture) {
+export function buildFirstReportViewModel(report: FirstReport) {
   const constitution = report.repository_constitution
   const snapshot = report.analysis_snapshot
   const entropy = report.entropy_report

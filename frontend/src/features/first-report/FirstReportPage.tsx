@@ -1,3 +1,4 @@
+import { FirstReportNotReadyError } from "./first-report-api"
 import { ArchitectureConstitutionPanels } from "./sections/architecture-constitution-panels"
 import { EntropyPanels } from "./sections/entropy-panels"
 import { MaintenancePanels } from "./sections/maintenance-panels"
@@ -5,14 +6,38 @@ import { ReportHeader } from "./sections/report-header"
 import { SessionPanel } from "./sections/session-panel"
 import { SummaryMetrics } from "./sections/summary-metrics"
 import { buildFirstReportViewModel } from "./first-report-view-model"
+import { useFirstReport } from "./use-first-report"
 import {
-  firstReportFixture,
-  useFirstReportFixture,
-} from "./use-first-report-fixture"
+  FirstReportEmptyState,
+  FirstReportErrorState,
+  FirstReportLoadingState,
+} from "./components/report-states"
 
 export function FirstReportPage() {
-  const { data, isLoading } = useFirstReportFixture()
-  const report = data ?? firstReportFixture
+  const { data, error, isError, isFetching, isLoading, refetch } =
+    useFirstReport()
+
+  const retry = () => {
+    void refetch()
+  }
+
+  if (isLoading) {
+    return <FirstReportLoadingState />
+  }
+
+  if (isError) {
+    if (error instanceof FirstReportNotReadyError) {
+      return <FirstReportEmptyState isRetrying={isFetching} onRetry={retry} />
+    }
+
+    return <FirstReportErrorState isRetrying={isFetching} onRetry={retry} />
+  }
+
+  if (!data) {
+    return <FirstReportEmptyState isRetrying={isFetching} onRetry={retry} />
+  }
+
+  const report = data
   const view = buildFirstReportViewModel(report)
   const prPlanCount = view.prPlans.length
 

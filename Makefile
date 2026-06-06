@@ -3,6 +3,7 @@
 
 PYTHON_VERSION ?= 3.12
 DOCKER ?= docker
+VITE_API_BASE_URL ?= http://localhost:8000/api/v1
 
 setup:
 	uv sync --python $(PYTHON_VERSION) --all-packages --all-groups
@@ -24,7 +25,7 @@ backend-dev:
 	cd backend && uv run python manage.py runserver 0.0.0.0:8000
 
 frontend-dev:
-	pnpm --dir frontend dev --host 0.0.0.0
+	VITE_API_BASE_URL=$(VITE_API_BASE_URL) pnpm --dir frontend dev --host 0.0.0.0
 
 check: services-check fixtures-validate docs-skills-validate backend-check backend-test analysis-test frontend-lint frontend-test frontend-build frontend-e2e
 
