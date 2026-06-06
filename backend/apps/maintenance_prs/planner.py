@@ -1,0 +1,300 @@
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from fnmatch import fnmatch
+from typing import Iterable
+
+from django.db import transaction
+
+from apps.maintenance_prs.models import MaintenancePRPlan, MaintenancePRPlanOpportunity
+
+
+CONFIDENCE_THRESHOLD = 0.90
+DEAD_CODE_CONFIDENCE_THRESHOLD = 0.95
+GROUP_SIZE_LIMIT = 3
+
+
+@dataclass(frozen=True)
+class PolicyDecision:
+    blocked: bool
+    reason: str | None = None
+
+
+def plan_maintenance_prs(
+    *,
+    repository,
+    gardening_session_id: str,
+    opportunities: Iterable[dict],
+    constitution: dict,
+) -> list[MaintenancePRPlan]:
+    ordered_opportunities = sorted(
+        opportunities,
+        key=lambda item: (
+            -float(item.get("confidence", 0)),
+            item.get("category", ""),
+            item.get("maintenance_opportunity_id", ""),
+        ),
+    )
+    existing_opportunity_ids = set(
+        MaintenancePRPlanOpportunity.objects.filter(
+            repository=repository,
+            gardening_session_id=gardening_session_id,
+        ).values_list("maintenance_opportunity_id", flat=True)
+    )
+
+    groups: list[list[dict]] = []
+    forced_block_reasons: dict[str, str] = {}
+    for opportunity in ordered_opportunities:
+        opportunity_id = opportunity["maintenance_opportunity_id"]
+        if opportunity_id in existing_opportunity_ids:
+            continue
+
+        decision = evaluate_policy(opportunity, constitution)
+        if decision.blocked:
+            groups.append([opportunity])
+            continue
+        if _conflicts_with_unblocked_groups(groups, opportunity, constitution):
+            forced_block_reasons[opportunity_id] = (
+                "Opportunity conflicts with another selected PR plan in this session."
+            )
+            groups.append([opportunity])
+            continue
+
+        for group in groups:
+            if _group_decision(group, constitution).blocked:
+                continue
+            if _compatible(group, opportunity):
+                group.append(opportunity)
+                break
+        else:
+            groups.append([opportunity])
+
+    plans: list[MaintenancePRPlan] = []
+    used_branch_names = set(
+        MaintenancePRPlan.objects.filter(
+            repository=repository,
+            gardening_session_id=gardening_session_id,
+        ).values_list("branch_name", flat=True)
+    )
+
+    with transaction.atomic():
+        for group in groups:
+            decision = _group_decision(group, constitution)
+            forced_reason = forced_block_reasons.get(group[0]["maintenance_opportunity_id"])
+            if forced_reason:
+                decision = PolicyDecision(True, forced_reason)
+            branch_name = _unique_branch_name(_base_branch_name(group), used_branch_names)
+            used_branch_names.add(branch_name)
+            plan = MaintenancePRPlan.objects.create(
+                repository=repository,
+                gardening_session_id=gardening_session_id,
+                branch_name=branch_name,
+                title=_plan_title(group),
+                risk_tier=_risk_tier(group),
+                confidence=min(float(item["confidence"]) for item in group),
+                changed_paths=_unique_values(
+                    path for item in group for path in item.get("affected_paths", [])
+                ),
+                pr_body_sections=_pr_body_sections(group, decision),
+                required_checks=_unique_values(
+                    check for item in group for check in item.get("required_checks", [])
+                ),
+                blocked=decision.blocked,
+                block_reason=decision.reason,
+            )
+            for opportunity in group:
+                MaintenancePRPlanOpportunity.objects.create(
+                    plan=plan,
+                    maintenance_opportunity_id=opportunity["maintenance_opportunity_id"],
+                )
+            plans.append(plan)
+
+    return plans
+
+
+def serialize_maintenance_pr_plan(plan: MaintenancePRPlan) -> dict:
+    return plan.to_contract()
+
+
+def evaluate_policy(opportunity: dict, constitution: dict) -> PolicyDecision:
+    if _has_blocking_open_questions(constitution):
+        return PolicyDecision(True, "Repository constitution has unresolved open questions.")
+
+    blocked_by = opportunity.get("blocked_by") or []
+    if blocked_by:
+        return PolicyDecision(True, "Opportunity is blocked by prerequisite work.")
+
+    confidence = float(opportunity.get("confidence", 0))
+    category = opportunity.get("category", "")
+    if category == "dead_code" and confidence < DEAD_CODE_CONFIDENCE_THRESHOLD:
+        return PolicyDecision(True, "Dead-code removal requires confidence >= 0.95.")
+    if confidence < CONFIDENCE_THRESHOLD:
+        return PolicyDecision(True, "Confidence below 0.90 PR creation threshold.")
+
+    allowed_fixes = constitution.get("allowed_fixes", {})
+    if category in allowed_fixes.get("advisory", []):
+        return PolicyDecision(True, "Opportunity category is advisory-only.")
+    if category in allowed_fixes.get("assisted", []):
+        return PolicyDecision(True, "Opportunity category requires assisted draft PR handling.")
+    if category not in allowed_fixes.get("autonomous", []):
+        return PolicyDecision(True, "Opportunity category is not allowed for autonomous PRs.")
+
+    if opportunity.get("risk_tier") != "tier_1_autonomous":
+        return PolicyDecision(True, "Risk tier requires assisted or advisory handling.")
+
+    protected_reason = _protected_path_reason(opportunity.get("affected_paths", []), constitution)
+    if protected_reason:
+        return PolicyDecision(True, protected_reason)
+
+    return PolicyDecision(False)
+
+
+def _group_decision(group: list[dict], constitution: dict) -> PolicyDecision:
+    decisions = [evaluate_policy(opportunity, constitution) for opportunity in group]
+    for decision in decisions:
+        if decision.blocked:
+            return decision
+    return PolicyDecision(False)
+
+
+def _has_blocking_open_questions(constitution: dict) -> bool:
+    for question in constitution.get("open_questions", []):
+        if question.get("severity", "blocking") == "blocking":
+            return True
+    return False
+
+
+def _compatible(group: list[dict], opportunity: dict) -> bool:
+    if len(group) >= GROUP_SIZE_LIMIT:
+        return False
+    first = group[0]
+    if first.get("category") != opportunity.get("category"):
+        return False
+    if first.get("risk_tier") != opportunity.get("risk_tier"):
+        return False
+
+    existing_paths = {path for item in group for path in item.get("affected_paths", [])}
+    new_paths = set(opportunity.get("affected_paths", []))
+    return existing_paths.isdisjoint(new_paths)
+
+
+def _conflicts_with_unblocked_groups(
+    groups: list[list[dict]],
+    opportunity: dict,
+    constitution: dict,
+) -> bool:
+    new_paths = set(opportunity.get("affected_paths", []))
+    if not new_paths:
+        return False
+    for group in groups:
+        if _group_decision(group, constitution).blocked:
+            continue
+        existing_paths = {path for item in group for path in item.get("affected_paths", [])}
+        if not existing_paths.isdisjoint(new_paths):
+            return True
+    return False
+
+
+def _protected_path_reason(paths: list[str], constitution: dict) -> str | None:
+    for path in paths:
+        for rule in constitution.get("never_touch", []):
+            if fnmatch(path, rule.get("path", "")):
+                return f"Path {path} matches never-touch rule: {rule.get('reason', 'no reason given')}"
+        for module in constitution.get("protected_modules", []):
+            for pattern in module.get("paths", []):
+                if fnmatch(path, pattern):
+                    return (
+                        f"Path {path} matches protected module "
+                        f"{module.get('name', 'unknown')}: {module.get('reason', 'no reason given')}"
+                    )
+    return None
+
+
+def _base_branch_name(group: list[dict]) -> str:
+    category = group[0].get("category", "maintenance")
+    source = group[0].get("title", category)
+    return f"gardener/{_slug(category)}-{_slug(source)}"[:240].rstrip("-")
+
+
+def _unique_branch_name(base_branch_name: str, used_branch_names: set[str]) -> str:
+    if base_branch_name not in used_branch_names:
+        return base_branch_name
+
+    counter = 2
+    while True:
+        suffix = f"-{counter}"
+        candidate = f"{base_branch_name[:255 - len(suffix)]}{suffix}"
+        if candidate not in used_branch_names:
+            return candidate
+        counter += 1
+
+
+def _plan_title(group: list[dict]) -> str:
+    if len(group) == 1:
+        return group[0]["title"]
+    return f"Plan {len(group)} {group[0]['category']} maintenance opportunities"
+
+
+def _risk_tier(group: list[dict]) -> str:
+    return group[0].get("risk_tier", "unknown")
+
+
+def _pr_body_sections(group: list[dict], decision: PolicyDecision) -> dict:
+    evidence = []
+    for opportunity in group:
+        for item in opportunity.get("evidence", []):
+            summary = item.get("summary")
+            path = item.get("path")
+            if summary and path:
+                evidence.append(f"{path}: {summary}")
+            elif summary:
+                evidence.append(summary)
+
+    entropy_delta = sum(float(item.get("expected_entropy_delta", 0)) for item in group)
+    checks = _unique_values(check for item in group for check in item.get("required_checks", []))
+    confidence = min(float(item.get("confidence", 0)) for item in group)
+    changed_paths = _unique_values(path for item in group for path in item.get("affected_paths", []))
+    categories = _unique_values(item.get("category", "unknown") for item in group)
+    confidence_reasons = (
+        f"Minimum opportunity confidence {confidence:.2f}; threshold {CONFIDENCE_THRESHOLD:.2f}; "
+        f"{'blocked by policy' if decision.blocked else 'meets autonomous PR threshold'}."
+    )
+    constitution_rules = (
+        f"Categories checked against constitution allowed fixes: {', '.join(categories)}. "
+        f"Changed paths checked against protected modules and never-touch paths: {', '.join(changed_paths)}."
+    )
+
+    verification = (
+        f"Required checks: {', '.join(checks) if checks else 'none configured'}. "
+        f"Risk tier: {_risk_tier(group)}. {confidence_reasons} "
+        f"Changed paths: {', '.join(changed_paths)}. "
+        "Rollback: revert the focused PR branch if checks or review fail."
+    )
+    if decision.blocked:
+        verification = f"Blocked: {decision.reason}. {verification}"
+
+    return {
+        "goal": " | ".join(item.get("summary", item["title"]) for item in group),
+        "evidence": (
+            f"{' | '.join(evidence) if evidence else 'No source evidence supplied.'} "
+            f"{constitution_rules}"
+        ),
+        "entropy_impact": f"Expected {entropy_delta:.1f} entropy delta across {len(changed_paths)} path(s).",
+        "verification": verification,
+    }
+
+
+def _unique_values(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def _slug(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "maintenance"
