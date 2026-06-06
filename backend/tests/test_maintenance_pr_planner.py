@@ -183,6 +183,30 @@ def test_planner_persists_dead_code_confidence_threshold():
 
 
 @pytest.mark.django_db
+def test_planner_accepts_legacy_dead_code_removal_allowed_fix_alias():
+    repository = demo_repository()
+    legacy_constitution = constitution()
+    legacy_constitution["allowed_fixes"]["autonomous"].append("dead_code_removal")
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_dead_code_alias",
+        opportunities=[
+            opportunity(
+                "opp_dead_code_alias",
+                "Remove dead code",
+                ["src/unused.py"],
+                category="dead_code",
+                confidence=0.99,
+            )
+        ],
+        constitution=legacy_constitution,
+    )
+
+    assert not plans[0].blocked
+
+
+@pytest.mark.django_db
 def test_planner_blocks_only_blocking_open_constitution_questions():
     repository = demo_repository()
     nonblocking_constitution = constitution()

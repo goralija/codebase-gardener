@@ -18,6 +18,11 @@ from apps.maintenance_prs.roi import estimate_roi
 
 CONFIDENCE_THRESHOLD = DEFAULT_CONFIDENCE_THRESHOLD
 GROUP_SIZE_LIMIT = 3
+CATEGORY_ALIASES = {
+    "dead_code_removal": "dead_code",
+    "dead-code-removal": "dead_code",
+    "dead code removal": "dead_code",
+}
 # Categories whose prior PRs were reverted demand stronger evidence than the
 # ordinary autonomous threshold before Gardener tries the same category again.
 REVERTED_CONFIDENCE_THRESHOLD = 0.97
@@ -156,7 +161,7 @@ def evaluate_policy(
     if confidence < threshold:
         return PolicyDecision(True, f"Confidence below {threshold:.2f} PR creation threshold.")
 
-    allowed_fixes = constitution.get("allowed_fixes", {})
+    allowed_fixes = _canonical_allowed_fixes(constitution.get("allowed_fixes", {}))
     if category in allowed_fixes.get("advisory", []):
         return PolicyDecision(True, "Opportunity category is advisory-only.")
     if category in allowed_fixes.get("assisted", []):
@@ -206,6 +211,22 @@ def _effective_threshold(
     if category and category in set(profile.get("reverted_categories") or []):
         threshold = max(threshold, REVERTED_CONFIDENCE_THRESHOLD)
     return threshold
+
+
+def _canonical_allowed_fixes(allowed_fixes: dict) -> dict[str, list[str]]:
+    return {
+        group: _canonical_categories(allowed_fixes.get(group, []))
+        for group in ("autonomous", "assisted", "advisory")
+    }
+
+
+def _canonical_categories(values) -> list[str]:
+    categories: list[str] = []
+    for value in values if isinstance(values, list) else []:
+        category = CATEGORY_ALIASES.get(str(value), str(value))
+        if category not in categories:
+            categories.append(category)
+    return categories
 
 
 def _has_blocking_open_questions(constitution: dict) -> bool:

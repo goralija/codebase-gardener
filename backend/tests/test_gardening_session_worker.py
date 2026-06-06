@@ -159,6 +159,98 @@ def test_run_gardening_session_offers_constitution_pr_from_analysis_artifacts(
 
 
 @pytest.mark.django_db
+def test_run_gardening_session_creates_pending_plans_from_real_opportunities(
+    settings,
+    monkeypatch,
+):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "first_scan"},
+    )
+    report = first_report_for_repository(
+        repository,
+        opportunities=[
+            opportunity("opp_docs", "Refresh docs", ["docs/api.md"]),
+            opportunity(
+                "opp_tests",
+                "Add tenant tests",
+                ["tenants/test_gap.py"],
+                category="tests",
+                risk_tier="tier_2_assisted",
+                confidence=0.94,
+            ),
+        ],
+    )
+    executed = []
+
+    monkeypatch.setattr(
+        "apps.sessions.tasks.storage_service.load_first_report",
+        lambda _analysis: report,
+    )
+    monkeypatch.setattr(
+        "apps.maintenance_prs.executor.execute_maintenance_pr_plan",
+        lambda plan: executed.append(plan.id),
+    )
+
+    run_gardening_session.delay(str(session.id)).get()
+
+    session.refresh_from_db()
+    plans = list(MaintenancePRPlan.objects.for_session(str(session.id)).order_by("title"))
+    assert len(plans) == 2
+    assert all(plan.approval_status == MaintenancePRPlan.ApprovalStatus.PENDING for plan in plans)
+    assert executed == []
+
+    unblocked = [plan for plan in plans if not plan.blocked]
+    blocked = [plan for plan in plans if plan.blocked]
+    assert len(unblocked) == 1
+    assert len(blocked) == 1
+    assert blocked[0].block_reason == "Opportunity category requires assisted draft PR handling."
+    assert session.result["opportunities_selected"] == ["opp_docs"]
+    assert session.result["opportunities_deferred"] == [
+        {
+            "maintenance_opportunity_id": "opp_tests",
+            "reason": "Opportunity category requires assisted draft PR handling.",
+        }
+    ]
+    assert session.result["maintenance_pr_plans"] == [str(unblocked[0].id)]
+    assert session.result["errors"] == []
+    assert_gardening_session_result_contract(session.result)
+
+
+@pytest.mark.django_db
+def test_run_gardening_session_planning_is_idempotent_per_session_opportunity(
+    settings,
+    monkeypatch,
+):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "first_scan"},
+    )
+    report = first_report_for_repository(
+        repository,
+        opportunities=[opportunity("opp_docs", "Refresh docs", ["docs/api.md"])],
+    )
+
+    monkeypatch.setattr(
+        "apps.sessions.tasks.storage_service.load_first_report",
+        lambda _analysis: report,
+    )
+
+    run_gardening_session.delay(str(session.id)).get()
+    run_gardening_session.delay(str(session.id)).get()
+
+    session.refresh_from_db()
+    assert MaintenancePRPlan.objects.for_session(str(session.id)).count() == 1
+    assert session.result["opportunities_selected"] == ["opp_docs"]
+
+
+@pytest.mark.django_db
 def test_run_gardening_session_marks_session_failed_with_partial_result(settings):
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = False
@@ -549,6 +641,77 @@ def repo_root():
 
 def analysis_result():
     return SimpleNamespace(analysis=object(), artifacts={"constitution": {"open_questions": []}})
+
+
+def first_report_for_repository(repository: ManagedRepository, *, opportunities: list[dict]):
+    report = copy.deepcopy(load_first_report_fixture())
+    report["repository_constitution"] = constitution_for_repository(repository)
+    report["maintenance_opportunities"] = copy.deepcopy(opportunities)
+    report["maintenance_pr_plans"] = []
+    return report
+
+
+def constitution_for_repository(repository: ManagedRepository):
+    return {
+        "schema_version": "1.0",
+        "repository_id": str(repository.id),
+        "commit_sha": "abc123",
+        "completeness_score": 1.0,
+        "protected_modules": [
+            {
+                "name": "billing",
+                "paths": ["billing/**"],
+                "reason": "Billing is protected.",
+            }
+        ],
+        "never_touch": [
+            {
+                "path": "**/.env*",
+                "reason": "Secrets require human handling.",
+            }
+        ],
+        "allowed_fixes": {
+            "autonomous": ["docs", "dependency_patch"],
+            "assisted": ["tests", "complexity_reduction", "layer_violation_repair"],
+            "advisory": ["auth", "permissions"],
+        },
+        "architecture_boundaries": [],
+        "ignored_paths": [],
+        "open_questions": [],
+    }
+
+
+def opportunity(
+    maintenance_opportunity_id: str,
+    title: str,
+    affected_paths: list[str],
+    *,
+    category: str = "docs",
+    risk_tier: str = "tier_1_autonomous",
+    confidence: float = 0.94,
+):
+    return {
+        "schema_version": "1.0",
+        "maintenance_opportunity_id": maintenance_opportunity_id,
+        "repository_id": "repo_demo",
+        "analysis_snapshot_id": "snap_demo",
+        "category": category,
+        "risk_tier": risk_tier,
+        "confidence": confidence,
+        "title": title,
+        "summary": f"{title} summary.",
+        "affected_paths": affected_paths,
+        "blocked_by": [],
+        "expected_entropy_delta": -1.1,
+        "required_checks": ["docs_review"],
+        "evidence": [
+            {
+                "source_type": "file",
+                "path": affected_paths[0],
+                "summary": f"{title} evidence.",
+            }
+        ],
+    }
 
 
 def create_repository(identifier: int) -> ManagedRepository:

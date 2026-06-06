@@ -5,6 +5,7 @@ from apps.analysis import storage_service
 from apps.analysis.constitution_pr import maybe_open_constitution_pr
 from apps.analysis.runner import AnalysisRunError, run_repository_analysis
 from apps.github_app.client import RETRYABLE_STATUS_CODES, GitHubAPIError
+from apps.maintenance_prs.planner import plan_maintenance_prs
 from apps.sessions.lifecycle import (
     SessionLifecycleError,
     build_failed_gardening_session_result,
@@ -47,6 +48,7 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
             artifacts=analysis_result.artifacts,
         )
         first_report = storage_service.load_first_report(analysis_result.analysis)
+        _plan_session_prs(session, first_report)
         current_phase = "execute"
         executed_plan_ids, execution_errors = execute_session_pr_plans(session)
         session.result = build_gardening_session_result(
@@ -175,3 +177,33 @@ def _run_foundation_placeholder(session: GardeningSession) -> None:
     simulation = session.trigger.get("simulate")
     if simulation == "retryable_error":
         raise RetryableSessionError("Simulated retryable session error.")
+
+
+def _plan_session_prs(session: GardeningSession, first_report: dict) -> None:
+    """Persist real PR plans for stored analysis opportunities.
+
+    Fixture reports carry fixture PR plans and a non-UUID demo repository ID,
+    so they stay on the legacy fixture path. Stored analysis reports may include
+    prior session plan contracts for report serving; those must not suppress
+    planning for the current session.
+    """
+    if _is_fixture_report(session, first_report):
+        return
+
+    opportunities = first_report.get("maintenance_opportunities") or []
+    if not opportunities:
+        return
+
+    plan_maintenance_prs(
+        repository=session.repository,
+        gardening_session_id=str(session.id),
+        opportunities=opportunities,
+        constitution=first_report.get("repository_constitution") or {},
+    )
+
+
+def _is_fixture_report(session: GardeningSession, first_report: dict) -> bool:
+    repository_id = first_report.get("repository_constitution", {}).get("repository_id")
+    return repository_id != str(session.repository_id) and bool(
+        first_report.get("maintenance_pr_plans")
+    )

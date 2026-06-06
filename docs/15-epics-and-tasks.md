@@ -356,7 +356,7 @@ The three lanes move from fixture contracts to real end-to-end behavior.
 
 #### E05-T02 Wire real opportunities into session and PR planning
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Shared
 - Complexity: L
