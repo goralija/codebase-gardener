@@ -15,10 +15,12 @@ dependencies = [
   "PyJWT[crypto]>=2.10,<3",
   "referencing>=0.37,<0.38",
   "redis>=6,<7",
+  "boto3>=1.43.24",
 ]
 
 [dependency-groups]
 dev = [
+  "moto>=5.2.1",
   "pytest>=8.4.2,<9",
   "pytest-django>=4.11,<5",
 ]

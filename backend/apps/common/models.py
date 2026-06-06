@@ -35,6 +35,10 @@ class AuditEvent(UUIDTimestampedModel):
             "maintenance_pr_creation_failed",
             "Maintenance PR creation failed",
         )
+        ANALYSIS_STORED = (
+            "analysis_stored",
+            "Repository analysis stored",
+        )
         SESSION_TRIGGER_ENQUEUED = (
             "session_trigger_enqueued",
             "Session trigger enqueued",
