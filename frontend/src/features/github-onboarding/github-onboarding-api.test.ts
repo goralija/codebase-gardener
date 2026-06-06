@@ -88,8 +88,45 @@ describe("github onboarding API", () => {
         fetcher: fetcherReturning(jsonResponse(repositoryListPayload())),
       })
     ).resolves.toMatchObject({
-      repositories: [{ full_name: "acme/api" }],
+      repositories: [
+        {
+          full_name: "acme/api",
+          complexity: {
+            input_status: "complete",
+            multiplier: 2.1,
+          },
+        },
+      ],
     })
+  })
+
+  it("parses pending repository complexity", () => {
+    const payload = repositoryListPayload()
+    payload.repositories[0].complexity = pendingComplexity()
+
+    expect(parseRepositoriesResponse(payload).repositories[0].complexity).toEqual(
+      pendingComplexity()
+    )
+  })
+
+  it("parses partial and restricted repository complexity", () => {
+    const payload = repositoryListPayload()
+    payload.repositories = [
+      { ...payload.repositories[0], complexity: partialComplexity() },
+      {
+        ...payload.repositories[0],
+        id: "repo-2",
+        github_repository_id: 3002,
+        complexity: restrictedComplexity(),
+      },
+    ]
+
+    expect(parseRepositoriesResponse(payload).repositories[0].complexity).toEqual(
+      partialComplexity()
+    )
+    expect(parseRepositoriesResponse(payload).repositories[1].complexity).toEqual(
+      restrictedComplexity()
+    )
   })
 
   it("rejects request failures", async () => {
@@ -144,7 +181,84 @@ function repositoryListPayload() {
         default_branch: "main",
         html_url: "https://github.com/acme/api",
         selected_at: "2026-06-06T08:00:00Z",
+        complexity: completeComplexity(),
       },
     ],
+  }
+}
+
+function completeComplexity() {
+  return {
+    input_status: "complete",
+    loc: 120000,
+    module_count: 9,
+    contributor_count: 6,
+    loc_score: 0.66,
+    module_score: 0.66,
+    contributor_score: 0.33,
+    weighted_score: 0.55,
+    multiplier: 2.1,
+    calculation_version: "complexity.v1.equal_thirds",
+    source_analysis_id: "analysis-1",
+    source_commit_sha: "abc123",
+    missing_inputs: [],
+    calculated_at: "2026-06-06T08:10:00Z",
+  }
+}
+
+function partialComplexity() {
+  return {
+    input_status: "partial",
+    loc: 42000,
+    module_count: 4,
+    contributor_count: null,
+    loc_score: 0.33,
+    module_score: 0.33,
+    contributor_score: 0,
+    weighted_score: 0,
+    multiplier: 1,
+    calculation_version: "complexity.v1.equal_thirds",
+    source_analysis_id: "analysis-2",
+    source_commit_sha: "def456",
+    missing_inputs: ["contributor_count"],
+    calculated_at: "2026-06-06T08:11:00Z",
+  }
+}
+
+function restrictedComplexity() {
+  return {
+    input_status: "restricted",
+    loc: null,
+    module_count: null,
+    contributor_count: null,
+    loc_score: 0,
+    module_score: 0,
+    contributor_score: 0,
+    weighted_score: 0,
+    multiplier: 1,
+    calculation_version: "complexity.v1.equal_thirds",
+    source_analysis_id: null,
+    source_commit_sha: null,
+    missing_inputs: [],
+    calculated_at: null,
+  }
+}
+
+function pendingComplexity() {
+  return {
+    input_status: "pending",
+    loc: null,
+    module_count: null,
+    contributor_count: null,
+    loc_score: 0,
+    module_score: 0,
+    contributor_score: 0,
+    weighted_score: 0,
+    multiplier: 1,
+    calculation_version: "complexity.v1.equal_thirds",
+    source_analysis_id: null,
+    source_commit_sha: null,
+    missing_inputs: ["loc", "module_count", "contributor_count"],
+    calculated_at: null,
   }
 }

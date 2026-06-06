@@ -17,6 +17,7 @@ import {
   fetchOrganizationRepositories,
   fetchOrganizations,
   GithubOnboardingRequestError,
+  type ManagedRepository,
   type Organization,
 } from "./github-onboarding-api"
 
@@ -257,6 +258,7 @@ function RepositorySelectionPanel({
   isLoading: boolean
   repositories: Array<{
     id: string
+    complexity: ManagedRepository["complexity"]
     default_branch: string
     full_name: string
     html_url: string
@@ -300,14 +302,15 @@ function RepositorySelectionPanel({
           </div>
         ) : (
           <div className="overflow-x-auto rounded-md border">
-            <table className="w-full min-w-[36rem] table-fixed text-left text-sm">
+            <table className="w-full min-w-[52rem] table-fixed text-left text-sm">
               <thead className="bg-muted/50 text-xs text-muted-foreground uppercase">
                 <tr>
-                  <th className="w-7/12 px-3 py-2 font-medium">Repository</th>
-                  <th className="w-3/12 px-3 py-2 font-medium">
+                  <th className="w-4/12 px-3 py-2 font-medium">Repository</th>
+                  <th className="w-2/12 px-3 py-2 font-medium">
                     Default branch
                   </th>
                   <th className="w-2/12 px-3 py-2 font-medium">Visibility</th>
+                  <th className="w-4/12 px-3 py-2 font-medium">Complexity</th>
                 </tr>
               </thead>
               <tbody>
@@ -327,6 +330,9 @@ function RepositorySelectionPanel({
                     <td className="px-3 py-3 text-muted-foreground">
                       {repository.private ? "Private" : "Public"}
                     </td>
+                    <td className="px-3 py-3">
+                      <RepositoryComplexity complexity={repository.complexity} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -336,6 +342,74 @@ function RepositorySelectionPanel({
       </div>
     </section>
   )
+}
+
+function RepositoryComplexity({
+  complexity,
+}: {
+  complexity: ManagedRepository["complexity"]
+}) {
+  if (complexity.input_status === "complete") {
+    return (
+      <div className="flex min-w-0 flex-col gap-1">
+        <span className="font-medium">{formatMultiplier(complexity.multiplier)}</span>
+        <span className="truncate text-xs text-muted-foreground">
+          {formatComplexityInputs(complexity)}
+        </span>
+      </div>
+    )
+  }
+
+  if (complexity.input_status === "partial") {
+    return (
+      <div className="flex min-w-0 flex-col gap-1">
+        <span className="font-medium">Partial / 1.0x</span>
+        <span className="truncate text-xs text-muted-foreground">
+          {formatComplexityInputs(complexity)}
+        </span>
+      </div>
+    )
+  }
+
+  if (complexity.input_status === "restricted") {
+    return (
+      <div className="flex min-w-0 flex-col gap-1">
+        <span className="font-medium">Restricted</span>
+        <span className="truncate text-xs text-muted-foreground">
+          Owner or admin can view billing inputs
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="font-medium">Unknown / 1.0x</span>
+      <span className="truncate text-xs text-muted-foreground">
+        Waiting for LOC, modules, and contributors
+      </span>
+    </div>
+  )
+}
+
+function formatMultiplier(multiplier: number) {
+  return multiplier === 1 ? "1.0x" : `${multiplier.toFixed(2)}x`
+}
+
+function formatComplexityInputs(complexity: ManagedRepository["complexity"]) {
+  return [
+    complexity.loc == null ? "Unknown LOC" : `${formatNumber(complexity.loc)} LOC`,
+    complexity.module_count == null
+      ? "Unknown modules"
+      : `${formatNumber(complexity.module_count)} modules`,
+    complexity.contributor_count == null
+      ? "Unknown contributors"
+      : `${formatNumber(complexity.contributor_count)} contributors`,
+  ].join(" · ")
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("en-US").format(value)
 }
 
 function StatusBand({

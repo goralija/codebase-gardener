@@ -41,6 +41,8 @@
 ### Billing and ROI
 
 - ComplexityMultiplier: multiplier based on LOC, modules, and contributors.
+- ComplexityMultiplier v1 uses equal-third weighting across LOC, module count, and contributor count. Input bands are LOC `<=25k / <=100k / <=250k / >250k`, modules `<=3 / <=8 / <=20 / >20`, and contributors `<=5 / <=20 / <=50 / >50`; band scores are `0 / 0.33 / 0.66 / 1.0`, and the final multiplier is `1 + 2 * weighted_score`, capped by the `1.0x` to `3.0x` range.
+- If analysis-derived complexity inputs are missing or partial, Gardener shows the known inputs but keeps the active multiplier neutral at `1.0x`.
 - Subscription: base managed-repository plan and add-ons.
 - ROIEstimate: engineering hours saved, hotspots removed before incidents, and maintainability improvements.
 
