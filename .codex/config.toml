@@ -1,0 +1,8 @@
+[mcp_servers.repowise]
+args = [
+    "mcp",
+    "/Users/bloomteq/codebase-gardener",
+    "--transport",
+    "stdio",
+]
+command = "repowise"

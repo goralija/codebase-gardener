@@ -40,6 +40,47 @@ For active development:
 make dev
 ```
 
+This starts the local product services:
+
+- Django API: `http://localhost:8000`
+- Vite dashboard: `http://localhost:5173`
+
+If you only need the frontend shell, run:
+
+```bash
+VITE_API_BASE_URL=http://localhost:8000/api/v1 pnpm --dir frontend dev --host 0.0.0.0
+```
+
+## Local Repowise
+
+Repowise is vendored under `RepoWise/` and tracked by this repository. Edit Repowise files in place, then commit from the Codebase Gardener root:
+
+```bash
+git status
+git add RepoWise/packages/core/src
+git commit -m "Adapt Repowise for Gardener"
+```
+
+Use real paths from `git status`; paths like `RepoWise/path/to/changed_file.py` are examples, not literal commands.
+
+Run the vendored Repowise CLI through its project environment:
+
+```bash
+uv --project RepoWise run repowise status . --no-workspace
+uv --project RepoWise run repowise init . --index-only --mode fast --yes --no-agents --no-codex --no-claude-md
+uv --project RepoWise run repowise health . --format json
+```
+
+To inspect Repowise's own local dashboard:
+
+```bash
+uv --project RepoWise run repowise serve --port 7337 --ui-port 3000
+```
+
+Then open `http://localhost:3000`. This dashboard is for debugging raw repository intelligence; the customer-facing product UI remains the Gardener dashboard at `http://localhost:5173`.
+
+Repowise-generated local files such as `.repowise/`, `.codex/`, `.mcp.json`, `RepoWise/.repowise/`, `RepoWise/.venv/`, and `RepoWise/node_modules/` are ignored. Do not commit generated indexes, local virtualenvs, dependency folders, or absolute-path MCP config.
+
 ## Three Lanes
 
 - Lane A: Platform, GitHub App, API, Dashboard

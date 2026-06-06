@@ -40,6 +40,34 @@ The chosen stack must support:
 
 The default Docker Compose host ports are `15432` for PostgreSQL and `16379` for Redis to avoid collisions with common local services. Developers may override `POSTGRES_PORT`, `REDIS_PORT`, `DATABASE_URL`, and `REDIS_URL` per worktree or machine.
 
+Start the local product stack from the repository root:
+
+```bash
+make setup
+make services
+make dev
+```
+
+`make dev` runs the Django API at `http://localhost:8000` and the Vite dashboard at `http://localhost:5173`.
+
+Lane B repository-intelligence development uses the vendored Repowise checkout at `RepoWise/`. Run it through its own project environment from the Codebase Gardener root:
+
+```bash
+uv --project RepoWise run repowise status . --no-workspace
+uv --project RepoWise run repowise init . --index-only --mode fast --yes --no-agents --no-codex --no-claude-md
+uv --project RepoWise run repowise health . --format json
+```
+
+Repowise's own dashboard can be started for debugging raw scan output:
+
+```bash
+uv --project RepoWise run repowise serve --port 7337 --ui-port 3000
+```
+
+Open `http://localhost:3000` for the Repowise dashboard. This is an engineering/debugging surface only; Gardener's product dashboard remains the Vite app.
+
+Repowise source files under `RepoWise/` are tracked in the Codebase Gardener repository. Generated local files and machine-specific config are ignored, including `.repowise/`, `.codex/`, `.mcp.json`, `RepoWise/.repowise/`, `RepoWise/.venv/`, and `RepoWise/node_modules/`.
+
 ## Worker requirements
 
 - Isolate customer sessions.
