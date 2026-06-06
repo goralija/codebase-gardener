@@ -2,12 +2,12 @@
 
 Vite, React, TypeScript, TanStack Query/Router/Form, Valibot, and shadcn/ui with preset `bLToCnFy`.
 
-The first screen consumes `../fixtures/contracts/first_report_fixture.json` until Lane A replaces the fixture path with DRF API responses.
+The first screen consumes the DRF first-report API using `VITE_API_BASE_URL`. Root `make dev` and `.env.example` point Vite at `http://localhost:8000/api/v1`; if unset, the frontend falls back to same-origin `/api/v1`.
 
 ## Commands
 
 ```bash
-pnpm dev
+VITE_API_BASE_URL=http://localhost:8000/api/v1 pnpm dev
 pnpm test -- --run
 pnpm build
 pnpm exec playwright test

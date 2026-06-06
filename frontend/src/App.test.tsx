@@ -1,8 +1,26 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
+import firstReportFixture from "../../fixtures/contracts/first_report_fixture.json"
 import App from "@/App.tsx"
+
+function jsonResponse(body: unknown, init: ResponseInit = {}) {
+  return new Response(JSON.stringify(body), {
+    headers: {
+      "Content-Type": "application/json",
+    },
+    status: 200,
+    ...init,
+  })
+}
+
+function mockFirstReportResponse(response: Response | Promise<Response>) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => response)
+  )
+}
 
 function renderApp() {
   const queryClient = new QueryClient({
@@ -21,7 +39,13 @@ function renderApp() {
 }
 
 describe("App", () => {
-  it("renders the required first-report dashboard sections", async () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("renders the required first-report dashboard sections from the API", async () => {
+    mockFirstReportResponse(jsonResponse(firstReportFixture))
+
     renderApp()
 
     expect(
@@ -54,6 +78,64 @@ describe("App", () => {
     ).toHaveLength(2)
     expect(
       screen.getByText("gardener/docs-archive-seed-spec")
+    ).toBeInTheDocument()
+  })
+
+  it("shows a loading state while the first report is requested", async () => {
+    let resolveResponse: (response: Response) => void
+    const pendingResponse = new Promise<Response>((resolve) => {
+      resolveResponse = resolve
+    })
+    mockFirstReportResponse(pendingResponse)
+
+    renderApp()
+
+    expect(
+      screen.getByRole("heading", { name: "Loading first report" })
+    ).toBeInTheDocument()
+
+    resolveResponse!(jsonResponse(firstReportFixture))
+    expect(
+      await screen.findByRole("heading", { name: "First report" })
+    ).toBeInTheDocument()
+  })
+
+  it("shows the first-report empty state for a 404 response", async () => {
+    mockFirstReportResponse(
+      jsonResponse(
+        {
+          code: "not_found",
+          message: "First report not found.",
+          details: {},
+        },
+        { status: 404 }
+      )
+    )
+
+    renderApp()
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "First report is not ready",
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Retry first report" })
+    ).toBeInTheDocument()
+  })
+
+  it("shows the first-report error state for invalid API data", async () => {
+    mockFirstReportResponse(jsonResponse({ repository_constitution: {} }))
+
+    renderApp()
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Could not load first report",
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/does not match the shared contract/)
     ).toBeInTheDocument()
   })
 })
