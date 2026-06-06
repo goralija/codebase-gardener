@@ -13,4 +13,9 @@ urlpatterns = [
         views.oauth_callback,
         name="github-app-oauth-callback",
     ),
+    path(
+        "webhooks/",
+        views.webhook_delivery,
+        name="github-app-webhook-delivery",
+    ),
 ]
