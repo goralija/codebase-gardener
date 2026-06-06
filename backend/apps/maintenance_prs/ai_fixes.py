@@ -12,14 +12,20 @@ import ast
 import difflib
 import logging
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
 import os
 import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+<<<<<<< HEAD
 =======
 import re
 from collections.abc import Callable
 >>>>>>> 9e7c4e4 (feat(ai-fixes): progress logging + percentage callback for AI authoring)
+=======
+>>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
 
 from apps.common.llm import LLMError, complete
 from apps.maintenance_prs.models import MaintenancePRPlan
@@ -102,16 +108,16 @@ _MAX_FILE_CHARS = 200_000
 # Files at/under this size are edited in a single pass with full context.
 _SINGLE_PASS_CHARS = 40_000
 
-# Larger files are read in chunks of this size (the whole file is covered across
-# passes); edits from every chunk are collected and applied to the full file.
+# Larger files are processed in parallel chunks. The merged edit is still
+# validated before the executor commits anything to GitHub.
 _CHUNK_CHARS = 32_000
-
-# Safety bound on passes per file so a pathological file can't run unbounded.
 _MAX_CHUNKS = 40
-
-# Absolute ceiling; beyond this even chunking is refused (chars).
 _MAX_FILE_CHARS = _CHUNK_CHARS * _MAX_CHUNKS
+<<<<<<< HEAD
 >>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
+=======
+_DEFAULT_CHUNK_WORKERS = 8
+>>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
 
 >>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
 # Upper bound on requested completion tokens. Edit blocks are small, so this is
@@ -151,6 +157,9 @@ def apply_ai_fix(
     Uses SEARCH/REPLACE edit blocks: the model returns only the changed regions,
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
     so output stays small. Files larger than a single safe context window are
     split into chunks and analyzed concurrently; the merged result is still
     rejected unless it validates.
@@ -165,6 +174,7 @@ def apply_ai_fix(
         )
 
     chunks = [content] if len(content) <= _SINGLE_PASS_CHARS else _chunk_content(path, content)
+<<<<<<< HEAD
     total = len(chunks)
     _report(progress, 0, "reading", f"{path}: reading in {total} part(s)")
 
@@ -217,39 +227,24 @@ def apply_ai_fix(
     else:
         chunks = _chunk_content(path, content)
 
+=======
+>>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
     total = len(chunks)
     _report(progress, 0, "reading", f"{path}: reading in {total} part(s)")
 
     blocks: list[tuple[str, str]] = []
     whole_file_fallback: str | None = None
-    for index, chunk in enumerate(chunks):
-        prompt = _build_prompt(
-            path, chunk, plan, opportunity, part=(index + 1, total)
-        )
-        try:
-            raw = complete(
-                prompt, system=_SYSTEM_PROMPT, max_tokens=_MODEL_OUTPUT_TOKEN_CAP
-            )
-        except LLMError as exc:
-            raise AIFixError(f"LLM fix failed for {path}: {exc}") from exc
-
+    outputs = _complete_chunks(path, chunks, plan, opportunity, progress=progress)
+    for index, raw in enumerate(outputs):
         chunk_blocks = _parse_edit_blocks(raw)
         if chunk_blocks:
             blocks.extend(chunk_blocks)
-        elif total == 1:
+            continue
+        if total == 1:
             # Single-pass fallback: model returned the whole file in a fence.
             fenced = _FENCE_RE.search(raw)
             if fenced:
                 whole_file_fallback = fenced.group(1).strip("\n") + "\n"
-
-        # Reserve the last 10% for apply + validate.
-        percent = int((index + 1) / total * 90)
-        _report(
-            progress,
-            percent,
-            "analyzing",
-            f"{path}: part {index + 1}/{total}, {len(blocks)} edit(s) so far",
-        )
 
     _report(progress, 90, "applying", f"{path}: applying {len(blocks)} edit(s)")
     if blocks:
@@ -267,6 +262,9 @@ def apply_ai_fix(
 
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
 def _complete_chunks(
     path: str,
     chunks: list[str],
@@ -337,8 +335,11 @@ def _chunk_worker_count() -> int:
     return max(1, min(value, _DEFAULT_CHUNK_WORKERS))
 
 
+<<<<<<< HEAD
 =======
 >>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
+=======
+>>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
 def _chunk_content(path: str, content: str) -> list[str]:
     """Split content into context-sized chunks that together cover the whole file.
 
@@ -378,10 +379,13 @@ def _chunk_content(path: str, content: str) -> list[str]:
 def _python_top_level_line_starts(content: str) -> set[int] | None:
     try:
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
         import ast
 
 >>>>>>> 8135096 (feat(ai-fixes): chunked reading so large files are edited, not skipped)
+=======
+>>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
         tree = ast.parse(content)
     except SyntaxError:
         return None
@@ -459,6 +463,9 @@ def _parse_edit_blocks(text: str) -> list[tuple[str, str]]:
 
 def _apply_edit_blocks(path: str, content: str, blocks: list[tuple[str, str]]) -> str:
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
     """Apply edit blocks best-effort.
 
     Blocks whose SEARCH no longer matches (model mis-quote, or a region already
@@ -468,6 +475,7 @@ def _apply_edit_blocks(path: str, content: str, blocks: list[tuple[str, str]]) -
     cannot poison the whole merged patch. Fails only if nothing applied. The
     final result is still validated (ast parse + change ratio).
     """
+<<<<<<< HEAD
     updated = content
     applied = 0
     skipped = 0
@@ -507,24 +515,50 @@ def _python_parses(content: str) -> bool:
 
 
 =======
+=======
+>>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
     updated = content
+    applied = 0
+    skipped = 0
     for search, replace in blocks:
         if not search.strip():
-            raise AIFixError(f"AI fix for {path} had an empty SEARCH block.")
-        if search in updated:
-            updated = updated.replace(search, replace, 1)
+            skipped += 1
             continue
-        # Tolerate trailing-whitespace / line-ending differences.
-        normalized = _match_ignoring_trailing_ws(updated, search)
-        if normalized is None:
-            raise AIFixError(
-                f"AI fix for {path}: a SEARCH block did not match the file exactly."
-            )
-        updated = updated.replace(normalized, replace, 1)
+
+        matched = search if search in updated else _match_ignoring_trailing_ws(updated, search)
+        if matched is None:
+            skipped += 1
+            continue
+
+        candidate = updated.replace(matched, replace, 1)
+        if path.endswith(".py") and not _python_parses(candidate):
+            skipped += 1
+            continue
+
+        updated = candidate
+        applied += 1
+
+    if applied == 0:
+        raise AIFixError(
+            f"AI fix for {path}: no SEARCH block matched the file ({skipped} skipped)."
+        )
+    if skipped:
+        logger.info("ai_fix %s: applied %d edit(s), skipped %d", path, applied, skipped)
     return updated
 
 
+<<<<<<< HEAD
 >>>>>>> c88ee3e (feat(ai-fixes): SEARCH/REPLACE edit blocks for any-size files)
+=======
+def _python_parses(content: str) -> bool:
+    try:
+        ast.parse(content)
+    except SyntaxError:
+        return False
+    return True
+
+
+>>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
 def _match_ignoring_trailing_ws(content: str, search: str) -> str | None:
     """Return the substring of *content* matching *search* ignoring trailing
     whitespace per line, or None if not found."""

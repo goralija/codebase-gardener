@@ -258,6 +258,9 @@ def _apply_actual_file_fixes(
         if plan.category == "docs":
             updated = apply_docs_maintenance_note(content, plan)
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
             _write_updated_file(
                 client,
                 owner,
@@ -269,11 +272,14 @@ def _apply_actual_file_fixes(
                 token=token,
                 plan=plan,
             )
+<<<<<<< HEAD
 =======
         else:
             updated = apply_ai_fix(path, content, plan, opportunity, progress=progress)
         if updated == content:
 >>>>>>> 9e7c4e4 (feat(ai-fixes): progress logging + percentage callback for AI authoring)
+=======
+>>>>>>> 58a0c24 (fix(ai-fixes): apply edit blocks best-effort instead of all-or-nothing)
             continue
         file_inputs.append((path, content))
 
