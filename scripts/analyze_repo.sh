@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Full Lane B analysis of a connected GitHub repo.
+# Dev-only Lane B analysis bridge for a connected GitHub repo.
 # Clones to a temp dir, runs index -> snapshot -> constitution -> entropy,
 # writes JSON artifacts to analysis-output/<repo>/, then ALWAYS deletes the clone.
+# Production/session flow uses the Celery analysis worker.
 #
 # Usage:  scripts/analyze_repo.sh <owner/repo>
 #   e.g.  scripts/analyze_repo.sh HananB27/bloomhub-be

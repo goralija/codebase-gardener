@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 from django.contrib.auth import get_user_model
 
@@ -26,9 +28,21 @@ User = get_user_model()
 
 
 @pytest.fixture(autouse=True)
-def _eager_celery(settings):
+def _eager_celery(settings, monkeypatch):
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = True
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository: _analysis_result(),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.storage_service.load_first_report",
+        lambda _analysis: _first_report_fixture(),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.maybe_open_constitution_pr",
+        lambda **_kwargs: {"created": False},
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -406,6 +420,18 @@ def _keep_sessions_queued(monkeypatch):
 
 def _kind_of(result: dict) -> str:
     return GardeningSession.objects.get(id=result["gardening_session_id"]).trigger["type"]
+
+
+def _first_report_fixture() -> dict:
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "fixtures/contracts/first_report_fixture.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _analysis_result():
+    return SimpleNamespace(analysis=object(), artifacts={"constitution": {"open_questions": []}})
 
 
 def push_payload(*, commit_count: int, modified=None) -> dict:

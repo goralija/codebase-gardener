@@ -115,6 +115,84 @@ def test_dead_code_parser_extracts_final_json_payload_from_noisy_stdout():
     assert parsed == [{"kind": "unused_export", "file_path": "src/a.py"}]
 
 
+def test_snapshot_extracts_dependency_ci_ownership_and_graph_cycle_signals(tmp_path: Path):
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    (repo_path / "package.json").write_text('{"dependencies":{"left-pad":"1.0.0"}}\n')
+    (repo_path / ".github" / "workflows").mkdir(parents=True)
+    (repo_path / ".github" / "workflows" / "ci.yml").write_text(
+        "name: ci\non: [push]\njobs:\n  build:\n    steps:\n      - run: echo build\n",
+        encoding="utf-8",
+    )
+    (repo_path / "src").mkdir()
+    (repo_path / "src" / "a.py").write_text("import src.b\n", encoding="utf-8")
+    (repo_path / "src" / "b.py").write_text("import src.a\n", encoding="utf-8")
+    _git(repo_path, "init")
+    _git(repo_path, "add", ".")
+    for index in range(3):
+        (repo_path / "src" / "a.py").write_text(f"import src.b\n# {index}\n")
+        _git(repo_path, "add", ".")
+        _git(
+            repo_path,
+            "-c",
+            "user.name=Solo",
+            "-c",
+            "user.email=solo@example.com",
+            "commit",
+            "-m",
+            f"Commit {index}",
+        )
+
+    index_result = repowise.RepowiseIndexResult(
+        repo_path=repo_path,
+        commit_sha=_git_stdout(repo_path, "rev-parse", "HEAD"),
+        state={},
+        knowledge_graph={
+            "nodes": [
+                {"id": "file:src/a.py", "filePath": "src/a.py"},
+                {"id": "file:src/b.py", "filePath": "src/b.py"},
+            ],
+            "edges": [
+                {"source": "file:src/a.py", "target": "file:src/b.py", "type": "imports"},
+                {"source": "file:src/b.py", "target": "file:src/a.py", "type": "imports"},
+            ],
+        },
+        health={
+            "metrics": [],
+            "findings": [
+                {
+                    "biomarker_type": "dependency_signal",
+                    "file_path": "package.json",
+                    "reason": "Dependency package drift detected.",
+                    "severity": "medium",
+                }
+            ],
+        },
+        dead_code=[],
+    )
+
+    snapshot = build_analysis_snapshot(
+        index_result,
+        repository_id="repo_full",
+        constitution_id="constitution_full",
+        created_at=datetime(2026, 6, 6, 12, 0, tzinfo=UTC),
+    )
+    signals = snapshot["signals"]
+
+    assert any(s["kind"] == "import_cycle" for s in signals["dependency_cycles"])
+    assert any(
+        s["kind"] == "dependency_manifest_without_lockfile"
+        for s in signals["dependency_risks"]
+    )
+    assert any(s["kind"] == "ci_without_tests" for s in signals["ci_failures"])
+    assert any(s["kind"] == "low_bus_factor" for s in signals["ownership_risks"])
+    assert any(
+        s["kind"] == "ownership_concentration"
+        for s in signals["ownership_risks"]
+    )
+    _validate_analysis_snapshot(snapshot)
+
+
 def _copy_fixture_as_git_repo(name: str, tmp_path: Path) -> Path:
     fixture = load_fixture_repository(name)
     repo_path = tmp_path / name
@@ -141,6 +219,15 @@ def _git(repo_path: Path, *args: str) -> None:
         capture_output=True,
         text=True,
     )
+
+
+def _git_stdout(repo_path: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo_path), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
 
 def _validate_analysis_snapshot(snapshot: dict) -> None:
