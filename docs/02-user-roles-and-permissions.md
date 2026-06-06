@@ -31,6 +31,7 @@ Every action must be scoped to a customer organization and repository. Gardener-
 | Capability | Owner | Admin | Maintainer | Reviewer | Viewer | Gardener Worker |
 | --- | --- | --- | --- | --- | --- | --- |
 | Manage billing | Yes | No | No | No | No | No |
+| View billing plan inputs | Yes | Yes | No | No | No | No |
 | Install/remove repositories | Yes | Yes | No | No | No | No |
 | View entropy reports | Yes | Yes | Yes | Yes | Yes | No |
 | Edit repository constitution answers | Yes | Yes | Yes | No | No | Proposed only |

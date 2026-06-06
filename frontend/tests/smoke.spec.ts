@@ -25,6 +25,38 @@ const credentialCorsHeaders = {
   "access-control-allow-credentials": "true",
   "access-control-allow-origin": "http://127.0.0.1:5174",
 }
+const completeComplexity = {
+  input_status: "complete",
+  loc: 120000,
+  module_count: 9,
+  contributor_count: 6,
+  loc_score: 0.66,
+  module_score: 0.66,
+  contributor_score: 0.33,
+  weighted_score: 0.55,
+  multiplier: 2.1,
+  calculation_version: "complexity.v1.equal_thirds",
+  source_analysis_id: "analysis-1",
+  source_commit_sha: "abc123",
+  missing_inputs: [],
+  calculated_at: "2026-06-06T08:10:00Z",
+}
+const pendingComplexity = {
+  input_status: "pending",
+  loc: null,
+  module_count: null,
+  contributor_count: null,
+  loc_score: 0,
+  module_score: 0,
+  contributor_score: 0,
+  weighted_score: 0,
+  multiplier: 1,
+  calculation_version: "complexity.v1.equal_thirds",
+  source_analysis_id: null,
+  source_commit_sha: null,
+  missing_inputs: ["loc", "module_count", "contributor_count"],
+  calculated_at: null,
+}
 
 test("loads the API-backed dashboard shell", async ({ page }) => {
   let requestedFirstReportUrl: string | undefined
@@ -186,6 +218,7 @@ test("loads GitHub onboarding with selected repositories", async ({ page }) => {
             default_branch: "main",
             html_url: "https://github.com/acme/api",
             selected_at: "2026-06-06T08:00:00Z",
+            complexity: completeComplexity,
           },
           {
             id: "repo-2",
@@ -197,6 +230,7 @@ test("loads GitHub onboarding with selected repositories", async ({ page }) => {
             default_branch: "main",
             html_url: "https://github.com/acme/web",
             selected_at: "2026-06-06T08:00:00Z",
+            complexity: pendingComplexity,
           },
         ],
       },
@@ -214,6 +248,8 @@ test("loads GitHub onboarding with selected repositories", async ({ page }) => {
   ).toBeVisible()
   await expect(page.getByRole("link", { name: "acme/api" })).toBeVisible()
   await expect(page.getByRole("link", { name: "acme/web" })).toBeVisible()
+  await expect(page.getByText("2.10x")).toBeVisible()
+  await expect(page.getByText("Unknown / 1.0x")).toBeVisible()
   await expect(
     page.getByRole("link", { name: /Edit repository access in GitHub/ })
   ).toHaveAttribute("href", settingsUrl)
