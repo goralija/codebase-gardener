@@ -48,7 +48,6 @@ def test_apply_ai_fix_applies_search_replace_block(monkeypatch):
 def test_apply_ai_fix_chunks_large_file_and_applies_edits(monkeypatch):
     from apps.maintenance_prs import ai_fixes
 
-    # Build a >40k-char file so it is processed in multiple chunk passes.
     kept = "".join(f"def used_{i}():\n    return {i}\n\n\n" for i in range(4000))
     big = kept + "def dead():\n    return 0\n"
     assert len(big) > 40_000
@@ -57,9 +56,7 @@ def test_apply_ai_fix_chunks_large_file_and_applies_edits(monkeypatch):
 
     def fake_complete(*a, **k):
         calls["n"] += 1
-        return (
-            "<<<<<<< SEARCH\ndef dead():\n    return 0\n=======\n>>>>>>> REPLACE\n"
-        )
+        return "<<<<<<< SEARCH\ndef dead():\n    return 0\n=======\n>>>>>>> REPLACE\n"
 
     monkeypatch.setenv("GARDENER_AI_FIX_CHUNK_WORKERS", "4")
     monkeypatch.setattr(ai_fixes, "complete", fake_complete)
@@ -114,14 +111,17 @@ def test_apply_ai_fix_reports_progress(monkeypatch):
 
     events = []
     apply_ai_fix(
-        "core/util.py", ORIGINAL, _Plan(), {},
+        "core/util.py",
+        ORIGINAL,
+        _Plan(),
+        {},
         progress=lambda pct, phase, msg: events.append((pct, phase)),
     )
 
     percents = [p for p, _ in events]
     phases = [ph for _, ph in events]
     assert percents[0] == 0 and percents[-1] == 100
-    assert percents == sorted(percents)        # monotonic
+    assert percents == sorted(percents)
     assert "done" in phases
 
 

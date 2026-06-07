@@ -49,7 +49,6 @@ _SOURCE_EXTENSIONS = frozenset(
     {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".rb"}
 )
 
-# Per-category instruction appended to the prompt.
 _CATEGORY_GUIDANCE = {
     "dead_code": (
         "Remove only the unused/dead code identified by the finding. Do not change "
@@ -73,21 +72,12 @@ _CATEGORY_GUIDANCE = {
     ),
 }
 
-# Reject whole-file rewrites: fraction of lines allowed to change (except tests).
 _MAX_CHANGE_RATIO = 0.6
-
-# Files at/under this size are edited in a single pass with full context.
 _SINGLE_PASS_CHARS = 40_000
-
-# Larger files are processed in parallel chunks. The merged edit is still
-# validated before the executor commits anything to GitHub.
 _CHUNK_CHARS = 32_000
 _MAX_CHUNKS = 40
 _MAX_FILE_CHARS = _CHUNK_CHARS * _MAX_CHUNKS
 _DEFAULT_CHUNK_WORKERS = 8
-
-# Upper bound on requested completion tokens. Edit blocks are small, so this is
-# headroom, not sized to the file.
 _MODEL_OUTPUT_TOKEN_CAP = 16_000
 
 _FENCE_RE = re.compile(r"```[a-zA-Z0-9_+-]*\n(.*?)```", re.DOTALL)
@@ -118,16 +108,8 @@ def apply_ai_fix(
     opportunity: dict | None = None,
     progress: ProgressCallback | None = None,
 ) -> str:
-    """Return the LLM-edited file content, validated. Raises AIFixError on failure.
+    """Return the LLM-edited file content, validated. Raises AIFixError on failure."""
 
-    Uses SEARCH/REPLACE edit blocks: the model returns only the changed regions,
-    so output stays small. Files larger than a single safe context window are
-    split into chunks and analyzed concurrently; the merged result is still
-    rejected unless it validates.
-
-    ``progress(percent, phase, message)`` is invoked as the work advances so the
-    worker/UI can show how far along the AI fix is.
-    """
     opportunity = opportunity or {}
     if len(content) > _MAX_FILE_CHARS:
         raise AIFixError(
@@ -141,20 +123,19 @@ def apply_ai_fix(
     blocks: list[tuple[str, str]] = []
     whole_file_fallback: str | None = None
     outputs = _complete_chunks(path, chunks, plan, opportunity, progress=progress)
-    for index, raw in enumerate(outputs):
+    for raw in outputs:
         chunk_blocks = _parse_edit_blocks(raw)
         if chunk_blocks:
             blocks.extend(chunk_blocks)
             continue
         if total == 1:
-            # Single-pass fallback: model returned the whole file in a fence.
             fenced = _FENCE_RE.search(raw)
             if fenced:
                 whole_file_fallback = fenced.group(1).strip("\n") + "\n"
 
     _report(progress, 90, "applying", f"{path}: applying {len(blocks)} edit(s)")
     if blocks:
-        blocks = list(dict.fromkeys(blocks))  # dedupe identical edits across chunks
+        blocks = list(dict.fromkeys(blocks))
         updated = _apply_edit_blocks(path, content, blocks)
     elif whole_file_fallback is not None:
         updated = whole_file_fallback
@@ -175,7 +156,9 @@ def _complete_chunks(
 ) -> list[str]:
     total = len(chunks)
     if total == 1:
-        return [_complete_chunk(path, chunks[0], plan, opportunity, part=(1, 1))]
+        raw = _complete_chunk(path, chunks[0], plan, opportunity, part=(1, 1))
+        _report(progress, 90, "analyzing", f"{path}: part 1/1")
+        return [raw]
 
     workers = min(_chunk_worker_count(), total)
     outputs: dict[int, str] = {}
@@ -237,11 +220,6 @@ def _chunk_worker_count() -> int:
 
 
 def _chunk_content(path: str, content: str) -> list[str]:
-    """Split content into context-sized chunks that together cover the whole file.
-
-    For Python, prefer splitting on top-level definition boundaries so each chunk
-    is coherent; otherwise fall back to line windows. Chunk count is capped.
-    """
     boundaries = _python_top_level_line_starts(content) if path.endswith(".py") else None
     lines = content.split("\n")
     chunks: list[str] = []
@@ -339,15 +317,6 @@ def _parse_edit_blocks(text: str) -> list[tuple[str, str]]:
 
 
 def _apply_edit_blocks(path: str, content: str, blocks: list[tuple[str, str]]) -> str:
-    """Apply edit blocks best-effort.
-
-    Blocks whose SEARCH no longer matches (model mis-quote, or a region already
-    changed by an earlier block) are skipped rather than failing the whole fix —
-    important when a large file yields dozens of blocks. For Python, each
-    accepted block must keep the full file parseable, so one malformed chunk edit
-    cannot poison the whole merged patch. Fails only if nothing applied. The
-    final result is still validated (ast parse + change ratio).
-    """
     updated = content
     applied = 0
     skipped = 0
@@ -387,8 +356,6 @@ def _python_parses(content: str) -> bool:
 
 
 def _match_ignoring_trailing_ws(content: str, search: str) -> str | None:
-    """Return the substring of *content* matching *search* ignoring trailing
-    whitespace per line, or None if not found."""
     search_lines = [line.rstrip() for line in search.split("\n")]
     content_lines = content.split("\n")
     n = len(search_lines)

@@ -122,8 +122,12 @@ def execute_maintenance_pr_plan(
             progress=progress,
         )
         if not actual_fix_paths:
+            if plan.category == "docs":
+                raise PlanNotExecutableError(
+                    "Docs plan did not find any existing safe Markdown file to update."
+                )
             raise PlanNotExecutableError(
-                "Docs plan did not find any existing safe Markdown file to update."
+                "Plan did not find any existing safe file to update."
             )
 
         pull_request = _create_or_find_pull_request(
