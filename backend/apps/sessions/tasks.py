@@ -41,6 +41,9 @@ class RetryableSessionError(Exception):
 @shared_task(bind=True, max_retries=3)
 def run_gardening_session(self, session_id: str) -> dict[str, str]:
     session = GardeningSession.objects.get(id=session_id)
+    if session.status == GardeningSession.Status.CANCELED:
+        # Canceled while still queued; honor the cancel instead of resurrecting it.
+        return {"gardening_session_id": session_id, "status": session.status}
     baseline_analysis = storage_service.get_latest_relevant_baseline(session.repository)
     session.status = GardeningSession.Status.RUNNING
     session.task_id = self.request.id or ""
@@ -48,6 +51,12 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
     session.started_at = timezone.now()
     session.finished_at = None
     session.last_error = ""
+    session.result = _session_progress_payload(
+        session,
+        event="session.queued",
+        phase="observe",
+        message="Session queued. Waiting for hosted worker.",
+    )
     session.save(
         update_fields=[
             "status",
@@ -56,16 +65,29 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
             "started_at",
             "finished_at",
             "last_error",
+            "result",
             "updated_at",
         ]
     )
 
     try:
         current_phase = "observe"
+        _set_session_progress(
+            session,
+            event="session.observe.start",
+            phase=current_phase,
+            message="Starting hosted gardening session.",
+        )
         _run_foundation_placeholder(session)
         analysis_result = run_repository_analysis(
             repository=session.repository,
             source=_analysis_source(session),
+            progress=lambda event, phase, message: _set_session_progress(
+                session,
+                event=event,
+                phase=phase,
+                message=message,
+            ),
         )
         session.current_analysis = analysis_result.analysis
         session.save(update_fields=["current_analysis", "updated_at"])
@@ -78,6 +100,12 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
 
         if _baseline_only_session(session, baseline_analysis):
             current_phase = "learn"
+            _set_session_progress(
+                session,
+                event="session.baseline.promote",
+                phase=current_phase,
+                message="Promoting first-scan baseline.",
+            )
             _promote_session_baseline(analysis_result.analysis)
             baseline_only_report = _report_without_pr_work(first_report)
             session.result = build_gardening_session_result(
@@ -90,6 +118,12 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
             _emit_completion_notification(session, [])
         else:
             current_phase = "diagnose"
+            _set_session_progress(
+                session,
+                event="session.drift.start",
+                phase=current_phase,
+                message="Comparing current analysis against baseline.",
+            )
             drift_report = _build_session_drift_report(
                 baseline_analysis=baseline_analysis,
                 current_analysis=analysis_result.analysis,
@@ -99,6 +133,12 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
             session.save(update_fields=["drift_report", "updated_at"])
 
             current_phase = "plan"
+            _set_session_progress(
+                session,
+                event="session.plan.start",
+                phase=current_phase,
+                message="Planning reviewable maintenance PRs.",
+            )
             drift_opportunities = _planning_opportunities(
                 session=session,
                 opportunities=analysis_result.artifacts.get("opportunities") or [],
@@ -121,6 +161,12 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
             approved_pr_plans = _approve_auto_executable_pr_plans(planned_pr_plans)
             _log_pr_planning_summary(session, planned_pr_plans, approved_pr_plans)
             current_phase = "execute"
+            _set_session_progress(
+                session,
+                event="session.execute.start",
+                phase=current_phase,
+                message="Authoring approved maintenance PRs.",
+            )
             executed_plan_ids, execution_errors = execute_session_pr_plans(session)
             session.result = build_gardening_session_result(
                 session,
@@ -308,6 +354,50 @@ def _run_foundation_placeholder(session: GardeningSession) -> None:
     simulation = session.trigger.get("simulate")
     if simulation == "retryable_error":
         raise RetryableSessionError("Simulated retryable session error.")
+
+
+def _set_session_progress(
+    session: GardeningSession,
+    *,
+    event: str,
+    phase: str,
+    message: str,
+) -> None:
+    session.result = _session_progress_payload(
+        session,
+        event=event,
+        phase=phase,
+        message=message,
+    )
+    session.save(update_fields=["result", "updated_at"])
+
+
+def _session_progress_payload(
+    session: GardeningSession,
+    *,
+    event: str,
+    phase: str,
+    message: str,
+) -> dict:
+    timestamp = timezone.now().isoformat().replace("+00:00", "Z")
+    result = dict(session.result or {})
+    history = list(result.get("progress_events") or [])
+    history.append(
+        {
+            "event": event,
+            "phase": phase,
+            "message": message,
+            "recorded_at": timestamp,
+        }
+    )
+    result["progress"] = {
+        "event": event,
+        "phase": phase,
+        "message": message,
+        "updated_at": timestamp,
+    }
+    result["progress_events"] = history[-20:]
+    return result
 
 
 def _analysis_source(session: GardeningSession) -> str:
@@ -605,7 +695,7 @@ def _auto_approval_skip_reason(plan: MaintenancePRPlan) -> str | None:
         return f"Plan is blocked: {_sentence(plan.block_reason)}"
     if plan.approval_status == MaintenancePRPlan.ApprovalStatus.REJECTED:
         return "Plan was rejected for execution."
-    if plan.risk_tier not in {"tier_1_autonomous", "tier_2_assisted"}:
+    if plan.risk_tier not in {"tier_1_autonomous", "tier_2_assisted", "tier_3_advisory"}:
         return f"Risk tier {plan.risk_tier or 'unknown'} is not eligible for PR execution."
     if plan.confidence < plan.confidence_threshold:
         return (

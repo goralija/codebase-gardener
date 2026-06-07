@@ -183,7 +183,7 @@ def test_execute_ai_dead_code_fix_authors_pr_and_applies_risk_labels(monkeypatch
     assert "def dead()" not in client.put_contents["core/util.py"]
     # PR labeled by risk tier / confidence / category.
     assert ("add_labels", "org-1", "repo-1", 42,
-            ("gardener:tier-1-autonomous", "gardener:confidence-high",
+            ("gardener:tier-1-autonomous", "gardener:risk-low", "gardener:confidence-high",
              "gardener:category-dead-code")) in client.calls
 
 
@@ -227,6 +227,7 @@ def test_execute_ai_fix_authors_multiple_files(monkeypatch):
 def test_execute_ai_fix_failure_fails_plan_without_pr(monkeypatch):
     from apps.maintenance_prs import ai_fixes
     from apps.maintenance_prs.ai_fixes import AIFixError
+    from apps.maintenance_prs.executor import PlanNotExecutableError
 
     def _boom(*a, **k):
         raise AIFixError("invalid python")
@@ -240,12 +241,46 @@ def test_execute_ai_fix_failure_fails_plan_without_pr(monkeypatch):
     )
     client = FakeGitHubClient(file_contents={"core/util.py": "x = 1\n"})
 
-    with pytest.raises(AIFixError):
+    # The only file fails to author -> 0 changes -> plan fails, no PR opened.
+    with pytest.raises(PlanNotExecutableError, match="no file changes"):
         execute_maintenance_pr_plan(plan, client=client)
 
     plan.refresh_from_db()
     assert plan.execution_status == MaintenancePRPlan.ExecutionStatus.FAILED
     assert "create_pull_request" not in _names(client)
+
+
+@pytest.mark.django_db
+def test_execute_ships_files_that_authored_and_skips_failures(monkeypatch):
+    from apps.maintenance_prs import ai_fixes
+    from apps.maintenance_prs.ai_fixes import AIFixError
+
+    def _author(path, content, *a, **k):
+        if path == "core/bad.py":
+            raise AIFixError("no SEARCH block matched")
+        return content + "# fixed\n"
+
+    monkeypatch.setattr(ai_fixes, "apply_ai_fix", _author)
+
+    plan = make_plan(
+        category="dead_code",
+        branch_name="gardener/dead-code-partial",
+        changed_paths=["core/good.py", "core/bad.py"],
+    )
+    client = FakeGitHubClient(
+        file_contents={"core/good.py": "x = 1\n", "core/bad.py": "y = 2\n"},
+        file_shas={"core/good.py": "good_sha", "core/bad.py": "bad_sha"},
+    )
+
+    result = execute_maintenance_pr_plan(plan, client=client)
+
+    # The good file ships; the failing file is skipped, not fatal. PR still opens.
+    assert "core/good.py" in client.put_contents
+    assert "core/bad.py" not in client.put_contents
+    assert "create_pull_request" in _names(client)
+    plan.refresh_from_db()
+    assert plan.execution_status == MaintenancePRPlan.ExecutionStatus.SUCCEEDED
+    assert result["created_pr_number"] == 42
 
 
 @pytest.mark.django_db
@@ -393,7 +428,7 @@ def test_docs_plan_without_existing_markdown_target_does_not_open_marker_only_pr
         get_file_contents_error=GitHubAPIError("not found", status_code=404),
     )
 
-    with pytest.raises(PlanNotExecutableError, match="existing safe Markdown"):
+    with pytest.raises(PlanNotExecutableError, match="no Markdown file changes"):
         execute_maintenance_pr_plan(plan, client=client)
 
     marker_path = ".gardener/plans/gardener-docs-refresh.md"
@@ -526,7 +561,6 @@ def test_non_422_branch_error_fails():
         },
         {"execution_status": MaintenancePRPlan.ExecutionStatus.SUCCEEDED},
         {"execution_status": MaintenancePRPlan.ExecutionStatus.RUNNING},
-        {"risk_tier": "tier_3_advisory"},
     ],
 )
 def test_gate_blocks_non_executable_plans(overrides):

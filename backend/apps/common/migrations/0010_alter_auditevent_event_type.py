@@ -20,7 +20,10 @@ class Migration(migrations.Migration):
                         "Managed repository hard deleted",
                     ),
                     ("maintenance_pr_created", "Maintenance PR created"),
-                    ("maintenance_pr_creation_failed", "Maintenance PR creation failed"),
+                    (
+                        "maintenance_pr_creation_failed",
+                        "Maintenance PR creation failed",
+                    ),
                     (
                         "maintenance_pr_outcome_recorded",
                         "Maintenance PR outcome recorded",
@@ -34,6 +37,7 @@ class Migration(migrations.Migration):
                     ("automation_policy_updated", "Automation policy updated"),
                     ("session_trigger_enqueued", "Session trigger enqueued"),
                     ("session_trigger_failed", "Session trigger failed"),
+                    ("session_canceled", "Session canceled"),
                     ("maintenance_prs_authored", "Maintenance PRs authored"),
                 ],
                 max_length=64,

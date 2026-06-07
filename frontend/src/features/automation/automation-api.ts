@@ -62,6 +62,13 @@ const automationPermissionsSchema = v.object({
   can_trigger_manual_session: v.boolean(),
 })
 
+const sessionProgressSchema = v.object({
+  event: v.string(),
+  phase: v.string(),
+  message: v.string(),
+  updated_at: v.string(),
+})
+
 const recentSessionSchema = v.object({
   id: v.string(),
   status: v.string(),
@@ -74,6 +81,7 @@ const recentSessionSchema = v.object({
   started_at: v.nullable(v.string()),
   finished_at: v.nullable(v.string()),
   last_error: v.string(),
+  progress: v.optional(v.nullable(sessionProgressSchema)),
 })
 
 const recentPrPlanSchema = v.object({
@@ -109,6 +117,13 @@ const triggerResponseSchema = v.object({
     gardening_session_id: v.string(),
     status: v.string(),
     deduped: v.boolean(),
+  }),
+})
+
+const cancelSessionResponseSchema = v.object({
+  session: v.object({
+    gardening_session_id: v.string(),
+    status: v.string(),
   }),
 })
 
@@ -190,6 +205,24 @@ export async function triggerRepositorySession(
   return requestJson(
     `/organizations/${organizationId}/repositories/${repositoryId}/automation/trigger/`,
     (input) => v.parse(triggerResponseSchema, input),
+    {
+      apiBaseUrl,
+      body: {},
+      fetcher,
+      method: "POST",
+    }
+  )
+}
+
+export async function cancelRepositorySession(
+  organizationId: string,
+  repositoryId: string,
+  sessionId: string,
+  { apiBaseUrl, fetcher = fetch }: FetchOptions = {}
+) {
+  return requestJson(
+    `/organizations/${organizationId}/repositories/${repositoryId}/sessions/${sessionId}/cancel/`,
+    (input) => v.parse(cancelSessionResponseSchema, input),
     {
       apiBaseUrl,
       body: {},

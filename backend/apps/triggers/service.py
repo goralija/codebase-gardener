@@ -83,7 +83,27 @@ def enqueue_session_for_trigger(
         "subject_id": subject_id,
         **(extra or {}),
     }
-    session = GardeningSession.objects.create(repository=repository, trigger=trigger)
+    queued_at = timezone.now()
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger=trigger,
+        result={
+            "progress": {
+                "event": "session.queued",
+                "phase": "queue",
+                "message": "Session queued. Waiting for hosted worker.",
+                "updated_at": queued_at.isoformat().replace("+00:00", "Z"),
+            },
+            "progress_events": [
+                {
+                    "event": "session.queued",
+                    "phase": "queue",
+                    "message": "Session queued. Waiting for hosted worker.",
+                    "recorded_at": queued_at.isoformat().replace("+00:00", "Z"),
+                }
+            ],
+        },
+    )
     try:
         async_result = run_gardening_session.delay(str(session.id))
     except Exception as exc:
@@ -139,6 +159,62 @@ def trigger_manual_session(
         extra=extra,
         actor=actor,
     )
+
+
+CANCELABLE_SESSION_STATUSES = (
+    GardeningSession.Status.QUEUED,
+    GardeningSession.Status.RUNNING,
+)
+
+
+class SessionNotCancelableError(Exception):
+    """Raised when a session is already terminal and cannot be canceled."""
+
+
+def cancel_session(*, session: GardeningSession, actor) -> dict[str, Any]:
+    """Stop a queued or running session.
+
+    Revokes the Celery task (terminating the worker child if it is mid-run) and
+    marks the session ``CANCELED``. Terminal sessions raise
+    :class:`SessionNotCancelableError`.
+    """
+
+    if session.status not in CANCELABLE_SESSION_STATUSES:
+        raise SessionNotCancelableError(
+            f"Session is {session.get_status_display().lower()} and cannot be canceled."
+        )
+
+    if session.task_id:
+        try:
+            from config.celery import app as celery_app
+
+            celery_app.control.revoke(session.task_id, terminate=True, signal="SIGTERM")
+        except Exception:  # noqa: BLE001 - revoke is best-effort; still mark canceled
+            logger.warning(
+                "Failed to revoke session task",
+                extra={"gardening_session_id": str(session.id), "task_id": session.task_id},
+                exc_info=True,
+            )
+
+    canceled_at = timezone.now()
+    session.status = GardeningSession.Status.CANCELED
+    session.finished_at = canceled_at
+    session.last_error = ""
+    session.result = canceled_session_result(session, canceled_at)
+    session.save(
+        update_fields=["status", "finished_at", "last_error", "result", "updated_at"]
+    )
+
+    _safe_create_audit(
+        repository=session.repository,
+        session=session,
+        kind=session.trigger.get("type", registry.MANUAL),
+        actor=actor,
+        event_type=AuditEvent.EventType.SESSION_CANCELED,
+        extra_metadata=None,
+    )
+
+    return {"gardening_session_id": str(session.id), "status": session.status}
 
 
 def evaluate_push_triggers(
@@ -349,4 +425,32 @@ def failed_session_result(
         "opportunities_deferred": [],
         "maintenance_pr_plans": [],
         "errors": [{"phase": "queue", "message": error}],
+    }
+
+
+def canceled_session_result(
+    session: GardeningSession,
+    canceled_at: datetime,
+) -> dict[str, Any]:
+    timestamp = canceled_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    started = session.started_at.astimezone(UTC).isoformat().replace("+00:00", "Z") if session.started_at else timestamp
+    return {
+        "schema_version": "1.0",
+        "gardening_session_id": str(session.id),
+        "repository_id": str(session.repository_id),
+        "trigger": session.trigger,
+        "status": "canceled",
+        "started_at": started,
+        "finished_at": timestamp,
+        "phase_results": [{"phase": "queue", "status": "canceled", "summary": "Session canceled by user."}],
+        "opportunities_selected": [],
+        "opportunities_deferred": [],
+        "maintenance_pr_plans": [],
+        "errors": [],
+        "progress": {
+            "event": "session.canceled",
+            "phase": "queue",
+            "message": "Session canceled by user.",
+            "updated_at": timestamp,
+        },
     }

@@ -24,6 +24,8 @@ from apps.triggers.serializers import RepositoryAutomationPolicySerializer
 from apps.triggers import registry
 from apps.triggers.service import (
     SessionEnqueueError,
+    SessionNotCancelableError,
+    cancel_session,
     enqueue_session_for_trigger,
     trigger_manual_session,
 )
@@ -131,6 +133,43 @@ def repository_automation_trigger(request, organization_id, repository_id):
         )
 
     return Response({"trigger": result}, status=status.HTTP_202_ACCEPTED)
+
+
+@api_view(["POST"])
+def repository_session_cancel(request, organization_id, repository_id, session_id):
+    repository = _visible_repository(request.user, organization_id, repository_id)
+    if repository is None:
+        return api_error_response(
+            "not_found",
+            "Repository not found.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+    if not _can_edit_automation(request.user, repository.organization):
+        return api_error_response(
+            "permission_denied",
+            "Owner, admin, or maintainer access is required to cancel a session.",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
+    session = repository.gardening_sessions.filter(id=session_id).first()
+    if session is None:
+        return api_error_response(
+            "not_found",
+            "Session not found.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+    try:
+        result = cancel_session(session=session, actor=request.user)
+    except SessionNotCancelableError as exc:
+        return api_error_response(
+            "session_not_cancelable",
+            str(exc),
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+    return Response({"session": result}, status=status.HTTP_200_OK)
 
 
 def _should_run_first_scan(repository, manual_plan) -> bool:
@@ -289,6 +328,27 @@ def _session_payload(session: GardeningSession):
         "started_at": _timestamp(session.started_at),
         "finished_at": _timestamp(session.finished_at),
         "last_error": session.last_error,
+        "progress": _session_progress_payload(session),
+    }
+
+
+def _session_progress_payload(session: GardeningSession):
+    result = session.result if isinstance(session.result, dict) else {}
+    progress = result.get("progress")
+    if not isinstance(progress, dict):
+        if session.status == GardeningSession.Status.QUEUED:
+            return {
+                "event": "session.queued",
+                "phase": "queue",
+                "message": "Session queued. Waiting for hosted worker.",
+                "updated_at": _timestamp(session.updated_at),
+            }
+        return None
+    return {
+        "event": str(progress.get("event") or ""),
+        "phase": str(progress.get("phase") or ""),
+        "message": str(progress.get("message") or ""),
+        "updated_at": str(progress.get("updated_at") or ""),
     }
 
 

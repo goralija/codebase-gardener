@@ -79,6 +79,10 @@ class AuditEvent(UUIDTimestampedModel):
             "session_trigger_failed",
             "Session trigger failed",
         )
+        SESSION_CANCELED = (
+            "session_canceled",
+            "Session canceled",
+        )
         MAINTENANCE_PRS_AUTHORED = (
             "maintenance_prs_authored",
             "Maintenance PRs authored",

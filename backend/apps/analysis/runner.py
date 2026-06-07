@@ -27,6 +27,7 @@ from gardener_analysis import (
 
 JsonObject = dict[str, Any]
 CloneRepository = Callable[[ManagedRepository, str, Path], None]
+ProgressCallback = Callable[[str, str, str], None]
 logger = logging.getLogger(__name__)
 
 
@@ -53,6 +54,7 @@ def run_repository_analysis(
     actor=None,
     client: GitHubAppClient | None = None,
     clone_repository: CloneRepository | None = None,
+    progress: ProgressCallback | None = None,
 ) -> AnalysisRunResult:
     repository = ManagedRepository.objects.select_related(
         "organization",
@@ -68,6 +70,7 @@ def run_repository_analysis(
         "analysis.run.start",
         extra=_repo_log_extra(repository),
     )
+    _emit_progress(progress, "analysis.run.start", "observe", "Preparing repository analysis.")
     token = github_client.create_installation_token(
         repository.github_installation.github_installation_id
     )
@@ -75,10 +78,17 @@ def run_repository_analysis(
         with TemporaryDirectory(prefix="gardener-analysis-") as clone_root:
             repo_path = Path(clone_root) / "repo"
             logger.info("analysis.clone.start", extra=_repo_log_extra(repository))
+            _emit_progress(progress, "analysis.clone.start", "observe", "Cloning repository.")
             clone_repository(repository, token, repo_path)
             _ensure_repository_has_head(repo_path)
             logger.info("analysis.clone.completed", extra=_repo_log_extra(repository))
-            artifacts = _build_analysis_artifacts(repository, repo_path)
+            _emit_progress(
+                progress,
+                "analysis.clone.completed",
+                "observe",
+                "Repository clone completed.",
+            )
+            artifacts = _build_analysis_artifacts(repository, repo_path, progress=progress)
     finally:
         token = ""
 
@@ -89,6 +99,7 @@ def run_repository_analysis(
             "commit_sha": artifacts["snapshot"]["commit_sha"],
         },
     )
+    _emit_progress(progress, "analysis.storage.start", "learn", "Storing analysis artifacts.")
     analysis = store_analysis(
         organization=repository.organization,
         repository=repository,
@@ -108,12 +119,24 @@ def run_repository_analysis(
             "opportunity_count": len(artifacts["opportunities"]),
         },
     )
+    _emit_progress(progress, "analysis.run.completed", "learn", "Analysis completed.")
     return AnalysisRunResult(analysis=analysis, artifacts=artifacts)
 
 
-def _build_analysis_artifacts(repository: ManagedRepository, repo_path: Path) -> JsonObject:
+def _build_analysis_artifacts(
+    repository: ManagedRepository,
+    repo_path: Path,
+    *,
+    progress: ProgressCallback | None = None,
+) -> JsonObject:
     try:
         logger.info("analysis.repowise.start", extra=_repo_log_extra(repository))
+        _emit_progress(
+            progress,
+            "analysis.repowise.start",
+            "diagnose",
+            "Indexing repository intelligence with Repowise.",
+        )
         index = index_repository(
             repo_path,
             RepowiseIndexOptions(repowise_project=_repowise_project_path()),
@@ -130,7 +153,19 @@ def _build_analysis_artifacts(repository: ManagedRepository, repo_path: Path) ->
                 "has_knowledge_graph": bool(index.knowledge_graph),
             },
         )
+        _emit_progress(
+            progress,
+            "analysis.repowise.completed",
+            "diagnose",
+            "Repository intelligence index completed.",
+        )
         logger.info("analysis.discovery.start", extra=_repo_log_extra(repository))
+        _emit_progress(
+            progress,
+            "analysis.discovery.start",
+            "diagnose",
+            "Discovering source-truth files.",
+        )
         discovery = discover_source_truth(repo_path)
         logger.info(
             "analysis.discovery.completed",
@@ -139,8 +174,20 @@ def _build_analysis_artifacts(repository: ManagedRepository, repo_path: Path) ->
                 "source_truth_count": len(discovery.files),
             },
         )
+        _emit_progress(
+            progress,
+            "analysis.discovery.completed",
+            "diagnose",
+            "Source-truth discovery completed.",
+        )
         constitution_id = f"constitution_{repository.id}"
         logger.info("analysis.snapshot.start", extra=_repo_log_extra(repository))
+        _emit_progress(
+            progress,
+            "analysis.snapshot.start",
+            "diagnose",
+            "Building analysis snapshot.",
+        )
         snapshot = build_analysis_snapshot(
             index,
             repository_id=str(repository.id),
@@ -155,7 +202,19 @@ def _build_analysis_artifacts(repository: ManagedRepository, repo_path: Path) ->
                 "signal_counts": _signal_counts(snapshot),
             },
         )
+        _emit_progress(
+            progress,
+            "analysis.snapshot.completed",
+            "diagnose",
+            "Analysis snapshot completed.",
+        )
         logger.info("analysis.constitution.start", extra=_repo_log_extra(repository))
+        _emit_progress(
+            progress,
+            "analysis.constitution.start",
+            "diagnose",
+            "Building repository constitution.",
+        )
         constitution = build_repository_constitution(
             repo_path,
             repository_id=str(repository.id),
@@ -175,7 +234,19 @@ def _build_analysis_artifacts(repository: ManagedRepository, repo_path: Path) ->
                 ),
             },
         )
+        _emit_progress(
+            progress,
+            "analysis.constitution.completed",
+            "diagnose",
+            "Repository constitution completed.",
+        )
         logger.info("analysis.entropy.start", extra=_repo_log_extra(repository))
+        _emit_progress(
+            progress,
+            "analysis.entropy.start",
+            "forecast",
+            "Calculating entropy score.",
+        )
         entropy = build_entropy_report(snapshot, constitution)
         logger.info(
             "analysis.entropy.completed",
@@ -184,7 +255,19 @@ def _build_analysis_artifacts(repository: ManagedRepository, repo_path: Path) ->
                 "entropy_score": entropy.get("score", {}),
             },
         )
+        _emit_progress(
+            progress,
+            "analysis.entropy.completed",
+            "forecast",
+            "Entropy scoring completed.",
+        )
         logger.info("analysis.opportunities.start", extra=_repo_log_extra(repository))
+        _emit_progress(
+            progress,
+            "analysis.opportunities.start",
+            "plan",
+            "Generating maintenance opportunities.",
+        )
         opportunities = generate_maintenance_opportunities(
             snapshot,
             entropy,
@@ -200,6 +283,12 @@ def _build_analysis_artifacts(repository: ManagedRepository, repo_path: Path) ->
                     {str(opportunity.get("category", "")) for opportunity in opportunities}
                 ),
             },
+        )
+        _emit_progress(
+            progress,
+            "analysis.opportunities.completed",
+            "plan",
+            "Maintenance opportunities generated.",
         )
     except Exception as exc:
         logger.exception(
@@ -217,6 +306,20 @@ def _build_analysis_artifacts(repository: ManagedRepository, repo_path: Path) ->
         "health": index.health,
         "dead_code": index.dead_code,
     }
+
+
+def _emit_progress(
+    progress: ProgressCallback | None,
+    event: str,
+    phase: str,
+    message: str,
+) -> None:
+    if progress is None:
+        return
+    try:
+        progress(event, phase, message)
+    except Exception:  # noqa: BLE001 - progress reporting must never break analysis
+        logger.warning("analysis.progress_callback_failed", exc_info=True)
 
 
 def _clone_repository(repository: ManagedRepository, token: str, destination: Path) -> None:

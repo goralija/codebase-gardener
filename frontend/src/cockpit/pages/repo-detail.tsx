@@ -9,7 +9,10 @@ import { useNavigate } from "@tanstack/react-router"
 
 import { Icon } from "@/cockpit/icon"
 import { entColor, fmt, relTime, shortTime } from "@/cockpit/format"
-import { triggerRepositorySession } from "@/features/automation/automation-api"
+import {
+  cancelRepositorySession,
+  triggerRepositorySession,
+} from "@/features/automation/automation-api"
 import { deleteManagedRepository } from "@/features/github-onboarding/github-onboarding-api"
 import {
   useAutomation,
@@ -93,6 +96,15 @@ export function RepoDetailPage({
     },
   })
 
+  const cancel = useMutation({
+    mutationFn: (sessionId: string) =>
+      cancelRepositorySession(organization?.id ?? "", repoId, sessionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cockpit", "automation"] })
+      queryClient.invalidateQueries({ queryKey: ["cockpit", "report", repoId] })
+    },
+  })
+
   const model = useMemo(
     () => (repository ? toRepoModel(repository, automationQuery.data) : null),
     [repository, automationQuery.data]
@@ -126,6 +138,17 @@ export function RepoDetailPage({
     } as never)
 
   const curSha = report?.entropy_report.commit_sha ?? model.baseSha
+  const activeSession =
+    automationQuery.data?.recent_sessions.find((session) =>
+      ["queued", "running"].includes(session.status)
+    ) ?? null
+  const activeSessionProgress = activeSession?.progress
+  const activeSessionMessage =
+    activeSessionProgress?.message ||
+    (activeSession?.status === "running"
+      ? "Hosted worker is running this session."
+      : "Session queued. Waiting for hosted worker.")
+  const shouldShowSessionProgress = Boolean(activeSession || trigger.isSuccess)
 
   return (
     <div className="page wide">
@@ -212,7 +235,7 @@ export function RepoDetailPage({
         </div>
       </div>
 
-      {trigger.isSuccess && (
+      {shouldShowSessionProgress && (
         <div
           className="card pad mb20"
           style={{
@@ -220,12 +243,54 @@ export function RepoDetailPage({
             borderColor: "var(--accent-bd)",
           }}
         >
-          <div className="row gap10">
-            <Icon color="var(--accent-2)" name="CircleCheck" size={16} />
-            <span className="sm fg2">
-              Session queued. The report and PR plans will refresh once the
-              hosted worker completes.
-            </span>
+          <div className="row gap10" style={{ alignItems: "flex-start" }}>
+            <Icon
+              className={activeSession?.status === "running" ? "spin" : ""}
+              color="var(--accent-2)"
+              name={activeSession?.status === "running" ? "Loader" : "CircleCheck"}
+              size={16}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="sm fg2">{activeSessionMessage}</div>
+              <div className="row gap6 mt8 wrap tiny muted">
+                <span className="mono">
+                  {activeSessionProgress?.phase || activeSession?.status || "queued"}
+                </span>
+                {activeSessionProgress?.event && (
+                  <>
+                    <span>·</span>
+                    <span className="mono">{activeSessionProgress.event}</span>
+                  </>
+                )}
+                {activeSessionProgress?.updated_at && (
+                  <>
+                    <span>·</span>
+                    <span>{relTime(activeSessionProgress.updated_at)}</span>
+                  </>
+                )}
+              </div>
+              {cancel.isError && (
+                <div className="tiny mt8" style={{ color: "var(--red)" }}>
+                  Could not stop the session. Try again.
+                </div>
+              )}
+            </div>
+            {activeSession &&
+              automationQuery.data?.permissions.can_trigger_manual_session && (
+                <button
+                  className="btn"
+                  disabled={cancel.isPending}
+                  onClick={() => cancel.mutate(activeSession.id)}
+                  type="button"
+                >
+                  <Icon
+                    className={cancel.isPending ? "spin" : ""}
+                    name={cancel.isPending ? "Loader" : "Square"}
+                    size={14}
+                  />
+                  {cancel.isPending ? "Stopping…" : "Stop session"}
+                </button>
+              )}
           </div>
         </div>
       )}

@@ -127,6 +127,12 @@ export function useAutomation(
     queryFn: () =>
       fetchRepositoryAutomation(organizationId ?? "", repositoryId ?? ""),
     queryKey: ["cockpit", "automation", organizationId, repositoryId],
+    refetchInterval: (query) =>
+      query.state.data?.recent_sessions.some((session) =>
+        ["queued", "running"].includes(session.status)
+      )
+        ? 3000
+        : false,
     retry: false,
   })
 }

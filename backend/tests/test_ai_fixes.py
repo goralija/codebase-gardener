@@ -45,6 +45,61 @@ def test_apply_ai_fix_applies_search_replace_block(monkeypatch):
     assert "def used()" in result
 
 
+def test_apply_ai_fix_matches_search_block_with_indentation_drift(monkeypatch):
+    # The model reproduces the right lines but re-indents them (no leading
+    # whitespace). The all-whitespace fallback matcher should still apply it.
+    block = (
+        "<<<<<<< SEARCH\n"
+        "def dead():\n"
+        "return 2\n"
+        "=======\n"
+        ">>>>>>> REPLACE\n"
+    )
+    _patch_llm(monkeypatch, block)
+
+    result = apply_ai_fix("core/util.py", ORIGINAL, _Plan(), {"summary": "dead()"})
+
+    assert "def dead()" not in result
+    assert "def used()" in result
+
+
+def test_apply_edit_blocks_matches_through_quote_and_comma_drift():
+    from apps.maintenance_prs.ai_fixes import _apply_edit_blocks
+
+    content = 'import { Foo } from "bar";\nconst keep = 1;\n'
+    # Model used single quotes + a trailing comma in its SEARCH text.
+    blocks = [("import { Foo } from 'bar',", "import { Foo, Baz } from 'bar';")]
+
+    result = _apply_edit_blocks("src/x.ts", content, blocks)
+
+    assert "import { Foo, Baz } from 'bar';" in result
+    assert "const keep = 1;" in result
+
+
+def test_apply_edit_blocks_fuzzy_matches_single_char_drift():
+    from apps.maintenance_prs.ai_fixes import _apply_edit_blocks
+
+    content = "export const fetchUser = (id: string) => api.get(id);\nexport const z = 1;\n"
+    # One character drift (fetchUserr) — fuzzy tier should still locate it.
+    blocks = [("export const fetchUserr = (id: string) => api.get(id);", "")]
+
+    result = _apply_edit_blocks("src/api.ts", content, blocks)
+
+    assert "fetchUser" not in result
+    assert "export const z = 1;" in result
+
+
+def test_apply_edit_blocks_fuzzy_refuses_ambiguous_match():
+    from apps.maintenance_prs.ai_fixes import _apply_edit_blocks, AIFixError
+
+    # Two near-identical lines: fuzzy must refuse (no unique best) -> skipped.
+    content = "export const a = endpoint(1);\nexport const b = endpoint(2);\n"
+    blocks = [("export const x = endpoint(9);", "// changed")]
+
+    with pytest.raises(AIFixError):
+        _apply_edit_blocks("src/api.ts", content, blocks)
+
+
 def test_apply_ai_fix_chunks_large_file_and_applies_edits(monkeypatch):
     from apps.maintenance_prs import ai_fixes
 

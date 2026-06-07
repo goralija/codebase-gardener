@@ -38,7 +38,7 @@ _ANALYSIS_COUNTER = count(1)
 def _stub_real_analysis(monkeypatch):
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION, progress=None: analysis_result(
             repository,
             source=source,
         ),
@@ -130,7 +130,7 @@ def test_run_gardening_session_uses_analysis_report(settings, monkeypatch):
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION, progress=None: analysis_result(
             repository,
             source=source,
         ),
@@ -176,7 +176,7 @@ def test_run_gardening_session_offers_constitution_pr_from_analysis_artifacts(
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION, progress=None: analysis_result(
             repository,
             artifacts=artifacts,
             source=source,
@@ -220,7 +220,7 @@ def test_manual_baseline_only_session_offers_constitution_pr_from_analysis_artif
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION, progress=None: analysis_result(
             repository,
             artifacts=artifacts,
             source=source,
@@ -337,7 +337,7 @@ def test_run_gardening_session_plans_and_executes_real_opportunities(
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION, progress=None: analysis_result(
             repository,
             artifacts=artifacts,
             source=source,
@@ -438,7 +438,7 @@ def test_run_gardening_session_executes_assisted_draft_plan(
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION, progress=None: analysis_result(
             repository,
             artifacts=artifacts,
             source=source,
@@ -496,7 +496,7 @@ def test_manual_session_plans_current_opportunities_when_drift_is_empty(
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION, progress=None: analysis_result(
             repository,
             artifacts=artifacts,
             source=source,
@@ -555,7 +555,7 @@ def test_automated_session_does_not_plan_current_opportunities_when_drift_is_emp
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION, progress=None: analysis_result(
             repository,
             artifacts=artifacts,
             source=source,
@@ -615,7 +615,7 @@ def test_run_gardening_session_defers_safe_docs_plans_over_auto_approval_cap(
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION, progress=None: analysis_result(
             repository,
             artifacts=artifacts,
             source=source,
@@ -701,7 +701,7 @@ def test_run_gardening_session_does_not_approve_blocked_protected_or_low_confide
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION, progress=None: analysis_result(
             repository,
             artifacts=artifacts,
             source=source,
@@ -771,7 +771,7 @@ def test_run_gardening_session_planning_is_idempotent_per_session_opportunity(
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION, progress=None: analysis_result(
             repository,
             artifacts=artifacts,
             source=source,
@@ -864,7 +864,7 @@ def test_refresh_analysis_after_session_prs_promotes_once(settings, monkeypatch)
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION, progress=None: analysis_result(
             repository,
             source=source,
         ),
@@ -1307,7 +1307,7 @@ def test_run_gardening_session_persists_failed_result_for_analysis_errors(
     )
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository, source=RepositoryAnalysis.Source.SESSION: (_ for _ in ()).throw(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION, progress=None: (_ for _ in ()).throw(
             AnalysisRunError("diagnose", "Repowise failed")
         ),
     )

@@ -6,7 +6,7 @@ import { useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 
 import { Icon } from "@/cockpit/icon"
-import { duration, relTime } from "@/cockpit/format"
+import { duration, humanize, relTime, shortTime } from "@/cockpit/format"
 import {
   CAT_ICON,
   STATUS_ICON,
@@ -364,6 +364,165 @@ export function OpportunitiesView({
 }
 
 /* ---------------- Sessions ---------------- */
+function SessionDrawer({
+  onClose,
+  onOpenRepository,
+  repoName,
+  session,
+}: {
+  onClose: () => void
+  onOpenRepository: () => void
+  repoName: string
+  session: SessionModel
+}) {
+  const triggerLabel = TRIGGER_LABEL[session.trigger] || humanize(session.trigger)
+  const errorText =
+    session.lastError ||
+    (session.status === "failed"
+      ? "No failure reason was recorded for this session."
+      : "")
+
+  return (
+    <Drawer onClose={onClose}>
+      <div className="drawer-h">
+        <div
+          className="a-ico"
+          style={{
+            background:
+              session.status === "failed" ? "var(--red-bg)" : "var(--panel-2)",
+            border: "1px solid var(--border)",
+            borderRadius: 9,
+            height: 34,
+            width: 34,
+          }}
+        >
+          <Icon
+            color={session.status === "failed" ? "var(--red)" : "var(--fg-2)"}
+            name={STATUS_ICON[session.status] || "Square"}
+            size={17}
+          />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="row gap6 mb8 wrap">
+            <StatusBadge status={session.status} />
+            <Badge
+              icon={TRIGGERS.find((t) => t.key === session.trigger)?.icon}
+              tone="slate"
+            >
+              {triggerLabel}
+            </Badge>
+          </div>
+          <div className="mono" style={{ fontSize: 15, fontWeight: 600 }}>
+            {session.id}
+          </div>
+          <div className="row gap6 mt8 mono tiny muted">
+            <span className="fg2">{repoName}</span>
+            <span>·</span>
+            <span>{duration(session.startedAt, session.finishedAt)}</span>
+          </div>
+        </div>
+        <button className="icon-btn" onClick={onClose} type="button">
+          <Icon name="X" size={17} />
+        </button>
+      </div>
+      <div className="drawer-b">
+        {errorText && (
+          <div
+            className="card pad mb20"
+            style={{
+              background: "var(--red-bg)",
+              borderColor: "var(--red-bd)",
+            }}
+          >
+            <div className="row gap10" style={{ alignItems: "flex-start" }}>
+              <Icon color="var(--red)" name="CircleX" size={16} />
+              <div style={{ minWidth: 0 }}>
+                <div className="b6" style={{ color: "var(--red)", fontSize: 13 }}>
+                  Failure reason
+                </div>
+                <div
+                  className="mono sm mt8"
+                  style={{
+                    color: "var(--fg)",
+                    lineHeight: 1.5,
+                    overflowWrap: "anywhere",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {errorText}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <dl className="kv mb20">
+          <dt>Status</dt>
+          <dd>
+            <StatusBadge status={session.status} />
+          </dd>
+          {session.progress && (
+            <>
+              <dt>Current phase</dt>
+              <dd>
+                <div className="row gap6 wrap">
+                  <Badge tone="teal">{session.progress.phase || "running"}</Badge>
+                  <span className="fg2">{session.progress.message}</span>
+                </div>
+              </dd>
+            </>
+          )}
+          <dt>Trigger</dt>
+          <dd>{triggerLabel}</dd>
+          <dt>Created</dt>
+          <dd>{shortTime(session.createdAt)}</dd>
+          <dt>Started</dt>
+          <dd>{shortTime(session.startedAt)}</dd>
+          <dt>Finished</dt>
+          <dd>{shortTime(session.finishedAt)}</dd>
+          <dt>Duration</dt>
+          <dd>{duration(session.startedAt, session.finishedAt)}</dd>
+          <dt>Baseline analysis</dt>
+          <dd className="mono sm">{session.baselineAnalysisId || "—"}</dd>
+          <dt>Current analysis</dt>
+          <dd className="mono sm">{session.currentAnalysisId || "—"}</dd>
+          <dt>Commit</dt>
+          <dd className="mono sm">{session.commitSha || "—"}</dd>
+          <dt>Drift report</dt>
+          <dd>{session.hasDriftReport ? "Available" : "Not recorded"}</dd>
+        </dl>
+
+        <div className="sect-title mb12">Trigger metadata</div>
+        <div className="evi">
+          <div className="evi-h">
+            <Icon name="Braces" size={13} />
+            session trigger
+          </div>
+          <pre
+            className="evi-b mono"
+            style={{
+              margin: 0,
+              overflowX: "auto",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {JSON.stringify(session.triggerMetadata, null, 2)}
+          </pre>
+        </div>
+      </div>
+      <div className="drawer-f">
+        <button className="btn" onClick={onClose} type="button">
+          Close
+        </button>
+        <button className="btn" onClick={onOpenRepository} type="button">
+          <Icon name="ExternalLink" size={14} />
+          Open repository
+        </button>
+      </div>
+    </Drawer>
+  )
+}
+
 export function SessionsView({
   sessions,
   repoName,
@@ -375,6 +534,7 @@ export function SessionsView({
 }) {
   const navigate = useNavigate()
   const [status, setStatus] = useState("all")
+  const [sel, setSel] = useState<SessionModel | null>(null)
   const list = sessions.filter((s) => status === "all" || s.status === status)
 
   return (
@@ -424,7 +584,7 @@ export function SessionsView({
                 <tr
                   className="click"
                   key={s.id}
-                  onClick={() => gotoRepo(navigate, s.repoId, "sessions")}
+                  onClick={() => setSel(s)}
                 >
                   <td>
                     <span className="mono fg2">{s.id.slice(0, 8)}</span>
@@ -454,6 +614,17 @@ export function SessionsView({
             </tbody>
           </table>
         </div>
+      )}
+      {sel && (
+        <SessionDrawer
+          onClose={() => setSel(null)}
+          onOpenRepository={() => {
+            setSel(null)
+            gotoRepo(navigate, sel.repoId, "sessions")
+          }}
+          repoName={repoName(sel.repoId)}
+          session={sel}
+        />
       )}
     </>
   )
