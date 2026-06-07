@@ -191,6 +191,7 @@ def evaluate_policy(
     allowed_fixes = _canonical_allowed_fixes(constitution.get("allowed_fixes", {}))
     if category in allowed_fixes.get("advisory", []):
         return PolicyDecision(False)
+    if category in allowed_fixes.get("assisted", []):
         return PolicyDecision(False)
     if category not in allowed_fixes.get("autonomous", []):
         return PolicyDecision(True, "Opportunity category is not allowed for PR creation.")

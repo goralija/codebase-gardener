@@ -100,7 +100,18 @@
           "created_at": { "type": "string", "format": "date-time" },
           "started_at": { "type": ["string", "null"], "format": "date-time" },
           "finished_at": { "type": ["string", "null"], "format": "date-time" },
-          "last_error": { "type": "string" }
+          "last_error": { "type": "string" },
+          "progress": {
+            "type": ["object", "null"],
+            "required": ["event", "phase", "message", "updated_at"],
+            "properties": {
+              "event": { "type": "string" },
+              "phase": { "type": "string" },
+              "message": { "type": "string" },
+              "updated_at": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
         },
         "additionalProperties": false
       }

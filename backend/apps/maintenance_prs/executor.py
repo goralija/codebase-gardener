@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -28,6 +29,8 @@ from apps.triggers.policy import (
 WORKER_AUDIT_SOURCE = "gardening_worker"
 DEFAULT_AI_FIX_WORKERS = 8
 BRANCH_COLLISION_ATTEMPTS = 10
+
+logger = logging.getLogger("gardener.maintenance_prs")
 
 
 class PRExecutionError(Exception):
@@ -119,10 +122,11 @@ def execute_maintenance_pr_plan(
         if not actual_fix_paths:
             if plan.category == "docs":
                 raise PlanNotExecutableError(
-                    "Docs plan did not find any existing safe Markdown file to update."
+                    "Docs plan produced no Markdown file changes."
                 )
             raise PlanNotExecutableError(
-                "Plan did not find any existing safe file to update."
+                "Plan produced no file changes (the AI author could not edit any "
+                "of the targeted files)."
             )
 
         pull_request = _create_or_find_pull_request(
@@ -175,6 +179,14 @@ def execute_maintenance_pr_plan(
                 "branch_ref": plan.created_branch_ref,
             },
         )
+
+    logger.info(
+        "maintenance_pr.created plan=%s category=%s PR #%s %s",
+        plan.id,
+        plan.category or "unknown",
+        plan.created_pr_number,
+        plan.created_pr_url,
+    )
 
     return {
         "maintenance_pr_plan_id": str(plan.id),
@@ -246,7 +258,7 @@ def _apply_actual_file_fixes(
         paths = ai_fixes.ai_fixable_paths(plan)
         opportunity = _lookup_opportunity(plan)
 
-    existing_paths: list[str] = []
+    changed_paths: list[str] = []
     file_inputs: list[tuple[str, str]] = []
     for path in paths:
         try:
@@ -262,10 +274,9 @@ def _apply_actual_file_fixes(
                 continue
             raise
 
-        existing_paths.append(path)
         if plan.category == "docs":
             updated = apply_docs_maintenance_note(content, plan)
-            _write_updated_file(
+            if _write_updated_file(
                 client,
                 owner,
                 repo,
@@ -275,7 +286,8 @@ def _apply_actual_file_fixes(
                 branch=branch,
                 token=token,
                 plan=plan,
-            )
+            ):
+                changed_paths.append(path)
             continue
         file_inputs.append((path, content))
 
@@ -286,7 +298,7 @@ def _apply_actual_file_fixes(
             opportunity=opportunity,
             progress=progress,
         ):
-            _write_updated_file(
+            if _write_updated_file(
                 client,
                 owner,
                 repo,
@@ -296,8 +308,9 @@ def _apply_actual_file_fixes(
                 branch=branch,
                 token=token,
                 plan=plan,
-            )
-    return existing_paths
+            ):
+                changed_paths.append(path)
+    return changed_paths
 
 
 def _create_or_reuse_plan_branch(
@@ -366,20 +379,25 @@ def _author_ai_file_fixes(
     opportunity: dict,
     progress=None,
 ) -> list[tuple[str, str, str]]:
+    """Author each file independently. A file the model cannot edit is skipped
+    (logged) rather than failing the whole plan, so the PR ships the files that
+    did succeed."""
+
     workers = min(_ai_fix_worker_count(), len(file_inputs))
     if workers <= 1:
-        return [
-            (
-                path,
-                content,
-                ai_fixes.apply_ai_fix(
+        results: list[tuple[str, str, str]] = []
+        for path, content in file_inputs:
+            try:
+                updated = ai_fixes.apply_ai_fix(
                     path, content, plan, opportunity, progress=progress
-                ),
-            )
-            for path, content in file_inputs
-        ]
+                )
+            except ai_fixes.AIFixError as exc:
+                _log_skipped_file(plan, path, exc)
+                continue
+            results.append((path, content, updated))
+        return results
 
-    results: dict[str, str] = {}
+    authored: dict[str, str] = {}
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
             executor.submit(
@@ -393,9 +411,26 @@ def _author_ai_file_fixes(
             for path, content in file_inputs
         }
         for future in as_completed(futures):
-            results[futures[future]] = future.result()
+            path = futures[future]
+            try:
+                authored[path] = future.result()
+            except ai_fixes.AIFixError as exc:
+                _log_skipped_file(plan, path, exc)
 
-    return [(path, content, results[path]) for path, content in file_inputs]
+    return [
+        (path, content, authored[path])
+        for path, content in file_inputs
+        if path in authored
+    ]
+
+
+def _log_skipped_file(plan: MaintenancePRPlan, path: str, exc: Exception) -> None:
+    logger.info(
+        "maintenance_pr.file_skipped plan=%s path=%s reason=%s",
+        plan.id,
+        path,
+        exc,
+    )
 
 
 def _ai_fix_worker_count() -> int:
@@ -418,9 +453,9 @@ def _write_updated_file(
     branch: str,
     token: str,
     plan: MaintenancePRPlan,
-) -> None:
+) -> bool:
     if updated == original:
-        return
+        return False
 
     sha = client.get_file_sha(owner, repo, path, branch=branch, token=token)
     client.put_file_contents(
@@ -433,18 +468,27 @@ def _write_updated_file(
         token=token,
         sha=sha,
     )
+    return True
 
 
 def _risk_labels(plan: MaintenancePRPlan) -> list[str]:
     """Reviewer-facing labels: risk tier, confidence band, category."""
     tier = (plan.risk_tier or "unknown").replace("_", "-")
+    if plan.risk_tier == "tier_1_autonomous":
+        risk = "low"
+    elif plan.risk_tier == "tier_2_assisted":
+        risk = "medium"
+    elif plan.risk_tier == "tier_3_advisory":
+        risk = "high"
+    else:
+        risk = "unknown"
     if plan.confidence >= 0.9:
         band = "high"
     elif plan.confidence >= 0.7:
         band = "medium"
     else:
         band = "low"
-    labels = [f"gardener:{tier}", f"gardener:confidence-{band}"]
+    labels = [f"gardener:{tier}", f"gardener:risk-{risk}", f"gardener:confidence-{band}"]
     if plan.category:
         labels.append(f"gardener:category-{plan.category.replace('_', '-')}")
     return labels
