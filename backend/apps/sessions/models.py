@@ -22,6 +22,28 @@ class GardeningSession(UUIDTimestampedModel):
         default=Status.QUEUED,
     )
     task_id = models.CharField(max_length=255, blank=True)
+    baseline_analysis = models.ForeignKey(
+        "analysis.RepositoryAnalysis",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="baseline_gardening_sessions",
+    )
+    current_analysis = models.ForeignKey(
+        "analysis.RepositoryAnalysis",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="current_gardening_sessions",
+    )
+    post_pr_refresh_analysis = models.ForeignKey(
+        "analysis.RepositoryAnalysis",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="post_pr_refresh_gardening_sessions",
+    )
+    drift_report = models.JSONField(default=dict, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     result = models.JSONField(default=dict, blank=True)
@@ -33,6 +55,7 @@ class GardeningSession(UUIDTimestampedModel):
         indexes = [
             models.Index(fields=["repository", "status"]),
             models.Index(fields=["created_at"]),
+            models.Index(fields=["repository", "current_analysis"]),
         ]
 
     def __str__(self) -> str:

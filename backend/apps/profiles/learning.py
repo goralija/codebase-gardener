@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.db import transaction
+from django.utils import timezone
 
 from apps.common.models import AuditEvent
 from apps.maintenance_prs.models import MaintenancePRPlan
@@ -150,6 +151,9 @@ def record_pr_outcome(
             transaction.on_commit(
                 lambda: _enqueue_profile_sync(repository_id)
             )
+        if _is_refresh_outcome(outcome):
+            session_id = plan.gardening_session_id
+            transaction.on_commit(lambda: _enqueue_analysis_refresh(session_id))
 
     return OutcomeResult(
         recorded=True,
@@ -164,18 +168,38 @@ def _persist_plan_outcome_state(
     outcome: str,
     metadata: dict[str, Any],
 ) -> None:
-    """Record the merge commit SHA so reverts can be matched precisely later."""
+    """Record append-only outcome history and terminal state on the PR plan."""
 
-    if outcome != Outcome.MERGED:
-        return
+    recorded_at = timezone.now()
+    outcome_history = list(plan.outcome_history or [])
+    outcome_history.append(
+        {
+            "outcome": outcome,
+            "recorded_at": recorded_at.isoformat().replace("+00:00", "Z"),
+            "source_metadata": metadata,
+        }
+    )
+    updates: dict[str, Any] = {
+        "outcome_history": outcome_history,
+        "updated_at": recorded_at,
+    }
+
     merge_commit_sha = str(metadata.get("merge_commit_sha") or "").strip()
-    if merge_commit_sha and plan.merge_commit_sha != merge_commit_sha:
-        # Atomic single-row update avoids a read-modify-write race with a
-        # concurrent revert webhook and skips full_clean on a partial write.
-        MaintenancePRPlan.objects.filter(pk=plan.pk).update(
-            merge_commit_sha=merge_commit_sha
-        )
+    if outcome == Outcome.MERGED and merge_commit_sha:
+        updates["merge_commit_sha"] = merge_commit_sha
+
+    if _is_refresh_outcome(outcome):
+        updates["terminal_outcome"] = outcome
+        updates["terminal_outcome_at"] = recorded_at
+
+    MaintenancePRPlan.objects.filter(pk=plan.pk).update(**updates)
+    plan.outcome_history = outcome_history
+    plan.updated_at = recorded_at
+    if "merge_commit_sha" in updates:
         plan.merge_commit_sha = merge_commit_sha
+    if "terminal_outcome" in updates:
+        plan.terminal_outcome = outcome
+        plan.terminal_outcome_at = recorded_at
 
 
 def _enqueue_profile_sync(repository_id: str) -> None:
@@ -184,6 +208,16 @@ def _enqueue_profile_sync(repository_id: str) -> None:
     from apps.profiles.tasks import sync_profile_pr
 
     sync_profile_pr.delay(repository_id)
+
+
+def _enqueue_analysis_refresh(session_id: str) -> None:
+    from apps.sessions.tasks import refresh_analysis_after_session_prs
+
+    refresh_analysis_after_session_prs.delay(session_id)
+
+
+def _is_refresh_outcome(outcome: str) -> bool:
+    return outcome in {Outcome.MERGED, Outcome.CLOSED, Outcome.REVERTED}
 
 
 def _already_recorded(profile: GardenerProfile, plan_id: str, outcome: str) -> bool:

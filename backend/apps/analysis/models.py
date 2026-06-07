@@ -12,6 +12,12 @@ class RepositoryAnalysis(UUIDTimestampedModel):
     form the history used for trend / diff comparisons.
     """
 
+    class Source(models.TextChoices):
+        FIRST_SCAN = "first_scan", "First scan"
+        SESSION = "session", "Gardening session"
+        POST_PR_REFRESH = "post_pr_refresh", "Post-PR refresh"
+        MANUAL_INGEST = "manual_ingest", "Manual ingest"
+
     organization = models.ForeignKey(
         "accounts.CustomerOrganization",
         on_delete=models.CASCADE,
@@ -23,6 +29,13 @@ class RepositoryAnalysis(UUIDTimestampedModel):
         related_name="analyses",
     )
     commit_sha = models.CharField(max_length=64)
+    source = models.CharField(
+        max_length=32,
+        choices=Source.choices,
+        default=Source.SESSION,
+        db_index=True,
+    )
+    baseline_promoted_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     # Inline small contracts.
     constitution = models.JSONField(default=dict, blank=True)

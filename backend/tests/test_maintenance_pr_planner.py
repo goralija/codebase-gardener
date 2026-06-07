@@ -470,7 +470,13 @@ def demo_repository(*, autonomous_pr_add_on_enabled=True):
         autonomous_pr_add_on_enabled=autonomous_pr_add_on_enabled,
     )
     installation = create_installation(organization, 900)
-    return create_repository(organization, installation, 900)
+    repository = create_repository(organization, installation, 900)
+    RepositoryAutomationPolicy.objects.create(
+        organization=organization,
+        repository=repository,
+        autonomy_mode=RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS,
+    )
+    return repository
 
 
 def constitution():

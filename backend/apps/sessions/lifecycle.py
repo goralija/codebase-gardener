@@ -63,6 +63,12 @@ def build_gardening_session_result(
         "repository_id": repository_id,
         "trigger": session.trigger,
         "status": "completed",
+        "baseline_analysis_id": _analysis_id(session.baseline_analysis_id),
+        "baseline_commit_sha": _analysis_commit(session.baseline_analysis),
+        "current_analysis_id": _analysis_id(session.current_analysis_id),
+        "current_commit_sha": _analysis_commit(session.current_analysis),
+        "post_pr_refresh_analysis_id": _analysis_id(session.post_pr_refresh_analysis_id),
+        "drift_report": session.drift_report or None,
         "started_at": _format_timestamp(started_at),
         "finished_at": _format_timestamp(finished_at),
         "phase_results": phase_results,
@@ -223,6 +229,12 @@ def _failed_result(
         "repository_id": repository_id,
         "trigger": session.trigger,
         "status": "failed",
+        "baseline_analysis_id": _analysis_id(session.baseline_analysis_id),
+        "baseline_commit_sha": _analysis_commit(session.baseline_analysis),
+        "current_analysis_id": _analysis_id(session.current_analysis_id),
+        "current_commit_sha": _analysis_commit(session.current_analysis),
+        "post_pr_refresh_analysis_id": _analysis_id(session.post_pr_refresh_analysis_id),
+        "drift_report": session.drift_report or None,
         "started_at": _format_timestamp(started_at),
         "finished_at": _format_timestamp(finished_at),
         "phase_results": phase_results,
@@ -238,6 +250,14 @@ def _phase_results() -> list[dict[str, str]]:
         {"phase": phase, "status": "completed", "summary": summary}
         for phase, summary in PHASES
     ]
+
+
+def _analysis_id(value) -> str | None:
+    return str(value) if value else None
+
+
+def _analysis_commit(analysis) -> str | None:
+    return analysis.commit_sha if analysis else None
 
 
 def _failure_phase(session: GardeningSession) -> str:

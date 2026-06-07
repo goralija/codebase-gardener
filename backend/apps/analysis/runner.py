@@ -49,6 +49,7 @@ class AnalysisRunResult:
 def run_repository_analysis(
     *,
     repository: ManagedRepository,
+    source: str = RepositoryAnalysis.Source.SESSION,
     actor=None,
     client: GitHubAppClient | None = None,
     clone_repository: CloneRepository | None = None,
@@ -93,6 +94,7 @@ def run_repository_analysis(
         repository=repository,
         commit_sha=artifacts["snapshot"]["commit_sha"],
         artifacts=artifacts,
+        source=source,
         actor=actor,
     )
     logger.info(

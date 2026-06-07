@@ -16,12 +16,29 @@ Every Gardening Session follows:
 5. Execute
 6. Learn
 
+First scans are baseline-only. They run repository analysis, store and promote
+the initial baseline, and may propose a starter `GARDENER.md`, but they do not
+create maintenance PR plans. A later non-first-scan session compares current
+analysis against the latest promoted baseline and plans only from new or
+worsened drift. If a manual or automated session runs before any baseline
+exists, it promotes the current analysis and stops without maintenance PRs.
+
+Every completed non-first-scan session promotes its current analysis as the
+latest relevant baseline. After all Gardener-authored PRs from that session are
+merged or closed, Gardener runs one idempotent post-PR refresh analysis and
+promotes it too. Reverts of merged Gardener PRs also trigger a refresh because
+the default branch changed again.
+
 ## Autonomy modes
 
 - Conservative: reports and recommendations only.
 - Assisted: reports plus draft PRs.
 - Autonomous: reports plus focused PRs within allowed tiers and confidence policy.
 - Aggressive: multiple scheduled PRs and broader action surface. This is not a v1 default.
+
+New repositories default to Conservative. Manual sessions are enabled by
+default; scheduled, commit-count, risky-module, PR-opened, and CI-failure
+triggers are disabled until the user enables them.
 
 ## Fix tiers
 
@@ -72,6 +89,7 @@ Gardener must not directly modify these by default:
 - Prefer multiple focused PRs that do not interfere with one another.
 - Do not mix unrelated maintenance categories in one PR.
 - Include evidence, risk tier, confidence, expected entropy impact, changed paths, and verification.
+- For drift-aware sessions, PR body evidence must include the baseline commit, current commit, and why the opportunity is new or worse since the baseline.
 - Do not auto-merge in the v1 default policy.
 - If a session produces conflicting PR candidates, rank them and defer lower-priority work.
 
@@ -85,5 +103,10 @@ Gardener must not directly modify these by default:
 ## Learning rules
 
 - Track accepted, rejected, edited, merged, reverted, and failed PRs.
+- Track terminal PR outcomes on each `MaintenancePRPlan` with append-only outcome history.
 - Write learned preferences to `.gardener/profile.yaml`.
 - Learned preferences never override explicit Repository Constitution rules.
+
+Trigger rules use the latest promoted baseline constitution. Commit counters
+reset when a session promotes a new baseline because the current default branch
+state has been observed.

@@ -122,7 +122,13 @@ def make_repository(identifier=1):
         autonomous_pr_add_on_enabled=True,
     )
     installation = create_installation(organization, identifier)
-    return create_repository(organization, installation, identifier)
+    repository = create_repository(organization, installation, identifier)
+    RepositoryAutomationPolicy.objects.create(
+        organization=organization,
+        repository=repository,
+        autonomy_mode=RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS,
+    )
+    return repository
 
 
 def make_plan(repository=None, **overrides):

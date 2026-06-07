@@ -2,6 +2,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
+from apps.analysis import storage_service
 from apps.accounts.models import Membership
 from apps.billing.services import (
     AUTONOMOUS_PR_ADD_ON_DISABLED_REASON,
@@ -150,6 +151,7 @@ def _automation_payload(repository, user):
     return {
         "schema_version": "1.0",
         "repository": _repository_payload(repository),
+        "baseline": _baseline_payload(repository),
         "policy": RepositoryAutomationPolicySerializer(policy).data,
         "effective": {
             "autonomous_pr_add_on_enabled": add_on_enabled,
@@ -215,11 +217,38 @@ def _repository_payload(repository):
     }
 
 
+def _baseline_payload(repository):
+    baseline = storage_service.get_latest_relevant_baseline(repository)
+    if baseline is None:
+        return {
+            "analysis_id": None,
+            "commit_sha": None,
+            "source": None,
+            "promoted_at": None,
+        }
+    return {
+        "analysis_id": str(baseline.id),
+        "commit_sha": baseline.commit_sha,
+        "source": baseline.source,
+        "promoted_at": _timestamp(baseline.baseline_promoted_at),
+    }
+
+
 def _session_payload(session: GardeningSession):
     return {
         "id": str(session.id),
         "status": session.status,
         "trigger": session.trigger,
+        "baseline_analysis_id": str(session.baseline_analysis_id)
+        if session.baseline_analysis_id
+        else None,
+        "current_analysis_id": str(session.current_analysis_id)
+        if session.current_analysis_id
+        else None,
+        "current_commit_sha": session.current_analysis.commit_sha
+        if session.current_analysis_id
+        else None,
+        "has_drift_report": bool(session.drift_report),
         "created_at": _timestamp(session.created_at),
         "started_at": _timestamp(session.started_at),
         "finished_at": _timestamp(session.finished_at),
@@ -236,6 +265,8 @@ def _pr_plan_payload(plan: MaintenancePRPlan):
         "approval_status": plan.approval_status,
         "execution_status": plan.execution_status,
         "created_pr_url": plan.created_pr_url or None,
+        "terminal_outcome": plan.terminal_outcome or None,
+        "terminal_outcome_at": _timestamp(plan.terminal_outcome_at),
         "confidence": plan.confidence,
         "confidence_threshold": plan.confidence_threshold,
         "created_at": _timestamp(plan.created_at),

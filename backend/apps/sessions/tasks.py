@@ -1,6 +1,8 @@
 from celery import shared_task
 from django.utils import timezone
+from gardener_analysis import build_analysis_drift_report
 
+from apps.analysis.models import RepositoryAnalysis
 from apps.analysis import storage_service
 from apps.analysis.constitution_pr import maybe_open_constitution_pr
 from apps.analysis.runner import AnalysisRunError, run_repository_analysis
@@ -32,8 +34,10 @@ class RetryableSessionError(Exception):
 @shared_task(bind=True, max_retries=3)
 def run_gardening_session(self, session_id: str) -> dict[str, str]:
     session = GardeningSession.objects.get(id=session_id)
+    baseline_analysis = storage_service.get_latest_relevant_baseline(session.repository)
     session.status = GardeningSession.Status.RUNNING
     session.task_id = self.request.id or ""
+    session.baseline_analysis = baseline_analysis
     session.started_at = timezone.now()
     session.finished_at = None
     session.last_error = ""
@@ -41,6 +45,7 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
         update_fields=[
             "status",
             "task_id",
+            "baseline_analysis",
             "started_at",
             "finished_at",
             "last_error",
@@ -51,29 +56,73 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
     try:
         current_phase = "observe"
         _run_foundation_placeholder(session)
-        analysis_result = run_repository_analysis(repository=session.repository)
-        current_phase = "plan"
-        maybe_open_constitution_pr(
+        analysis_result = run_repository_analysis(
             repository=session.repository,
-            artifacts=analysis_result.artifacts,
+            source=_analysis_source(session),
         )
+        session.current_analysis = analysis_result.analysis
+        session.save(update_fields=["current_analysis", "updated_at"])
+
         first_report = storage_service.load_first_report(analysis_result.analysis)
-        planned_pr_plans = _plan_session_prs(
-            session=session,
-            artifacts=analysis_result.artifacts,
-            first_report=first_report,
-        )
-        _approve_auto_executable_pr_plans(planned_pr_plans)
-        current_phase = "execute"
-        executed_plan_ids, execution_errors = execute_session_pr_plans(session)
-        session.result = build_gardening_session_result(
-            session,
-            started_at=session.started_at,
-            executed_plan_ids=executed_plan_ids,
-            execution_errors=execution_errors,
-            first_report=first_report,
-        )
-        _emit_completion_notification(session, executed_plan_ids)
+        if _is_first_scan(session):
+            maybe_open_constitution_pr(
+                repository=session.repository,
+                artifacts=analysis_result.artifacts,
+            )
+
+        if _baseline_only_session(session, baseline_analysis):
+            current_phase = "learn"
+            _promote_session_baseline(analysis_result.analysis)
+            baseline_only_report = _report_without_pr_work(first_report)
+            session.result = build_gardening_session_result(
+                session,
+                started_at=session.started_at,
+                executed_plan_ids=[],
+                execution_errors=[],
+                first_report=baseline_only_report,
+            )
+            _emit_completion_notification(session, [])
+        else:
+            current_phase = "diagnose"
+            drift_report = _build_session_drift_report(
+                baseline_analysis=baseline_analysis,
+                current_analysis=analysis_result.analysis,
+                current_artifacts=analysis_result.artifacts,
+            )
+            session.drift_report = drift_report
+            session.save(update_fields=["drift_report", "updated_at"])
+
+            current_phase = "plan"
+            drift_opportunities = _drift_relevant_opportunities(
+                opportunities=analysis_result.artifacts.get("opportunities") or [],
+                drift_report=drift_report,
+            )
+            planning_artifacts = {
+                **analysis_result.artifacts,
+                "opportunities": drift_opportunities,
+            }
+            planning_report = {
+                **first_report,
+                "maintenance_opportunities": drift_opportunities,
+                "maintenance_pr_plans": [],
+            }
+            planned_pr_plans = _plan_session_prs(
+                session=session,
+                artifacts=planning_artifacts,
+                first_report=planning_report,
+            )
+            _approve_auto_executable_pr_plans(planned_pr_plans)
+            current_phase = "execute"
+            executed_plan_ids, execution_errors = execute_session_pr_plans(session)
+            session.result = build_gardening_session_result(
+                session,
+                started_at=session.started_at,
+                executed_plan_ids=executed_plan_ids,
+                execution_errors=execution_errors,
+                first_report=planning_report,
+            )
+            _promote_session_baseline(analysis_result.analysis)
+            _emit_completion_notification(session, executed_plan_ids or [])
     except AnalysisRunError as exc:
         session.status = GardeningSession.Status.FAILED
         session.finished_at = timezone.now()
@@ -189,10 +238,200 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
     return {"session_id": str(session.id), "status": session.status}
 
 
+@shared_task(bind=True, max_retries=3)
+def refresh_analysis_after_session_prs(self, session_id: str) -> dict[str, str]:
+    session = GardeningSession.objects.select_related(
+        "repository",
+        "post_pr_refresh_analysis",
+    ).get(id=session_id)
+    plans = list(
+        MaintenancePRPlan.objects.for_session(str(session.id))
+        .filter(
+            repository=session.repository,
+            execution_status=MaintenancePRPlan.ExecutionStatus.SUCCEEDED,
+            created_pr_number__isnull=False,
+        )
+        .order_by("created_at", "id")
+    )
+    if not plans:
+        return {"session_id": str(session.id), "status": "no_authored_prs"}
+
+    terminal_outcomes = {
+        MaintenancePRPlan.TerminalOutcome.MERGED,
+        MaintenancePRPlan.TerminalOutcome.CLOSED,
+        MaintenancePRPlan.TerminalOutcome.REVERTED,
+    }
+    waiting_plan_ids = [
+        str(plan.id)
+        for plan in plans
+        if plan.terminal_outcome not in terminal_outcomes
+        or plan.terminal_outcome_at is None
+    ]
+    if waiting_plan_ids:
+        return {
+            "session_id": str(session.id),
+            "status": "waiting_for_terminal_prs",
+            "waiting_plan_ids": ",".join(waiting_plan_ids),
+        }
+
+    latest_terminal_at = max(plan.terminal_outcome_at for plan in plans)
+    if (
+        session.post_pr_refresh_analysis_id
+        and session.post_pr_refresh_analysis
+        and session.post_pr_refresh_analysis.created_at >= latest_terminal_at
+    ):
+        return {"session_id": str(session.id), "status": "already_refreshed"}
+
+    analysis_result = run_repository_analysis(
+        repository=session.repository,
+        source=RepositoryAnalysis.Source.POST_PR_REFRESH,
+    )
+    session.post_pr_refresh_analysis = analysis_result.analysis
+    session.save(update_fields=["post_pr_refresh_analysis", "updated_at"])
+    _promote_session_baseline(analysis_result.analysis)
+    return {
+        "session_id": str(session.id),
+        "status": "refreshed",
+        "analysis_id": str(analysis_result.analysis.id),
+    }
+
+
 def _run_foundation_placeholder(session: GardeningSession) -> None:
     simulation = session.trigger.get("simulate")
     if simulation == "retryable_error":
         raise RetryableSessionError("Simulated retryable session error.")
+
+
+def _analysis_source(session: GardeningSession) -> str:
+    if _is_first_scan(session):
+        return RepositoryAnalysis.Source.FIRST_SCAN
+    return RepositoryAnalysis.Source.SESSION
+
+
+def _is_first_scan(session: GardeningSession) -> bool:
+    return session.trigger.get("type") == "first_scan"
+
+
+def _baseline_only_session(
+    session: GardeningSession,
+    baseline_analysis: RepositoryAnalysis | None,
+) -> bool:
+    return _is_first_scan(session) or baseline_analysis is None
+
+
+def _promote_session_baseline(analysis: RepositoryAnalysis) -> None:
+    storage_service.promote_relevant_baseline(analysis)
+    from apps.triggers.service import reset_commit_tracker
+
+    reset_commit_tracker(analysis.repository)
+
+
+def _report_without_pr_work(first_report: dict) -> dict:
+    return {
+        **first_report,
+        "maintenance_opportunities": [],
+        "maintenance_pr_plans": [],
+    }
+
+
+def _build_session_drift_report(
+    *,
+    baseline_analysis: RepositoryAnalysis,
+    current_analysis: RepositoryAnalysis,
+    current_artifacts: dict,
+) -> dict:
+    baseline_snapshot = storage_service.load_snapshot(baseline_analysis) or {
+        "repository_id": str(baseline_analysis.repository_id),
+        "commit_sha": baseline_analysis.commit_sha,
+        "signals": {},
+    }
+    return build_analysis_drift_report(
+        baseline_snapshot=baseline_snapshot,
+        baseline_entropy=baseline_analysis.entropy or {},
+        current_snapshot=current_artifacts.get("snapshot") or storage_service.load_snapshot(
+            current_analysis
+        ),
+        current_entropy=current_analysis.entropy or {},
+        baseline_analysis_id=str(baseline_analysis.id),
+        current_analysis_id=str(current_analysis.id),
+    )
+
+
+def _drift_relevant_opportunities(
+    *,
+    opportunities: list[dict],
+    drift_report: dict,
+) -> list[dict]:
+    changed_signals = [
+        *(drift_report.get("signal_changes", {}).get("new") or []),
+        *(drift_report.get("signal_changes", {}).get("worsened") or []),
+    ]
+    drift_paths = {
+        str(signal.get("path") or "")
+        for signal in changed_signals
+        if str(signal.get("path") or "")
+    }
+    if not drift_paths:
+        return []
+
+    relevant: list[dict] = []
+    for opportunity in opportunities:
+        opportunity_paths = _opportunity_paths(opportunity)
+        matched_paths = sorted(
+            drift_path
+            for drift_path in drift_paths
+            if any(_paths_related(opportunity_path, drift_path) for opportunity_path in opportunity_paths)
+        )
+        if not matched_paths:
+            continue
+        enriched = {
+            **opportunity,
+            "evidence": [
+                *(opportunity.get("evidence") or []),
+                _drift_evidence(drift_report, matched_paths, changed_signals),
+            ],
+        }
+        relevant.append(enriched)
+    return relevant
+
+
+def _opportunity_paths(opportunity: dict) -> set[str]:
+    paths = {str(path) for path in opportunity.get("affected_paths", []) if str(path)}
+    for evidence in opportunity.get("evidence") or []:
+        if isinstance(evidence, dict) and evidence.get("path"):
+            paths.add(str(evidence["path"]))
+    return paths
+
+
+def _paths_related(opportunity_path: str, drift_path: str) -> bool:
+    from fnmatch import fnmatch
+
+    if opportunity_path == drift_path:
+        return True
+    return fnmatch(drift_path, opportunity_path) or fnmatch(opportunity_path, drift_path)
+
+
+def _drift_evidence(
+    drift_report: dict,
+    matched_paths: list[str],
+    changed_signals: list[dict],
+) -> dict:
+    baseline_commit = drift_report.get("baseline_commit_sha") or "unknown"
+    current_commit = drift_report.get("current_commit_sha") or "unknown"
+    reasons = [
+        str(signal.get("summary") or "")
+        for signal in changed_signals
+        if signal.get("path") in matched_paths and signal.get("summary")
+    ]
+    reason = reasons[0] if reasons else "Opportunity touches a drift hotspot."
+    return {
+        "source_type": "analysis_drift",
+        "path": matched_paths[0],
+        "summary": (
+            f"New or worse since baseline {baseline_commit[:12]} -> "
+            f"{current_commit[:12]}: {reason}"
+        ),
+    }
 
 
 def _plan_session_prs(

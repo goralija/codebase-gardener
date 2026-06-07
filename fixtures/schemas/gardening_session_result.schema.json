@@ -12,6 +12,17 @@
       "required": ["type"]
     },
     "status": { "type": "string" },
+    "baseline_analysis_id": { "type": ["string", "null"] },
+    "baseline_commit_sha": { "type": ["string", "null"] },
+    "current_analysis_id": { "type": ["string", "null"] },
+    "current_commit_sha": { "type": ["string", "null"] },
+    "post_pr_refresh_analysis_id": { "type": ["string", "null"] },
+    "drift_report": {
+      "oneOf": [
+        { "$ref": "https://codebase-gardener.dev/schemas/analysis_drift_report.schema.json" },
+        { "type": "null" }
+      ]
+    },
     "started_at": { "type": "string", "format": "date-time" },
     "finished_at": { "type": "string", "format": "date-time" },
     "phase_results": {

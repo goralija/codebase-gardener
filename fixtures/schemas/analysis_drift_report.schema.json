@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codebase-gardener.dev/schemas/analysis_drift_report.schema.json",
+  "type": "object",
+  "required": ["schema_version", "repository_id", "baseline_analysis_id", "baseline_commit_sha", "current_analysis_id", "current_commit_sha", "generated_at", "no_baseline", "entropy_delta", "signal_changes", "hotspot_paths", "summary"],
+  "$defs": {
+    "signal_summary": {
+      "type": "object",
+      "required": ["bucket", "path", "kind", "summary", "impact"],
+      "properties": {
+        "bucket": { "type": "string" },
+        "path": { "type": "string" },
+        "kind": { "type": "string" },
+        "summary": { "type": "string" },
+        "impact": { "type": "number" },
+        "baseline_impact": { "type": "number" },
+        "current_impact": { "type": "number" },
+        "impact_delta": { "type": "number" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "repository_id": { "type": "string" },
+    "baseline_analysis_id": { "type": "string" },
+    "baseline_commit_sha": { "type": "string" },
+    "current_analysis_id": { "type": "string" },
+    "current_commit_sha": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "no_baseline": { "type": "boolean" },
+    "entropy_delta": {
+      "type": "object",
+      "required": ["overall", "components"],
+      "properties": {
+        "overall": { "type": "number" },
+        "components": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "signal_changes": {
+      "type": "object",
+      "required": ["new", "worsened", "resolved", "unchanged_count"],
+      "properties": {
+        "new": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/signal_summary" }
+        },
+        "worsened": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/signal_summary" }
+        },
+        "resolved": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/signal_summary" }
+        },
+        "unchanged_count": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "hotspot_paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "change_count", "impact_delta", "reasons"],
+        "properties": {
+          "path": { "type": "string" },
+          "change_count": { "type": "integer", "minimum": 1 },
+          "impact_delta": { "type": "number" },
+          "reasons": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["new_count", "worsened_count", "resolved_count", "unchanged_count"],
+      "properties": {
+        "new_count": { "type": "integer", "minimum": 0 },
+        "worsened_count": { "type": "integer", "minimum": 0 },
+        "resolved_count": { "type": "integer", "minimum": 0 },
+        "unchanged_count": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

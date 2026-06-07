@@ -1,9 +1,12 @@
+from itertools import count
 from types import SimpleNamespace
 
 import pytest
 from django.contrib.auth import get_user_model
 
 from apps.accounts.models import CustomerOrganization, Membership
+from apps.analysis import storage_service
+from apps.analysis.models import RepositoryAnalysis
 from apps.common.models import AuditEvent
 from apps.github_app.models import GitHubInstallation
 from apps.repositories.models import ManagedRepository
@@ -13,6 +16,7 @@ from apps.triggers.models import RepositoryAutomationPolicy, RepositoryCommitTra
 from apps.triggers.policy import TriggerNotPermittedError, ensure_trigger_permitted
 from apps.triggers.service import (
     SessionEnqueueError,
+    constitution_for_repository,
     enqueue_session_for_trigger,
     evaluate_push_triggers,
     trigger_manual_session,
@@ -25,6 +29,7 @@ from apps.triggers.thresholds import (
 )
 
 User = get_user_model()
+_ANALYSIS_COUNTER = count(1)
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +38,10 @@ def _eager_celery(settings, monkeypatch):
     settings.CELERY_TASK_EAGER_PROPAGATES = True
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository: _analysis_result(),
+        lambda repository, source=RepositoryAnalysis.Source.SESSION: _analysis_result(
+            repository,
+            source=source,
+        ),
     )
     monkeypatch.setattr(
         "apps.sessions.tasks.storage_service.load_first_report",
@@ -255,6 +263,28 @@ def test_changed_paths_hit_protected_constitution_and_fallback():
     assert changed_paths_hit_protected(["app/auth/login.py"], {})
     assert changed_paths_hit_protected(["app/auth/login.py"], constitution) is None
     assert changed_paths_hit_protected(["README.md"], {}) is None
+
+
+@pytest.mark.django_db
+def test_constitution_for_repository_loads_latest_promoted_baseline():
+    repository = create_repository(1)
+    first = RepositoryAnalysis.objects.create(
+        organization=repository.organization,
+        repository=repository,
+        commit_sha="baseline-one",
+        constitution={"protected_modules": [{"name": "old", "paths": ["old/**"]}]},
+    )
+    second = RepositoryAnalysis.objects.create(
+        organization=repository.organization,
+        repository=repository,
+        commit_sha="baseline-two",
+        constitution={"protected_modules": [{"name": "new", "paths": ["new/**"]}]},
+    )
+
+    storage_service.promote_relevant_baseline(first)
+    storage_service.promote_relevant_baseline(second)
+
+    assert constitution_for_repository(repository) == second.constitution
 
 
 # --------------------------------------------------------------------------- #
@@ -520,8 +550,34 @@ def _first_report_fixture() -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _analysis_result():
-    return SimpleNamespace(analysis=object(), artifacts={"constitution": {"open_questions": []}})
+def _analysis_result(
+    repository: ManagedRepository,
+    *,
+    source: str = RepositoryAnalysis.Source.SESSION,
+):
+    marker = next(_ANALYSIS_COUNTER)
+    analysis = RepositoryAnalysis.objects.create(
+        organization=repository.organization,
+        repository=repository,
+        commit_sha=f"trigger-commit-{marker}",
+        source=source,
+        constitution={"open_questions": []},
+        entropy={"score": {"overall": 0.0, "components": {}}},
+        opportunities=[],
+    )
+    return SimpleNamespace(
+        analysis=analysis,
+        artifacts={
+            "constitution": {"open_questions": []},
+            "entropy": analysis.entropy,
+            "opportunities": [],
+            "snapshot": {
+                "repository_id": str(repository.id),
+                "commit_sha": analysis.commit_sha,
+                "signals": {},
+            },
+        },
+    )
 
 
 def push_payload(*, commit_count: int, modified=None) -> dict:
@@ -551,7 +607,7 @@ def create_repository(identifier: int) -> ManagedRepository:
         permissions={"metadata": "read", "contents": "read"},
         events=["installation", "repository"],
     )
-    return ManagedRepository.objects.create(
+    repository = ManagedRepository.objects.create(
         organization=organization,
         github_installation=installation,
         github_repository_id=3000 + identifier,
@@ -562,3 +618,14 @@ def create_repository(identifier: int) -> ManagedRepository:
         default_branch="main",
         html_url=f"https://github.com/org-{identifier}/repo-{identifier}",
     )
+    RepositoryAutomationPolicy.objects.create(
+        organization=organization,
+        repository=repository,
+        autonomy_mode=RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS,
+        scheduled_trigger_enabled=True,
+        commit_trigger_enabled=True,
+        risky_module_trigger_enabled=True,
+        pr_opened_trigger_enabled=True,
+        ci_failure_trigger_enabled=True,
+    )
+    return repository

@@ -662,6 +662,14 @@ function GatePanel({
           label="Default commit threshold"
           value={String(automation.effective.default_commit_threshold)}
         />
+        <MetricLine
+          label="Latest baseline"
+          value={
+            automation.baseline.commit_sha
+              ? shortSha(automation.baseline.commit_sha)
+              : "Not promoted"
+          }
+        />
       </div>
     </aside>
   )
@@ -686,7 +694,11 @@ function RecentSessions({
                   {triggerName(session.trigger)}
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  {formatDate(session.created_at)}
+                  {session.current_commit_sha
+                    ? `${shortSha(session.current_commit_sha)}${
+                        session.has_drift_report ? " · drift" : ""
+                      }`
+                    : formatDate(session.created_at)}
                 </div>
               </div>
               <StatusPill value={session.status} />
@@ -715,9 +727,11 @@ function RecentPrPlans({
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">{plan.title}</div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  {plan.blocked
-                    ? plan.block_reason
-                    : `${formatPercent(plan.confidence)} confidence`}
+                  {plan.terminal_outcome
+                    ? formatStatus(plan.terminal_outcome)
+                    : plan.blocked
+                      ? plan.block_reason
+                      : `${formatPercent(plan.confidence)} confidence`}
                 </div>
               </div>
               <StatusPill value={plan.blocked ? "blocked" : plan.execution_status} />
@@ -933,4 +947,8 @@ function formatDate(value: string) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value))
+}
+
+function shortSha(value: string) {
+  return value.slice(0, 12)
 }

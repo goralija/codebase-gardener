@@ -207,6 +207,79 @@ Produced by Lane B or Lane C. Displayed by Lane A. Planned by Lane C.
 }
 ```
 
+## AnalysisDriftReport
+
+Produced by Lane B/Lane C comparison logic. Consumed by session planning,
+reports, and PR body evidence.
+
+```json
+{
+  "schema_version": "1.0",
+  "repository_id": "repo_123",
+  "baseline_analysis_id": "analysis_base",
+  "baseline_commit_sha": "abc123",
+  "current_analysis_id": "analysis_current",
+  "current_commit_sha": "def456",
+  "generated_at": "2026-06-07T12:00:00Z",
+  "no_baseline": false,
+  "entropy_delta": {
+    "overall": 6.5,
+    "components": {
+      "architecture": 2.0,
+      "maintainability": 3.0,
+      "testing": 1.5
+    }
+  },
+  "signal_changes": {
+    "new": [
+      {
+        "bucket": "test_gaps",
+        "path": "backend/apps/sessions/tasks.py",
+        "kind": "test_gap",
+        "summary": "Session baseline promotion lacks regression coverage.",
+        "impact": 3.0
+      }
+    ],
+    "worsened": [
+      {
+        "bucket": "hotspots",
+        "path": "backend/apps/sessions/tasks.py",
+        "kind": "hotspot",
+        "summary": "Session worker changed frequently and owns more lifecycle logic.",
+        "impact": 12.0,
+        "baseline_impact": 5.0,
+        "current_impact": 12.0,
+        "impact_delta": 7.0
+      }
+    ],
+    "resolved": [],
+    "unchanged_count": 4
+  },
+  "hotspot_paths": [
+    {
+      "path": "backend/apps/sessions/tasks.py",
+      "change_count": 2,
+      "impact_delta": 10.0,
+      "reasons": [
+        "Session worker changed frequently and owns more lifecycle logic.",
+        "Session baseline promotion lacks regression coverage."
+      ]
+    }
+  ],
+  "summary": {
+    "new_count": 1,
+    "worsened_count": 1,
+    "resolved_count": 0,
+    "unchanged_count": 4
+  }
+}
+```
+
+Signal summaries must identify bucket, path, kind, summary, and impact without
+raw source code. `no_baseline` is true only for comparison-only callers without
+a prior baseline; the hosted session worker treats no-baseline sessions as
+baseline-only and does not plan PRs.
+
 ## GardeningSessionResult
 
 Produced by Lane C. Displayed by Lane A.
@@ -221,6 +294,12 @@ Produced by Lane C. Displayed by Lane A.
     "actor": "user_123"
   },
   "status": "completed",
+  "baseline_analysis_id": "analysis_base",
+  "baseline_commit_sha": "abc123",
+  "current_analysis_id": "analysis_current",
+  "current_commit_sha": "def456",
+  "post_pr_refresh_analysis_id": null,
+  "drift_report": null,
   "started_at": "2026-06-05T12:00:00Z",
   "finished_at": "2026-06-05T12:12:00Z",
   "phase_results": [
@@ -241,6 +320,10 @@ Produced by Lane C. Displayed by Lane A.
   "errors": []
 }
 ```
+
+The analysis ID/commit fields and `drift_report` are optional for compatibility
+with older fixtures. First-scan and no-baseline sessions set `drift_report` to
+null because they do not compare against a previous baseline.
 
 `errors[]` entries include `phase` and `message`. Execute-phase errors for a
 specific PR plan may also include `maintenance_pr_plan_id` so the session can
@@ -272,12 +355,17 @@ Produced by Lane C. Executed through Lane A's GitHub integration.
   },
   "required_checks": ["docs_review"],
   "blocked": false,
-  "block_reason": null
+  "block_reason": null,
+  "terminal_outcome": null,
+  "terminal_outcome_at": null
 }
 ```
 
 `confidence_threshold` is optional for `schema_version` 1.0 compatibility. Consumers that do
 not receive it must apply the default autonomous PR threshold of `0.9`.
+`terminal_outcome` is null until a Gardener-authored PR is merged, closed, or
+reverted. Plan outcome history is append-only in backend storage and is not
+part of the compact public plan contract.
 
 ## RepositoryAutomationSettings
 
@@ -292,23 +380,29 @@ Produced by Lane A backend. Displayed and edited by Lane A dashboard.
     "default_branch": "main",
     "html_url": "https://github.com/acme/api"
   },
+  "baseline": {
+    "analysis_id": null,
+    "commit_sha": null,
+    "source": null,
+    "promoted_at": null
+  },
   "policy": {
     "id": "policy_123",
-    "autonomy_mode": "autonomous",
+    "autonomy_mode": "conservative",
     "manual_trigger_enabled": true,
-    "scheduled_trigger_enabled": true,
-    "commit_trigger_enabled": true,
-    "risky_module_trigger_enabled": true,
-    "pr_opened_trigger_enabled": true,
-    "ci_failure_trigger_enabled": true,
+    "scheduled_trigger_enabled": false,
+    "commit_trigger_enabled": false,
+    "risky_module_trigger_enabled": false,
+    "pr_opened_trigger_enabled": false,
+    "ci_failure_trigger_enabled": false,
     "commit_threshold": 10,
     "created_at": "2026-06-06T08:00:00Z",
     "updated_at": "2026-06-06T08:00:00Z"
   },
   "effective": {
     "autonomous_pr_add_on_enabled": true,
-    "can_create_autonomous_prs": true,
-    "pr_creation_status": "Autonomous PR creation is enabled.",
+    "can_create_autonomous_prs": false,
+    "pr_creation_status": "Repository autonomy mode is Conservative; sessions report recommendations without PR creation.",
     "default_commit_threshold": 10,
     "confidence_threshold": 0.9
   },
@@ -325,6 +419,8 @@ Produced by Lane A backend. Displayed and edited by Lane A dashboard.
 `commit_threshold` must be between 1 and 500. Owner, admin, and maintainer roles
 may update repository automation policy and trigger manual sessions. Viewer and
 reviewer roles may view settings but may not update them.
+New repositories use the quiet defaults shown above until the user explicitly
+enables automated triggers or a higher autonomy mode.
 
 ## FirstReportFixture
 

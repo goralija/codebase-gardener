@@ -128,6 +128,12 @@ const gardeningSessionResultSchema = v.object({
     actor: v.string(),
   }),
   status: v.string(),
+  baseline_analysis_id: v.optional(v.nullable(v.string())),
+  baseline_commit_sha: v.optional(v.nullable(v.string())),
+  current_analysis_id: v.optional(v.nullable(v.string())),
+  current_commit_sha: v.optional(v.nullable(v.string())),
+  post_pr_refresh_analysis_id: v.optional(v.nullable(v.string())),
+  drift_report: v.optional(v.nullable(v.record(v.string(), v.unknown()))),
   started_at: v.string(),
   finished_at: v.string(),
   phase_results: v.array(
@@ -185,6 +191,8 @@ const maintenancePrPlanSchema = v.object({
   required_checks: stringArraySchema,
   blocked: v.boolean(),
   block_reason: v.nullable(v.string()),
+  terminal_outcome: v.optional(v.nullable(v.string())),
+  terminal_outcome_at: v.optional(v.nullable(v.string())),
 })
 
 export const firstReportSchema = v.object({

@@ -55,12 +55,25 @@ def test_owner_can_view_and_update_repository_automation_policy():
     assert payload["schema_version"] == "1.0"
     assert_repository_automation_settings_contract(payload)
     assert payload["repository"]["full_name"] == repository.full_name
-    assert payload["policy"]["autonomy_mode"] == "autonomous"
-    assert payload["policy"]["scheduled_trigger_enabled"] is True
+    assert payload["baseline"] == {
+        "analysis_id": None,
+        "commit_sha": None,
+        "source": None,
+        "promoted_at": None,
+    }
+    assert payload["policy"]["autonomy_mode"] == "conservative"
+    assert payload["policy"]["scheduled_trigger_enabled"] is False
+    assert payload["policy"]["commit_trigger_enabled"] is False
+    assert payload["policy"]["risky_module_trigger_enabled"] is False
+    assert payload["policy"]["pr_opened_trigger_enabled"] is False
+    assert payload["policy"]["ci_failure_trigger_enabled"] is False
     assert payload["effective"] == {
         "autonomous_pr_add_on_enabled": True,
-        "can_create_autonomous_prs": True,
-        "pr_creation_status": "Autonomous PR creation is enabled.",
+        "can_create_autonomous_prs": False,
+        "pr_creation_status": (
+            "Repository autonomy mode is Conservative; sessions report "
+            "recommendations without PR creation."
+        ),
         "default_commit_threshold": 10,
         "confidence_threshold": 0.9,
     }
@@ -74,8 +87,8 @@ def test_owner_can_view_and_update_repository_automation_policy():
     patch_response = client.patch(
         automation_url(repository),
         {
-            "autonomy_mode": "conservative",
-            "scheduled_trigger_enabled": False,
+            "autonomy_mode": "autonomous",
+            "scheduled_trigger_enabled": True,
             "commit_threshold": 3,
         },
         format="json",
@@ -83,10 +96,10 @@ def test_owner_can_view_and_update_repository_automation_policy():
 
     assert patch_response.status_code == 200
     updated = patch_response.json()
-    assert updated["policy"]["autonomy_mode"] == "conservative"
-    assert updated["policy"]["scheduled_trigger_enabled"] is False
+    assert updated["policy"]["autonomy_mode"] == "autonomous"
+    assert updated["policy"]["scheduled_trigger_enabled"] is True
     assert updated["policy"]["commit_threshold"] == 3
-    assert updated["effective"]["can_create_autonomous_prs"] is False
+    assert updated["effective"]["can_create_autonomous_prs"] is True
     audit = AuditEvent.objects.get(
         event_type=AuditEvent.EventType.AUTOMATION_POLICY_UPDATED
     )

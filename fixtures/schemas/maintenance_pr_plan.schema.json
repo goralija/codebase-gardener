@@ -35,7 +35,9 @@
     },
     "required_checks": { "type": "array", "items": { "type": "string" } },
     "blocked": { "type": "boolean" },
-    "block_reason": { "type": ["string", "null"] }
+    "block_reason": { "type": ["string", "null"] },
+    "terminal_outcome": { "type": ["string", "null"] },
+    "terminal_outcome_at": { "type": ["string", "null"], "format": "date-time" }
   },
   "additionalProperties": false
 }
