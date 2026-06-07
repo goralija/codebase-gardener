@@ -278,7 +278,10 @@ reports, and PR body evidence.
 Signal summaries must identify bucket, path, kind, summary, and impact without
 raw source code. `no_baseline` is true only for comparison-only callers without
 a prior baseline; the hosted session worker treats no-baseline sessions as
-baseline-only and does not plan PRs.
+baseline-only and does not plan PRs. Non-first automated sessions plan from new
+or worsened drift; manual sessions may fall back to current opportunities when
+no drift-relevant opportunities exist and no active unblocked Gardener PR plan
+already covers the opportunity.
 
 ## GardeningSessionResult
 
