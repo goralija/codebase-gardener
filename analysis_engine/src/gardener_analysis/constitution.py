@@ -221,16 +221,20 @@ def _protected_modules(
         paths = _globs(bullet)
         if not paths:
             continue
-        label = bullet.split(":", 1)[0].strip() if ":" in bullet else bullet.strip()
-        label = _BACKTICK.sub("", label).strip(" .-")
         modules.append(
             {
-                "name": label or "module",
+                "name": _protected_module_name(bullet, paths),
                 "paths": paths,
                 "reason": _reason(bullet),
             }
         )
     return modules
+
+
+def _protected_module_name(bullet: str, paths: list[str]) -> str:
+    prefix = bullet.split(":", 1)[0] if ":" in bullet else bullet.split("`", 1)[0]
+    label = _BACKTICK.sub("", prefix).strip(" .-")
+    return label or paths[0]
 
 
 def _never_touch(

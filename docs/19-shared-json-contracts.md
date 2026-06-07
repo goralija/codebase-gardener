@@ -202,10 +202,14 @@ Produced by Lane B or Lane C. Displayed by Lane A. Planned by Lane C.
   "affected_paths": ["ARCHITECTURE.md", "apps/api/services/**"],
   "blocked_by": [],
   "expected_entropy_delta": -2.1,
-  "required_checks": ["pytest", "docs_review"],
+  "required_checks": ["docs_review"],
   "evidence": []
 }
 ```
+
+`required_checks` contains semantic gates or commands backed by repository
+source truth / detected configuration. Producers must not emit stack-specific
+commands such as `pytest` unless the analyzed repository exposes them.
 
 ## AnalysisDriftReport
 
@@ -347,7 +351,7 @@ Produced by Lane C. Executed through Lane A's GitHub integration.
   "title": "Refresh architecture documentation",
   "risk_tier": "tier_1_autonomous",
   "confidence": 0.94,
-  "confidence_threshold": 0.9,
+  "confidence_threshold": 0.85,
   "changed_paths": ["ARCHITECTURE.md"],
   "pr_body_sections": {
     "goal": "Refresh stale architecture docs.",
@@ -359,13 +363,25 @@ Produced by Lane C. Executed through Lane A's GitHub integration.
   "required_checks": ["docs_review"],
   "blocked": false,
   "block_reason": null,
+  "approval_status": "approved",
+  "execution_status": "succeeded",
+  "created_pr_number": 12,
+  "created_pr_url": "https://github.com/acme/api/pull/12",
+  "created_branch_ref": "refs/heads/gardener/docs-architecture-refresh",
+  "execution_error": null,
   "terminal_outcome": null,
   "terminal_outcome_at": null
 }
 ```
 
 `confidence_threshold` is optional for `schema_version` 1.0 compatibility. Consumers that do
-not receive it must apply the default autonomous PR threshold of `0.9`.
+not receive it must apply the default autonomous PR threshold of `0.85`.
+`approval_status`, `execution_status`, `created_pr_number`, `created_pr_url`,
+`created_branch_ref`, and `execution_error` are optional for older compact plan
+fixtures, but backend-produced session plans include them so dashboards can show
+whether a plan is pending, running, failed, opened, or terminal without guessing
+from a missing GitHub URL. Tier 2 assisted plans are opened as draft PRs when
+repository policy allows PR creation.
 `terminal_outcome` is null until a Gardener-authored PR is merged, closed, or
 reverted. Plan outcome history is append-only in backend storage and is not
 part of the compact public plan contract.
@@ -417,7 +433,7 @@ Produced by Lane A backend. Displayed and edited by Lane A dashboard.
     "can_create_autonomous_prs": false,
     "pr_creation_status": "Repository autonomy mode is Conservative; sessions report recommendations without PR creation.",
     "default_commit_threshold": 10,
-    "confidence_threshold": 0.9
+    "confidence_threshold": 0.85
   },
   "permissions": {
     "can_edit": true,

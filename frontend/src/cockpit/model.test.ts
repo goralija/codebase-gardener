@@ -9,6 +9,7 @@ import {
 } from "@/features/first-report/first-report-contract"
 import {
   constitutionFromReport,
+  DEFAULT_CONFIDENCE_FLOOR,
   oppsFromReport,
   plansFromReport,
   systemsFromReport,
@@ -49,7 +50,7 @@ describe("cockpit model mapping", () => {
     const plans = plansFromReport(report, automation)
 
     expect(plans[0]).toMatchObject({
-      confidenceFloor: 90,
+      confidenceFloor: DEFAULT_CONFIDENCE_FLOOR,
       prUrl: "https://github.com/acme/api/pull/99",
       status: "open",
     })
@@ -76,6 +77,50 @@ describe("cockpit model mapping", () => {
     expect(plans[0]).toMatchObject({
       blocked: "Protected path changed.",
       status: "blocked",
+    })
+  })
+
+  it("does not label failed report plans as ready when no PR was opened", () => {
+    const report = reportWith({
+      maintenance_pr_plans: [
+        {
+          ...firstReportFixture.maintenance_pr_plans[0],
+          approval_status: "approved",
+          execution_status: "failed",
+          created_pr_url: null,
+          execution_error: "GitHub pull request creation failed.",
+        },
+      ],
+    })
+
+    const plans = plansFromReport(report)
+
+    expect(plans[0]).toMatchObject({
+      executionError: "GitHub pull request creation failed.",
+      prUrl: null,
+      status: "failed",
+    })
+  })
+
+  it("does not label pending report plans as ready when approval is missing", () => {
+    const report = reportWith({
+      maintenance_pr_plans: [
+        {
+          ...firstReportFixture.maintenance_pr_plans[0],
+          approval_status: "pending",
+          execution_status: "pending",
+          created_pr_url: null,
+          execution_error: "No implemented file fix for category dead_code.",
+        },
+      ],
+    })
+
+    const plans = plansFromReport(report)
+
+    expect(plans[0]).toMatchObject({
+      executionError: "No implemented file fix for category dead_code.",
+      prUrl: null,
+      status: "pending",
     })
   })
 

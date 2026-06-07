@@ -149,10 +149,27 @@ def test_apply_ai_fix_rejects_oversized_rewrite(monkeypatch):
 
 def test_ai_fixable_paths_filters_by_category_and_extension():
     assert ai_fixes.ai_fixable_paths(_Plan(category="docs")) == []
-    plan = _Plan(category="dead_code", changed_paths=["a.py", "b.md", "../evil.py", "c.ts"])
-    assert ai_fixes.ai_fixable_paths(plan) == ["a.py", "c.ts"]
+    plan = _Plan(
+        category="dead_code",
+        changed_paths=[
+            "a.py",
+            "b.md",
+            "../evil.py",
+            "c.ts",
+            "app/src/main/java/ba/unsa/etf/rma/spirala1/BiljkaListAdapter.kt",
+            "app/build.gradle.kts",
+        ],
+    )
+    assert ai_fixes.ai_fixable_paths(plan) == [
+        "a.py",
+        "c.ts",
+        "app/src/main/java/ba/unsa/etf/rma/spirala1/BiljkaListAdapter.kt",
+    ]
 
 
 def test_has_ai_fix_true_for_supported_category():
     assert ai_fixes.has_ai_fix(_Plan(category="dead_code")) is True
+    assert ai_fixes.has_ai_fix(
+        _Plan(category="layer_violation_repair", changed_paths=["app/src/main/Foo.kt"])
+    ) is True
     assert ai_fixes.has_ai_fix(_Plan(category="docs")) is False

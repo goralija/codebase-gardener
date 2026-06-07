@@ -21,6 +21,7 @@ import {
   AUTONOMY,
   CAT_ICON,
   COMPONENTS,
+  DEFAULT_CONFIDENCE_FLOOR,
   STATUS_ICON,
   STATUS_TONE,
   type AutonomyMode,
@@ -107,7 +108,7 @@ export function RiskBadge({ risk }: { risk: string }) {
 
 export function ConfidenceBadge({
   value,
-  floor = 90,
+  floor = DEFAULT_CONFIDENCE_FLOOR,
 }: {
   value: number
   floor?: number

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from fnmatch import fnmatch
@@ -7,10 +8,6 @@ from typing import Iterable
 
 from django.db import transaction
 
-from apps.billing.services import (
-    AUTONOMOUS_PR_ADD_ON_DISABLED_REASON,
-    autonomous_pr_add_on_enabled,
-)
 from apps.maintenance_prs.models import MaintenancePRPlan, MaintenancePRPlanOpportunity
 from apps.maintenance_prs.policy import (
     DEAD_CODE_CONFIDENCE_THRESHOLD,
@@ -18,11 +15,13 @@ from apps.maintenance_prs.policy import (
     confidence_threshold_for_opportunity,
 )
 from apps.maintenance_prs.roi import estimate_roi
+from apps.triggers.models import RepositoryAutomationPolicy
 from apps.triggers.policy import autonomous_pr_execution_block_reason
 
 
 CONFIDENCE_THRESHOLD = DEFAULT_CONFIDENCE_THRESHOLD
 GROUP_SIZE_LIMIT = 3
+logger = logging.getLogger(__name__)
 CATEGORY_ALIASES = {
     "dead_code_removal": "dead_code",
     "dead-code-removal": "dead_code",
@@ -31,6 +30,15 @@ CATEGORY_ALIASES = {
 # Categories whose prior PRs were reverted demand stronger evidence than the
 # ordinary autonomous threshold before Gardener tries the same category again.
 REVERTED_CONFIDENCE_THRESHOLD = 0.97
+POLICY_BLOCK_MARKERS = {"below_confidence_threshold"}
+POLICY_BLOCK_PREFIXES = ("protected_module:", "never_touch:")
+LEGACY_GENERATED_REQUIRED_CHECKS = {
+    "dependency_audit",
+    "python -m pytest",
+    "pytest",
+    "uv run python -m pytest",
+    "uv run pytest",
+}
 
 
 @dataclass(frozen=True)
@@ -102,19 +110,15 @@ def plan_maintenance_prs(
             gardening_session_id=gardening_session_id,
         ).values_list("branch_name", flat=True)
     )
-    automation_decision = _automation_decision(repository)
-    billing_decision = _billing_decision(repository)
-
     with transaction.atomic():
         for group in groups:
             decision = _group_decision(group, constitution, profile)
             forced_reason = forced_block_reasons.get(group[0]["maintenance_opportunity_id"])
             if forced_reason:
                 decision = PolicyDecision(True, forced_reason)
+            automation_decision = _automation_decision(repository, group)
             if automation_decision.blocked and not decision.blocked:
                 decision = automation_decision
-            if billing_decision.blocked and not decision.blocked:
-                decision = billing_decision
             branch_name = _unique_branch_name(_base_branch_name(group), used_branch_names)
             used_branch_names.add(branch_name)
             plan = MaintenancePRPlan.objects.create(
@@ -130,9 +134,7 @@ def plan_maintenance_prs(
                     path for item in group for path in item.get("affected_paths", [])
                 ),
                 pr_body_sections=_pr_body_sections(group, decision, constitution, profile),
-                required_checks=_unique_values(
-                    check for item in group for check in item.get("required_checks", [])
-                ),
+                required_checks=_group_required_checks(group),
                 blocked=decision.blocked,
                 block_reason=decision.reason,
             )
@@ -141,6 +143,12 @@ def plan_maintenance_prs(
                     plan=plan,
                     maintenance_opportunity_id=opportunity["maintenance_opportunity_id"],
                 )
+            logger.info(
+                "maintenance_pr_plan.blocked"
+                if plan.blocked
+                else "maintenance_pr_plan.created",
+                extra=_plan_log_extra(plan, group),
+            )
             plans.append(plan)
 
     return plans
@@ -159,13 +167,20 @@ def evaluate_policy(
     if _has_blocking_open_questions(constitution):
         return PolicyDecision(True, "Repository constitution has unresolved open questions.")
 
-    blocked_by = opportunity.get("blocked_by") or []
-    if blocked_by:
-        return PolicyDecision(True, "Opportunity is blocked by prerequisite work.")
-
     confidence = float(opportunity.get("confidence", 0))
     category = opportunity.get("category", "")
     threshold = _effective_threshold(opportunity, constitution, profile)
+    prerequisite_blockers = _prerequisite_blockers(opportunity)
+    if prerequisite_blockers:
+        return PolicyDecision(
+            True,
+            f"Opportunity is blocked by prerequisite work: {', '.join(prerequisite_blockers)}.",
+        )
+
+    protected_reason = _protected_path_reason(opportunity.get("affected_paths", []), constitution)
+    if protected_reason:
+        return PolicyDecision(True, protected_reason)
+
     if category == "dead_code" and confidence < DEAD_CODE_CONFIDENCE_THRESHOLD:
         return PolicyDecision(
             True,
@@ -178,16 +193,13 @@ def evaluate_policy(
     if category in allowed_fixes.get("advisory", []):
         return PolicyDecision(True, "Opportunity category is advisory-only.")
     if category in allowed_fixes.get("assisted", []):
-        return PolicyDecision(True, "Opportunity category requires assisted draft PR handling.")
-    if category not in allowed_fixes.get("autonomous", []):
-        return PolicyDecision(True, "Opportunity category is not allowed for autonomous PRs.")
-
-    if opportunity.get("risk_tier") != "tier_1_autonomous":
-        return PolicyDecision(True, "Risk tier requires assisted or advisory handling.")
-
-    protected_reason = _protected_path_reason(opportunity.get("affected_paths", []), constitution)
-    if protected_reason:
-        return PolicyDecision(True, protected_reason)
+        if opportunity.get("risk_tier") != "tier_2_assisted":
+            return PolicyDecision(True, "Assisted category requires tier_2_assisted risk.")
+    elif category in allowed_fixes.get("autonomous", []):
+        if opportunity.get("risk_tier") != "tier_1_autonomous":
+            return PolicyDecision(True, "Risk tier requires assisted or advisory handling.")
+    else:
+        return PolicyDecision(True, "Opportunity category is not allowed for PR creation.")
 
     # Learned profile signals are advisory and never override the constitution:
     # every constitution check above runs first, so this only adds a soft block
@@ -199,6 +211,20 @@ def evaluate_policy(
         )
 
     return PolicyDecision(False)
+
+
+def _prerequisite_blockers(opportunity: dict) -> list[str]:
+    blockers: list[str] = []
+    for blocker in opportunity.get("blocked_by") or []:
+        value = str(blocker).strip()
+        if not value:
+            continue
+        if value in POLICY_BLOCK_MARKERS:
+            continue
+        if any(value.startswith(prefix) for prefix in POLICY_BLOCK_PREFIXES):
+            continue
+        blockers.append(value)
+    return blockers
 
 
 def _group_decision(
@@ -213,13 +239,19 @@ def _group_decision(
     return PolicyDecision(False)
 
 
-def _billing_decision(repository) -> PolicyDecision:
-    if autonomous_pr_add_on_enabled(repository.organization):
+def _automation_decision(repository, group: list[dict]) -> PolicyDecision:
+    if _risk_tier(group) == "tier_2_assisted":
+        policy = RepositoryAutomationPolicy.get_or_create_for_repository(repository)
+        if policy.autonomy_mode in {
+            RepositoryAutomationPolicy.AutonomyMode.ASSISTED,
+            RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS,
+        }:
+            return PolicyDecision(False)
+        reason = autonomous_pr_execution_block_reason(repository)
+        if reason:
+            return PolicyDecision(True, reason)
         return PolicyDecision(False)
-    return PolicyDecision(True, AUTONOMOUS_PR_ADD_ON_DISABLED_REASON)
 
-
-def _automation_decision(repository) -> PolicyDecision:
     reason = autonomous_pr_execution_block_reason(repository)
     if reason:
         return PolicyDecision(True, reason)
@@ -363,6 +395,50 @@ def _plan_category(group: list[dict]) -> str:
     return str(group[0].get("category") or "")
 
 
+def _group_required_checks(group: list[dict]) -> list[str]:
+    return _unique_values(
+        check
+        for item in group
+        for check in _sanitized_required_checks(item.get("required_checks", []))
+    )
+
+
+def _sanitized_required_checks(value) -> list[str]:
+    checks: list[str] = []
+    for check in value if isinstance(value, list) else []:
+        if not isinstance(check, str):
+            continue
+        normalized = check.strip()
+        if not normalized or normalized.lower() in LEGACY_GENERATED_REQUIRED_CHECKS:
+            continue
+        checks.append(normalized)
+    return checks
+
+
+def _plan_log_extra(plan: MaintenancePRPlan, group: list[dict]) -> dict:
+    opportunity_ids = [
+        str(item.get("maintenance_opportunity_id"))
+        for item in group
+        if item.get("maintenance_opportunity_id")
+    ]
+    return {
+        "organization_id": str(plan.repository.organization_id),
+        "repository_id": str(plan.repository_id),
+        "gardening_session_id": plan.gardening_session_id,
+        "maintenance_pr_plan_id": str(plan.id),
+        "maintenance_opportunity_ids": opportunity_ids,
+        "maintenance_opportunity_count": len(opportunity_ids),
+        "category": plan.category,
+        "risk_tier": plan.risk_tier,
+        "confidence": plan.confidence,
+        "confidence_threshold": plan.confidence_threshold,
+        "blocked": plan.blocked,
+        "block_reason": plan.block_reason or "",
+        "changed_path_count": len(plan.changed_paths or []),
+        "required_check_count": len(plan.required_checks or []),
+    }
+
+
 def _pr_body_sections(
     group: list[dict],
     decision: PolicyDecision,
@@ -380,14 +456,14 @@ def _pr_body_sections(
                 evidence.append(summary)
 
     entropy_delta = sum(float(item.get("expected_entropy_delta", 0)) for item in group)
-    checks = _unique_values(check for item in group for check in item.get("required_checks", []))
+    checks = _group_required_checks(group)
     confidence = min(float(item.get("confidence", 0)) for item in group)
     threshold = _group_confidence_threshold(group, constitution, profile)
     changed_paths = _unique_values(path for item in group for path in item.get("affected_paths", []))
     categories = _unique_values(item.get("category", "unknown") for item in group)
     confidence_reasons = (
         f"Minimum opportunity confidence {confidence:.2f}; threshold {threshold:.2f}; "
-        f"{'blocked by policy' if decision.blocked else 'meets autonomous PR threshold'}."
+        f"{'blocked by policy' if decision.blocked else 'meets PR creation threshold'}."
     )
     constitution_rules = (
         f"Categories checked against constitution allowed fixes: {', '.join(categories)}. "
@@ -401,7 +477,7 @@ def _pr_body_sections(
         "Rollback: revert the focused PR branch if checks or review fail."
     )
     if decision.blocked:
-        verification = f"Blocked: {decision.reason}. {verification}"
+        verification = f"Blocked: {_sentence(decision.reason)} {verification}"
 
     return {
         "goal": " | ".join(item.get("summary", item["title"]) for item in group),
@@ -413,6 +489,11 @@ def _pr_body_sections(
         "verification": verification,
         "roi_impact": estimate_roi(group, blocked=decision.blocked),
     }
+
+
+def _sentence(value: str | None) -> str:
+    text = (value or "Blocked by PR planning policy.").strip()
+    return text if text.endswith((".", "!", "?")) else f"{text}."
 
 
 def _unique_values(values: Iterable[str]) -> list[str]:

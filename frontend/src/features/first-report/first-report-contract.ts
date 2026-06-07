@@ -192,6 +192,12 @@ const maintenancePrPlanSchema = v.object({
   required_checks: stringArraySchema,
   blocked: v.boolean(),
   block_reason: v.nullable(v.string()),
+  approval_status: v.optional(v.string()),
+  execution_status: v.optional(v.string()),
+  created_pr_number: v.optional(v.nullable(v.number())),
+  created_pr_url: v.optional(v.nullable(v.string())),
+  created_branch_ref: v.optional(v.nullable(v.string())),
+  execution_error: v.optional(v.nullable(v.string())),
   terminal_outcome: v.optional(v.nullable(v.string())),
   terminal_outcome_at: v.optional(v.nullable(v.string())),
 })

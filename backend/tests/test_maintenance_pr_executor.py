@@ -4,7 +4,6 @@ from base64 import b64encode
 from django.utils import timezone
 
 from apps.billing.models import Subscription
-from apps.billing.services import AUTONOMOUS_PR_ADD_ON_DISABLED_REASON
 from apps.common.models import AuditEvent
 from apps.github_app.client import GitHubAPIError
 from apps.maintenance_prs.executor import (
@@ -88,8 +87,8 @@ class FakeGitHubClient:
         self.put_contents[path] = content
         return {"commit": {"sha": "commit_sha"}}
 
-    def create_pull_request(self, owner, repo, *, title, head, base, body, token):
-        self.calls.append(("create_pull_request", owner, repo, head, base))
+    def create_pull_request(self, owner, repo, *, title, head, base, body, token, draft=False):
+        self.calls.append(("create_pull_request", owner, repo, head, base, draft))
         if self.create_pr_error is not None:
             raise self.create_pr_error
         self._maybe_fail("create_pull_request")
@@ -285,6 +284,41 @@ def test_execute_happy_path_creates_branch_and_pr():
 
 
 @pytest.mark.django_db
+def test_execute_assisted_plan_creates_draft_pr(monkeypatch):
+    from apps.maintenance_prs import ai_fixes
+
+    monkeypatch.setattr(
+        ai_fixes,
+        "apply_ai_fix",
+        lambda _path, content, _plan, _opportunity, progress=None: (
+            f"{content.rstrip()}\n\n"
+            "def test_added_by_gardener():\n"
+            "    assert True\n"
+        ),
+    )
+    plan = make_plan(
+        category="tests",
+        risk_tier="tier_2_assisted",
+        changed_paths=["tests/test_gap.py"],
+        required_checks=["test_review"],
+    )
+    client = FakeGitHubClient(
+        file_contents={"tests/test_gap.py": "def test_existing():\n    assert True\n"},
+        file_shas={"tests/test_gap.py": "test_sha"},
+    )
+
+    execute_maintenance_pr_plan(plan, client=client)
+
+    create_pr_calls = [call for call in client.calls if call[0] == "create_pull_request"]
+    assert create_pr_calls == [
+        ("create_pull_request", "org-1", "repo-1", "gardener/docs-refresh", "main", True)
+    ]
+    plan.refresh_from_db()
+    assert plan.execution_status == MaintenancePRPlan.ExecutionStatus.SUCCEEDED
+    assert plan.created_pr_url == "https://github.com/org-1/repo-1/pull/42"
+
+
+@pytest.mark.django_db
 def test_execute_docs_plan_updates_markdown_paths_and_writes_marker():
     plan = make_plan(
         category="docs",
@@ -346,7 +380,7 @@ def test_unsupported_tier_one_category_is_not_executable():
     )
     client = FakeGitHubClient(file_contents={"README.md": "# Project\n"})
 
-    with pytest.raises(PlanNotExecutableError, match="no implemented autonomous file fix"):
+    with pytest.raises(PlanNotExecutableError, match="No implemented file fix"):
         execute_maintenance_pr_plan(plan, client=client)
 
     assert client.calls == []
@@ -401,20 +435,55 @@ def test_existing_branch_without_matching_marker_fails():
 
 
 @pytest.mark.django_db
-def test_existing_branch_missing_marker_fails_as_ownership_error():
+def test_existing_branch_missing_marker_uses_suffixed_branch():
     plan = make_plan()
-    client = FakeGitHubClient(
-        create_branch_error=GitHubAPIError("exists", status_code=422),
-        get_file_contents_error=GitHubAPIError("not found", status_code=404),
-    )
 
-    with pytest.raises(PlanNotExecutableError):
-        execute_maintenance_pr_plan(plan, client=client)
+    class BranchCollisionClient(FakeGitHubClient):
+        def create_branch_ref(self, owner, repo, *, branch, sha, token):
+            self.calls.append(("create_branch_ref", owner, repo, branch, sha))
+            if branch == "gardener/docs-refresh":
+                raise GitHubAPIError("exists", status_code=422)
+            return {"ref": f"refs/heads/{branch}"}
+
+        def get_file_contents(self, owner, repo, path, *, branch, token):
+            if path == ".gardener/plans/gardener-docs-refresh.md":
+                self.calls.append(("get_file_contents", owner, repo, path, branch))
+                raise GitHubAPIError("not found", status_code=404)
+            return super().get_file_contents(owner, repo, path, branch=branch, token=token)
+
+    client = BranchCollisionClient(file_contents={"docs/api.md": "# API\n"})
+
+    execute_maintenance_pr_plan(plan, client=client)
 
     plan.refresh_from_db()
-    assert plan.execution_status == MaintenancePRPlan.ExecutionStatus.FAILED
-    assert "does not belong" in plan.execution_error
-    assert "put_file_contents" not in _names(client)
+    assert plan.branch_name == "gardener/docs-refresh-2"
+    assert plan.created_branch_ref == "refs/heads/gardener/docs-refresh-2"
+    assert plan.execution_status == MaintenancePRPlan.ExecutionStatus.SUCCEEDED
+    assert (
+        "create_branch_ref",
+        "org-1",
+        "repo-1",
+        "gardener/docs-refresh",
+        "base_sha",
+    ) in client.calls
+    assert (
+        "create_branch_ref",
+        "org-1",
+        "repo-1",
+        "gardener/docs-refresh-2",
+        "base_sha",
+    ) in client.calls
+    assert any(
+        call[:4]
+        == (
+            "put_file_contents",
+            "org-1",
+            "repo-1",
+            ".gardener/plans/gardener-docs-refresh-2.md",
+        )
+        for call in client.calls
+    )
+    assert ("create_pull_request", "org-1", "repo-1", "gardener/docs-refresh-2", "main", False) in client.calls
 
 
 @pytest.mark.django_db
@@ -457,7 +526,7 @@ def test_non_422_branch_error_fails():
         },
         {"execution_status": MaintenancePRPlan.ExecutionStatus.SUCCEEDED},
         {"execution_status": MaintenancePRPlan.ExecutionStatus.RUNNING},
-        {"risk_tier": "tier_2_assisted"},
+        {"risk_tier": "tier_3_advisory"},
     ],
 )
 def test_gate_blocks_non_executable_plans(overrides):
@@ -558,7 +627,7 @@ def test_inactive_repository_blocked():
 
 
 @pytest.mark.django_db
-def test_disabled_autonomous_pr_add_on_blocks_existing_plan_execution():
+def test_disabled_autonomous_pr_add_on_does_not_block_existing_plan_execution():
     plan = make_plan()
     Subscription.objects.filter(
         organization=plan.repository.organization,
@@ -567,13 +636,11 @@ def test_disabled_autonomous_pr_add_on_blocks_existing_plan_execution():
     )
     client = FakeGitHubClient()
 
-    with pytest.raises(PlanNotExecutableError) as exc_info:
-        execute_maintenance_pr_plan(plan, client=client)
+    result = execute_maintenance_pr_plan(plan, client=client)
 
-    assert str(exc_info.value) == AUTONOMOUS_PR_ADD_ON_DISABLED_REASON
-    assert client.calls == []
     plan.refresh_from_db()
-    assert plan.execution_status == MaintenancePRPlan.ExecutionStatus.PENDING
+    assert plan.execution_status == MaintenancePRPlan.ExecutionStatus.SUCCEEDED
+    assert result["created_pr_number"] == 42
 
 
 @pytest.mark.django_db
@@ -594,24 +661,19 @@ def test_conservative_autonomy_mode_blocks_existing_plan_execution():
 
 
 @pytest.mark.django_db
-def test_claim_blocks_if_autonomous_pr_add_on_disabled_in_db(monkeypatch):
+def test_claim_ignores_disabled_autonomous_pr_add_on_in_db():
     plan = make_plan()
     Subscription.objects.filter(
         organization=plan.repository.organization,
     ).update(
         autonomous_pr_add_on_enabled=False,
     )
-    monkeypatch.setattr(
-        "apps.maintenance_prs.executor.autonomous_pr_add_on_enabled",
-        lambda _organization: True,
-    )
     client = FakeGitHubClient()
 
-    with pytest.raises(PlanNotExecutableError) as exc_info:
-        execute_maintenance_pr_plan(plan, client=client)
+    execute_maintenance_pr_plan(plan, client=client)
 
-    assert str(exc_info.value) == "Plan could not be claimed for execution."
-    assert client.calls == []
+    plan.refresh_from_db()
+    assert plan.execution_status == MaintenancePRPlan.ExecutionStatus.SUCCEEDED
 
 
 @pytest.mark.django_db
@@ -729,7 +791,7 @@ def test_executable_queryset_filters():
         confidence=0.92,
         confidence_threshold=0.95,
     )
-    make_plan(
+    assisted = make_plan(
         repository=repository,
         branch_name="gardener/tier-2",
         risk_tier="tier_2_assisted",
@@ -742,7 +804,7 @@ def test_executable_queryset_filters():
     executable = list(
         MaintenancePRPlan.objects.for_session("session_exec").executable()
     )
-    assert executable == [approved, failed]
+    assert executable == [approved, failed, assisted]
 
 
 @pytest.mark.django_db

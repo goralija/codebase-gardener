@@ -21,7 +21,7 @@ Read these docs first:
 
 - Create multiple focused PRs, not one mixed PR, unless the user explicitly requests a batch.
 - Keep each PR small and coherent.
-- Require confidence >= 90% by default.
+- Require confidence >= 85% by default for Tier 1 autonomous PRs.
 - Use stricter evidence for dead-code removal.
 - Never touch protected modules or never-touch paths.
 - Do not auto-merge in the v1 default policy.

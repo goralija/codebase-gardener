@@ -11,6 +11,7 @@ from apps.accounts.models import Membership
 from apps.billing.models import Subscription
 from apps.common.models import AuditEvent
 from apps.maintenance_prs.models import MaintenancePRPlan
+from apps.maintenance_prs.policy import DEFAULT_CONFIDENCE_THRESHOLD
 from apps.sessions.models import GardeningSession
 from apps.triggers.models import RepositoryAutomationPolicy
 from tests.test_product_models import (
@@ -105,7 +106,7 @@ def test_owner_can_view_and_update_repository_automation_policy():
             "recommendations without PR creation."
         ),
         "default_commit_threshold": 10,
-        "confidence_threshold": 0.9,
+        "confidence_threshold": DEFAULT_CONFIDENCE_THRESHOLD,
     }
     assert payload["permissions"] == {
         "can_edit": True,
@@ -252,7 +253,7 @@ def test_manual_trigger_endpoint_accepts_manual_plan_payload(monkeypatch):
                 "category": "complexity_reduction",
                 "risk_tier": "tier_1_autonomous",
                 "confidence": 0.95,
-                "confidence_threshold": 0.90,
+                "confidence_threshold": 0.85,
                 "changed_paths": ["core/views.py", "core/serializers.py"],
                 "pr_body_sections": {
                     "goal": "Reduce complexity.",

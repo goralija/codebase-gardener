@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 
@@ -36,11 +37,6 @@ _TIER_BY_ALLOWED_GROUP = {
 
 _REQUIRED_CHECKS: dict[str, list[str]] = {
     "docs": ["docs_review"],
-    "dependency_patch": ["pytest", "dependency_audit"],
-    "dead_code": ["pytest"],
-    "tests": ["pytest"],
-    "complexity_reduction": ["pytest"],
-    "layer_violation_repair": ["pytest"],
 }
 
 # Per-category base confidence. dead_code uses the signals' own confidence.
@@ -53,7 +49,8 @@ _BASE_CONFIDENCE: dict[str, float] = {
     "dead_code": 0.90,
 }
 
-_CONFIDENCE_THRESHOLD = 0.90
+CONFIDENCE_THRESHOLD_ENV = "GARDENER_CONFIDENCE_THRESHOLD"
+_DEFAULT_CONFIDENCE_THRESHOLD = 0.85
 _MAX_AFFECTED_PATHS = 20
 _MAX_EVIDENCE = 3
 
@@ -158,7 +155,7 @@ def _build_opportunity(
     blocked_by = sorted(set(blocked_by))
 
     confidence = _confidence(category, group_signals)
-    if confidence < _CONFIDENCE_THRESHOLD:
+    if confidence < _confidence_threshold():
         blocked_by = sorted(set(blocked_by + ["below_confidence_threshold"]))
 
     entropy_delta = _expected_entropy_delta(
@@ -178,7 +175,7 @@ def _build_opportunity(
         "affected_paths": affected_paths,
         "blocked_by": blocked_by,
         "expected_entropy_delta": entropy_delta,
-        "required_checks": _REQUIRED_CHECKS.get(category, ["pytest"]),
+        "required_checks": _REQUIRED_CHECKS.get(category, []),
         "evidence": _evidence(group_signals),
     }
 
@@ -210,6 +207,19 @@ def _confidence(category: str, group_signals: list[JsonObject]) -> float:
         if values:
             return _clamp(min(values), 0.0, 1.0)
     return _clamp(_BASE_CONFIDENCE.get(category, 0.6), 0.0, 1.0)
+
+
+def _confidence_threshold() -> float:
+    raw = os.getenv(CONFIDENCE_THRESHOLD_ENV)
+    if raw is None:
+        return _DEFAULT_CONFIDENCE_THRESHOLD
+    try:
+        threshold = float(raw)
+    except ValueError:
+        return _DEFAULT_CONFIDENCE_THRESHOLD
+    if threshold > 1:
+        threshold = threshold / 100
+    return _clamp(threshold, 0.0, 1.0)
 
 
 def _expected_entropy_delta(

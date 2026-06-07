@@ -84,6 +84,7 @@ const recentPrPlanSchema = v.object({
   approval_status: v.string(),
   execution_status: v.string(),
   created_pr_url: v.nullable(v.string()),
+  execution_error: v.optional(v.nullable(v.string())),
   terminal_outcome: v.nullable(v.string()),
   terminal_outcome_at: v.nullable(v.string()),
   confidence: v.number(),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from datetime import timezone as datetime_timezone
 from typing import Any
@@ -10,6 +11,8 @@ from django.utils import timezone
 from apps.analysis.fixtures import load_first_report_fixture
 from apps.sessions.models import GardeningSession
 
+
+logger = logging.getLogger(__name__)
 
 PHASES = (
     ("observe", "Loaded shared fixture repository state."),
@@ -211,6 +214,8 @@ def _select_database_work(
 
 
 def _pending_plan_reason(plan) -> str:
+    if getattr(plan, "execution_error", ""):
+        return plan.execution_error
     if plan.approval_status == "rejected":
         return "Plan was rejected for execution."
     return "Plan is pending approval for autonomous execution."
@@ -299,6 +304,7 @@ def execute_session_pr_plans(
     means pure fixture mode where no DB plans exist for the session.
     """
     from apps.github_app.client import RETRYABLE_STATUS_CODES, GitHubAPIError
+    from apps.maintenance_prs.ai_fixes import AIFixError
     from apps.maintenance_prs.docs_fixes import has_implemented_file_fix
     from apps.maintenance_prs.executor import PRExecutionError, execute_maintenance_pr_plan
     from apps.maintenance_prs.models import MaintenancePRPlan
@@ -324,25 +330,38 @@ def execute_session_pr_plans(
         except GitHubAPIError as exc:
             if exc.status_code in RETRYABLE_STATUS_CODES:
                 raise
-            errors.append(
-                {
-                    "phase": "execute",
-                    "maintenance_pr_plan_id": str(plan.id),
-                    "message": str(exc),
-                }
-            )
+            errors.append(_plan_execution_error(plan, exc))
             continue
-        except PRExecutionError as exc:
-            errors.append(
-                {
-                    "phase": "execute",
-                    "maintenance_pr_plan_id": str(plan.id),
-                    "message": str(exc),
-                }
-            )
+        except (PRExecutionError, AIFixError) as exc:
+            errors.append(_plan_execution_error(plan, exc))
             continue
         executed.append(str(plan.id))
     return executed, errors
+
+
+def _plan_execution_error(plan, exc: Exception) -> dict[str, str]:
+    message = str(exc)
+    logger.warning(
+        "gardening_session.maintenance_pr_plan.execution_failed",
+        extra={
+            "organization_id": str(plan.repository.organization_id),
+            "repository_id": str(plan.repository_id),
+            "gardening_session_id": plan.gardening_session_id,
+            "maintenance_pr_plan_id": str(plan.id),
+            "branch_name": plan.branch_name,
+            "category": plan.category,
+            "risk_tier": plan.risk_tier,
+            "approval_status": plan.approval_status,
+            "execution_status": plan.execution_status,
+            "error_type": exc.__class__.__name__,
+            "execution_error": getattr(plan, "execution_error", "") or message,
+        },
+    )
+    return {
+        "phase": "execute",
+        "maintenance_pr_plan_id": str(plan.id),
+        "message": message,
+    }
 
 
 def _format_timestamp(value: datetime) -> str:

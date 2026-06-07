@@ -285,7 +285,7 @@ function automationPayload({
       pr_creation_status:
         "Repository autonomy mode is Conservative; sessions report recommendations without PR creation.",
       default_commit_threshold: 10,
-      confidence_threshold: 0.9,
+      confidence_threshold: 0.85,
     },
     permissions: {
       can_edit: true,

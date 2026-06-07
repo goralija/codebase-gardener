@@ -4,10 +4,7 @@ from rest_framework.response import Response
 
 from apps.analysis import storage_service
 from apps.accounts.models import Membership
-from apps.billing.services import (
-    AUTONOMOUS_PR_ADD_ON_DISABLED_REASON,
-    autonomous_pr_add_on_enabled,
-)
+from apps.billing.services import autonomous_pr_add_on_enabled
 from apps.common.api import api_error_response
 from apps.common.models import AuditEvent
 from apps.maintenance_prs.manual_plans import (
@@ -160,13 +157,7 @@ def _automation_payload(repository, user):
     policy = RepositoryAutomationPolicy.get_or_create_for_repository(repository)
     add_on_enabled = autonomous_pr_add_on_enabled(repository.organization)
     automation_block_reason = autonomous_pr_execution_block_reason(repository)
-    pr_creation_block_reason = None
-    if automation_block_reason:
-        pr_creation_block_reason = automation_block_reason
-    elif not add_on_enabled:
-        pr_creation_block_reason = AUTONOMOUS_PR_ADD_ON_DISABLED_REASON
-
-    can_create_autonomous_prs = pr_creation_block_reason is None
+    can_create_autonomous_prs = automation_block_reason is None
 
     return {
         "schema_version": "1.0",
@@ -180,7 +171,7 @@ def _automation_payload(repository, user):
             "pr_creation_status": (
                 "Autonomous PR creation is enabled."
                 if can_create_autonomous_prs
-                else pr_creation_block_reason
+                else automation_block_reason
             ),
             "default_commit_threshold": DEFAULT_COMMIT_THRESHOLD,
             "confidence_threshold": DEFAULT_CONFIDENCE_THRESHOLD,
@@ -310,6 +301,7 @@ def _pr_plan_payload(plan: MaintenancePRPlan):
         "approval_status": plan.approval_status,
         "execution_status": plan.execution_status,
         "created_pr_url": plan.created_pr_url or None,
+        "execution_error": plan.execution_error or None,
         "terminal_outcome": plan.terminal_outcome or None,
         "terminal_outcome_at": _timestamp(plan.terminal_outcome_at),
         "confidence": plan.confidence,
