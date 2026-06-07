@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from jsonschema import Draft202012Validator
 from rest_framework.test import APIClient
 
+from apps.analysis.models import RepositoryAnalysis
 from apps.accounts.models import Membership
 from apps.billing.models import Subscription
 from apps.common.models import AuditEvent
@@ -29,8 +30,21 @@ def test_owner_can_view_and_update_repository_automation_policy():
         organization=repository.organization,
         autonomous_pr_add_on_enabled=True,
     )
+    RepositoryAnalysis.objects.create(
+        organization=repository.organization,
+        repository=repository,
+        commit_sha="abc123baseline",
+        source=RepositoryAnalysis.Source.FIRST_SCAN,
+    )
+    RepositoryAnalysis.objects.create(
+        organization=repository.organization,
+        repository=repository,
+        commit_sha="def456current",
+        source=RepositoryAnalysis.Source.SESSION,
+    )
     GardeningSession.objects.create(
         repository=repository,
+        status=GardeningSession.Status.COMPLETED,
         trigger={"type": "schedule", "subject_id": "2026-06-06"},
     )
     MaintenancePRPlan.objects.create(
@@ -44,6 +58,22 @@ def test_owner_can_view_and_update_repository_automation_policy():
         changed_paths=["docs/api.md"],
         pr_body_sections={"goal": "Refresh stale docs."},
         required_checks=["docs_review"],
+        created_pr_url="https://github.com/acme/api/pull/12",
+        terminal_outcome=MaintenancePRPlan.TerminalOutcome.MERGED,
+    )
+    MaintenancePRPlan.objects.create(
+        repository=repository,
+        gardening_session_id="session-1",
+        branch_name="gardener/protected-auth",
+        title="Refactor protected auth",
+        category="refactoring",
+        risk_tier="tier_3_advisory",
+        confidence=0.55,
+        changed_paths=["apps/auth/models.py"],
+        pr_body_sections={"goal": "Refactor auth."},
+        required_checks=["pytest"],
+        blocked=True,
+        block_reason="Touches protected auth module.",
     )
     client = APIClient()
     client.force_authenticate(user=owner)
@@ -81,8 +111,20 @@ def test_owner_can_view_and_update_repository_automation_policy():
         "can_edit": True,
         "can_trigger_manual_session": True,
     }
+    latest_report_at = payload["stats"]["latest_report_at"]
+    assert latest_report_at.endswith("Z")
+    assert {**payload["stats"], "latest_report_at": None} == {
+        "report_count": 2,
+        "session_count": 1,
+        "completed_session_count": 1,
+        "pr_plan_count": 2,
+        "created_pr_count": 1,
+        "merged_pr_count": 1,
+        "blocked_pr_count": 1,
+        "latest_report_at": None,
+    }
     assert payload["recent_sessions"][0]["trigger"]["type"] == "schedule"
-    assert payload["recent_pr_plans"][0]["title"] == "Refresh docs"
+    assert payload["recent_pr_plans"][0]["title"] == "Refactor protected auth"
 
     patch_response = client.patch(
         automation_url(repository),

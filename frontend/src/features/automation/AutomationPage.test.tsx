@@ -378,6 +378,16 @@ function automationPayload(repository = repositoryPayload()) {
       source: "first_scan",
       promoted_at: "2026-06-06T08:00:00Z",
     },
+    stats: {
+      report_count: 2,
+      session_count: 1,
+      completed_session_count: 1,
+      pr_plan_count: 1,
+      created_pr_count: 1,
+      merged_pr_count: 1,
+      blocked_pr_count: 0,
+      latest_report_at: "2026-06-06T08:02:00Z",
+    },
     policy: {
       id: "policy-1",
       autonomy_mode: "conservative",

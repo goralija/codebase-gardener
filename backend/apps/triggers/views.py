@@ -152,6 +152,7 @@ def _automation_payload(repository, user):
         "schema_version": "1.0",
         "repository": _repository_payload(repository),
         "baseline": _baseline_payload(repository),
+        "stats": _repository_stats_payload(repository),
         "policy": RepositoryAutomationPolicySerializer(policy).data,
         "effective": {
             "autonomous_pr_add_on_enabled": add_on_enabled,
@@ -231,6 +232,30 @@ def _baseline_payload(repository):
         "commit_sha": baseline.commit_sha,
         "source": baseline.source,
         "promoted_at": _timestamp(baseline.baseline_promoted_at),
+    }
+
+
+def _repository_stats_payload(repository):
+    analyses = repository.analyses
+    sessions = repository.gardening_sessions
+    pr_plans = repository.maintenance_pr_plans
+    latest_report_at = (
+        analyses.order_by("-created_at").values_list("created_at", flat=True).first()
+    )
+
+    return {
+        "report_count": analyses.count(),
+        "session_count": sessions.count(),
+        "completed_session_count": sessions.filter(
+            status=GardeningSession.Status.COMPLETED
+        ).count(),
+        "pr_plan_count": pr_plans.count(),
+        "created_pr_count": pr_plans.exclude(created_pr_url="").count(),
+        "merged_pr_count": pr_plans.filter(
+            terminal_outcome=MaintenancePRPlan.TerminalOutcome.MERGED
+        ).count(),
+        "blocked_pr_count": pr_plans.filter(blocked=True).count(),
+        "latest_report_at": _timestamp(latest_report_at),
     }
 
 
