@@ -1,5 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -99,15 +105,25 @@ describe("AutomationPage", () => {
     expect(await screen.findByText("acme/api")).toBeInTheDocument()
     expect(await screen.findByText("Autonomous PR gate")).toBeInTheDocument()
     expect(screen.getByLabelText("Autonomous PR add-on")).toBeChecked()
-    expect(screen.getByLabelText("Commit threshold")).toHaveValue(10)
-    expect(screen.getByRole("link", { name: "abc123baseli" })).toHaveAttribute(
-      "href",
-      "/report?repositoryId=repo-1&baseline=1"
+    const commitThresholdTrigger = screen
+      .getByLabelText("Commit threshold trigger")
+      .closest("div")
+    expect(commitThresholdTrigger).not.toBeNull()
+    const commitThresholdInput = within(commitThresholdTrigger!).getByRole(
+      "spinbutton",
+      { name: "Commit threshold" }
     )
+    expect(commitThresholdInput).toHaveValue(10)
+    expect(
+      screen.getByRole("link", { name: /First scan report/ })
+    ).toHaveAttribute("href", "/report?repositoryId=repo-1&baseline=1")
+    expect(
+      screen.queryByRole("link", { name: "abc123baseli" })
+    ).not.toBeInTheDocument()
     expect(screen.getByText("Refresh docs")).toBeInTheDocument()
 
     await user.click(screen.getByLabelText(/Schedule/))
-    fireEvent.change(screen.getByLabelText("Commit threshold"), {
+    fireEvent.change(commitThresholdInput, {
       target: { value: "3" },
     })
     await user.click(screen.getByRole("button", { name: "Save" }))
