@@ -10,6 +10,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { Icon } from "@/cockpit/icon"
 import { entColor, fmt, relTime, shortTime } from "@/cockpit/format"
 import { triggerRepositorySession } from "@/features/automation/automation-api"
+import { deleteManagedRepository } from "@/features/github-onboarding/github-onboarding-api"
 import {
   useAutomation,
   useRepoReport,
@@ -54,6 +55,7 @@ const REPO_TABS = [
   { icon: "TerminalSquare", id: "sessions", label: "Sessions" },
   { icon: "GitPullRequest", id: "prplans", label: "PR Plans" },
   { icon: "SlidersHorizontal", id: "automation", label: "Automation" },
+  { icon: "Settings", id: "settings", label: "Settings" },
 ]
 
 export function RepoDetailPage({
@@ -78,6 +80,16 @@ export function RepoDetailPage({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cockpit", "automation"] })
       queryClient.invalidateQueries({ queryKey: ["cockpit", "report", repoId] })
+    },
+  })
+
+  const removeRepo = useMutation({
+    mutationFn: () => deleteManagedRepository(organization?.id ?? "", repoId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["cockpit", "repositories", organization?.id],
+      })
+      navigate({ to: "/repos" })
     },
   })
 
@@ -297,7 +309,18 @@ export function RepoDetailPage({
         <RepoTab
           automation={automationQuery.data}
           model={model}
+          onRemove={() => {
+            if (
+              window.confirm(
+                `Permanently remove ${model.name} and all stored Gardener data for it? This cannot be undone.`
+              )
+            ) {
+              removeRepo.mutate()
+            }
+          }}
           organizationId={organization?.id ?? ""}
+          removeError={removeRepo.isError}
+          removing={removeRepo.isPending}
           report={report}
           setTab={setTab}
           tab={tab}
@@ -314,6 +337,9 @@ function RepoTab({
   automation,
   organizationId,
   setTab,
+  onRemove,
+  removing,
+  removeError,
 }: {
   tab: string
   model: RepoModel
@@ -321,6 +347,9 @@ function RepoTab({
   automation: ReturnType<typeof useAutomation>["data"]
   organizationId: string
   setTab: (t: string) => void
+  onRemove: () => void
+  removing: boolean
+  removeError: boolean
 }) {
   const repoName = () => model.name
 
@@ -344,6 +373,18 @@ function RepoTab({
     const sessions = automation ? sessionsFromAutomation(automation) : []
     return (
       <SessionsView repoName={repoName} sessions={sessions} showRepo={false} />
+    )
+  }
+
+  if (tab === "settings") {
+    return (
+      <div style={{ display: "grid", gap: 16 }}>
+        <RemoveRepoCard
+          onRemove={onRemove}
+          removeError={removeError}
+          removing={removing}
+        />
+      </div>
     )
   }
 
@@ -632,6 +673,55 @@ function RepoSummary({
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+function RemoveRepoCard({
+  onRemove,
+  removing,
+  removeError,
+}: {
+  onRemove: () => void
+  removing: boolean
+  removeError: boolean
+}) {
+  return (
+    <div
+      className="card pad"
+      style={{ borderColor: "var(--red-bd, var(--border))" }}
+    >
+      <div className="sect-title mb8" style={{ color: "var(--red)" }}>
+        Remove repository
+      </div>
+      <p className="sm muted mb12" style={{ lineHeight: 1.5 }}>
+        Untie this repository from Codebase Gardener. Stored reports, sessions,
+        and PR plans are permanently deleted. This does not uninstall the GitHub
+        App.
+      </p>
+      {removeError && (
+        <div className="row gap6 sm mb8" style={{ color: "var(--red)" }}>
+          <Icon name="CircleX" size={14} />
+          Could not remove repository. Try again.
+        </div>
+      )}
+      <button
+        className="btn"
+        disabled={removing}
+        onClick={onRemove}
+        style={{
+          borderColor: "var(--red-bd, var(--red))",
+          color: "var(--red)",
+        }}
+        type="button"
+      >
+        <Icon
+          className={removing ? "spin" : ""}
+          name={removing ? "Loader" : "Trash2"}
+          size={14}
+        />
+        {removing ? "Removing…" : "Untie repository"}
+      </button>
     </div>
   )
 }

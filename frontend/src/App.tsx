@@ -1,5 +1,10 @@
 import type { ReactNode } from "react"
-import { useQueries, useQuery } from "@tanstack/react-query"
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import {
   AlertTriangle,
   CheckCircle2,
@@ -10,6 +15,7 @@ import {
   GitPullRequest,
   Gauge,
   Settings,
+  Trash2,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -18,6 +24,7 @@ import {
   type RepositoryAutomationResponse,
 } from "@/features/automation/automation-api"
 import {
+  deleteManagedRepository,
   fetchOrganizationRepositories,
   fetchOrganizations,
   isGithubOnboardingAuthenticationRequired,
@@ -34,6 +41,7 @@ type RepositoryStatsView = {
 }
 
 export function App() {
+  const queryClient = useQueryClient()
   const organizationsQuery = useQuery({
     queryKey: ["overview", "organizations"],
     queryFn: () => fetchOrganizations(),
@@ -85,6 +93,25 @@ export function App() {
   const isAuthenticationRequired = isGithubOnboardingAuthenticationRequired(
     organizationsQuery.error
   )
+  const deleteRepositoryMutation = useMutation({
+    mutationFn: (repository: ManagedRepository) =>
+      deleteManagedRepository(selectedOrganization?.id ?? "", repository.id),
+    onSuccess: async () => {
+      if (!selectedOrganization?.id) {
+        return
+      }
+      await queryClient.invalidateQueries({
+        queryKey: ["overview", "repositories", selectedOrganization.id],
+      })
+      await queryClient.invalidateQueries({
+        queryKey: [
+          "overview",
+          "repository-automation",
+          selectedOrganization.id,
+        ],
+      })
+    },
+  })
 
   if (organizationsQuery.isLoading) {
     return (
@@ -215,7 +242,22 @@ export function App() {
           </div>
 
           <RepositoryList
+            deleteError={deleteRepositoryMutation.isError}
+            deletingRepositoryId={
+              deleteRepositoryMutation.isPending
+                ? (deleteRepositoryMutation.variables?.id ?? null)
+                : null
+            }
             isLoading={repositoriesQuery.isLoading}
+            onDeleteRepository={(repository) => {
+              if (
+                window.confirm(
+                  `Permanently remove ${repository.full_name} and all stored Gardener data for it? This cannot be undone.`
+                )
+              ) {
+                deleteRepositoryMutation.mutate(repository)
+              }
+            }}
             repositories={repositories}
             statsByRepositoryId={repositoryStatsById}
           />
@@ -253,11 +295,17 @@ function OverviewLink({
 }
 
 function RepositoryList({
+  deleteError,
+  deletingRepositoryId,
   isLoading,
+  onDeleteRepository,
   repositories,
   statsByRepositoryId,
 }: {
+  deleteError: boolean
+  deletingRepositoryId: string | null
   isLoading: boolean
+  onDeleteRepository: (repository: ManagedRepository) => void
   repositories: ManagedRepository[]
   statsByRepositoryId: Map<string, RepositoryStatsView>
 }) {
@@ -279,66 +327,94 @@ function RepositoryList({
   }
 
   return (
-    <div className="mt-5 divide-y rounded-md border">
-      {repositories.map((repository) => (
-        <div
-          className="grid gap-4 px-3 py-4 text-sm sm:grid-cols-2 lg:grid-cols-[minmax(0,1.35fr)_8rem_8rem_8rem_minmax(0,1fr)]"
-          key={repository.id}
-        >
-          <div className="min-w-0">
-            <a
-              className="block truncate font-medium underline-offset-4 hover:underline"
-              href={repositoryReportHref(
-                repository.id,
-                statsByRepositoryId.get(repository.id)?.hasBaseline ?? false
-              )}
-            >
-              {repository.full_name}
-            </a>
-            <p className="mt-1 truncate text-xs text-muted-foreground">
-              {repository.default_branch || "unknown"} branch
-            </p>
-          </div>
-          <RepositoryStat
-            detail={latestReportLabel(statsByRepositoryId.get(repository.id))}
-            label="Reports"
-            value={repositoryCountLabel(
-              statsByRepositoryId.get(repository.id),
-              "report_count",
-              "report",
-              "reports"
-            )}
-          />
-          <RepositoryStat
-            detail={prOutcomeLabel(statsByRepositoryId.get(repository.id))}
-            label="PRs"
-            value={repositoryCountLabel(
-              statsByRepositoryId.get(repository.id),
-              "created_pr_count",
-              "PR",
-              "PRs"
-            )}
-          />
-          <RepositoryStat
-            detail={completedSessionLabel(
-              statsByRepositoryId.get(repository.id)
-            )}
-            label="Sessions"
-            value={repositoryCountLabel(
-              statsByRepositoryId.get(repository.id),
-              "session_count",
-              "session",
-              "sessions"
-            )}
-          />
-          <RepositoryStat
-            detail={prPlanLabel(statsByRepositoryId.get(repository.id))}
-            label="Status"
-            value={baselineLabel(statsByRepositoryId.get(repository.id))}
-          />
+    <>
+      {deleteError ? (
+        <div className="mt-5 flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          <AlertTriangle className="size-4" />
+          Repository removal failed
         </div>
-      ))}
-    </div>
+      ) : null}
+      <div className="mt-5 divide-y rounded-md border">
+        {repositories.map((repository) => {
+          const isDeleting = deletingRepositoryId === repository.id
+          return (
+            <div
+              className="grid gap-4 px-3 py-4 text-sm sm:grid-cols-2 lg:grid-cols-[minmax(0,1.35fr)_8rem_8rem_8rem_minmax(0,1fr)_2.5rem]"
+              key={repository.id}
+            >
+              <div className="min-w-0">
+                <a
+                  className="block truncate font-medium underline-offset-4 hover:underline"
+                  href={repositoryReportHref(
+                    repository.id,
+                    statsByRepositoryId.get(repository.id)?.hasBaseline ?? false
+                  )}
+                >
+                  {repository.full_name}
+                </a>
+                <p className="mt-1 truncate text-xs text-muted-foreground">
+                  {repository.default_branch || "unknown"} branch
+                </p>
+              </div>
+              <RepositoryStat
+                detail={latestReportLabel(statsByRepositoryId.get(repository.id))}
+                label="Reports"
+                value={repositoryCountLabel(
+                  statsByRepositoryId.get(repository.id),
+                  "report_count",
+                  "report",
+                  "reports"
+                )}
+              />
+              <RepositoryStat
+                detail={prOutcomeLabel(statsByRepositoryId.get(repository.id))}
+                label="PRs"
+                value={repositoryCountLabel(
+                  statsByRepositoryId.get(repository.id),
+                  "created_pr_count",
+                  "PR",
+                  "PRs"
+                )}
+              />
+              <RepositoryStat
+                detail={completedSessionLabel(
+                  statsByRepositoryId.get(repository.id)
+                )}
+                label="Sessions"
+                value={repositoryCountLabel(
+                  statsByRepositoryId.get(repository.id),
+                  "session_count",
+                  "session",
+                  "sessions"
+                )}
+              />
+              <RepositoryStat
+                detail={prPlanLabel(statsByRepositoryId.get(repository.id))}
+                label="Status"
+                value={baselineLabel(statsByRepositoryId.get(repository.id))}
+              />
+              <div className="flex items-start justify-end">
+                <Button
+                  aria-label={`Remove ${repository.full_name}`}
+                  disabled={isDeleting}
+                  onClick={() => onDeleteRepository(repository)}
+                  size="icon"
+                  title={`Remove ${repository.full_name}`}
+                  type="button"
+                  variant="ghost"
+                >
+                  {isDeleting ? (
+                    <CircleDashed className="animate-spin" />
+                  ) : (
+                    <Trash2 />
+                  )}
+                </Button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </>
   )
 }
 

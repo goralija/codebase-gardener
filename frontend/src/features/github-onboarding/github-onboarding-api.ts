@@ -208,6 +208,17 @@ export async function fetchOrganizationRepositories(
   )
 }
 
+export async function deleteManagedRepository(
+  organizationId: string,
+  repositoryId: string,
+  { apiBaseUrl, fetcher = fetch }: FetchOptions = {}
+) {
+  return requestNoContent(
+    `/organizations/${organizationId}/repositories/${repositoryId}/`,
+    { apiBaseUrl, fetcher, method: "DELETE" }
+  )
+}
+
 export async function fetchOrganizationBilling(
   organizationId: string,
   { apiBaseUrl, fetcher = fetch }: FetchOptions = {}
@@ -249,7 +260,7 @@ async function requestJson<T>(
     method?: "GET" | "PATCH"
   } = {}
 ): Promise<T> {
-  const headers = requestHeaders(body)
+  const headers = requestHeaders(body, method)
   const response = await fetcher(
     buildGithubOnboardingApiUrl(path, apiBaseUrl),
     {
@@ -283,6 +294,34 @@ async function requestJson<T>(
   }
 }
 
+async function requestNoContent(
+  path: string,
+  {
+    apiBaseUrl,
+    fetcher = fetch,
+    method,
+  }: FetchOptions & {
+    method: "DELETE"
+  }
+): Promise<void> {
+  const response = await fetcher(
+    buildGithubOnboardingApiUrl(path, apiBaseUrl),
+    {
+      credentials: "include",
+      headers: requestHeaders(undefined, method),
+      method,
+    }
+  )
+
+  if (!response.ok) {
+    throw new GithubOnboardingRequestError(
+      response.status,
+      response.statusText,
+      await readErrorCode(response)
+    )
+  }
+}
+
 async function readErrorCode(response: Response) {
   try {
     const payload: unknown = await response.clone().json()
@@ -301,12 +340,14 @@ async function readErrorCode(response: Response) {
   return undefined
 }
 
-function requestHeaders(body: unknown) {
+function requestHeaders(body: unknown, method: "DELETE" | "GET" | "PATCH") {
   const headers: Record<string, string> = {
     Accept: "application/json",
   }
   if (body != null) {
     headers["Content-Type"] = "application/json"
+  }
+  if (method !== "GET") {
     const csrfToken = readCookie(CSRF_COOKIE_NAME)
     if (csrfToken) {
       headers["X-CSRFToken"] = csrfToken

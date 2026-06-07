@@ -27,6 +27,10 @@ class AuditEvent(UUIDTimestampedModel):
             "managed_repository_unselected",
             "Managed repository unselected",
         )
+        MANAGED_REPOSITORY_HARD_DELETED = (
+            "managed_repository_hard_deleted",
+            "Managed repository hard deleted",
+        )
         MAINTENANCE_PR_CREATED = (
             "maintenance_pr_created",
             "Maintenance PR created",
