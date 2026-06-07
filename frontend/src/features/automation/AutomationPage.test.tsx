@@ -60,18 +60,32 @@ function renderPage() {
   )
 }
 
-<<<<<<< Updated upstream
-function mockAutomationFetch(repositories = [repositoryPayload()]) {
+type RepositoryPayload = ReturnType<typeof repositoryPayload>
+type AutomationPayload = ReturnType<typeof automationPayload>
+
+function isAutomationPayload(value: unknown): value is AutomationPayload {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "schema_version" in value &&
+      "policy" in value
+  )
+}
+
+function mockAutomationFetch(
+  input: RepositoryPayload[] | AutomationPayload = [repositoryPayload()]
+) {
+  const repositories = Array.isArray(input) ? input : [repositoryPayload()]
   const automationStates = new Map(
     repositories.map((repository) => [
       repository.id,
       automationPayload(repository),
     ])
   )
-=======
-function mockAutomationFetch(initialAutomationState = automationPayload()) {
-  let automationState = initialAutomationState
->>>>>>> Stashed changes
+  if (isAutomationPayload(input)) {
+    automationStates.set(input.repository.id, input)
+  }
+
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -314,7 +328,6 @@ describe("AutomationPage", () => {
     })
   })
 
-<<<<<<< Updated upstream
   it("refreshes active recent session statuses without a page reload", async () => {
     const fetchSequence = mockAutomationFetchSequence([
       automationWithSession({
@@ -342,7 +355,8 @@ describe("AutomationPage", () => {
     expect(screen.getByText("def456curren")).toBeInTheDocument()
     expect(screen.getByText("Drift")).toBeInTheDocument()
     expect(fetchSequence.automationReadCount()).toBeGreaterThanOrEqual(2)
-=======
+  })
+
   it("labels the first repository run as a first scan", async () => {
     mockAutomationFetch({
       ...automationPayload(),
@@ -363,7 +377,6 @@ describe("AutomationPage", () => {
     expect(
       screen.getByText(/The first scan promotes a baseline/)
     ).toBeInTheDocument()
->>>>>>> Stashed changes
   })
 })
 

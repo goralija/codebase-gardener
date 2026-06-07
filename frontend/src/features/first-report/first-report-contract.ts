@@ -181,6 +181,7 @@ const maintenancePrPlanSchema = v.object({
   title: v.string(),
   risk_tier: v.string(),
   confidence: ratioSchema,
+  confidence_threshold: v.optional(ratioSchema),
   changed_paths: stringArraySchema,
   pr_body_sections: v.object({
     goal: v.string(),
