@@ -115,6 +115,36 @@ def test_dead_code_parser_extracts_final_json_payload_from_noisy_stdout():
     assert parsed == [{"kind": "unused_export", "file_path": "src/a.py"}]
 
 
+def test_test_gap_parser_ignores_source_truth_docs_and_existing_tests():
+    health = {
+        "metrics": [
+            {"file_path": "GARDENER.md", "has_test_file": False},
+            {"file_path": "docs/guide.md", "has_test_file": False},
+            {"file_path": "tests/test_service.py", "has_test_file": False},
+            {"file_path": "src/service.py", "has_test_file": False},
+        ],
+        "findings": [
+            {
+                "biomarker_type": "untested_hotspot",
+                "file_path": "GARDENER.md",
+                "reason": "No paired test.",
+            },
+            {
+                "biomarker_type": "untested_hotspot",
+                "file_path": "frontend/src/use-report.ts",
+                "reason": "No paired test.",
+            },
+        ],
+    }
+
+    gaps = repowise._test_gaps(health)
+
+    assert [gap["path"] for gap in gaps] == [
+        "src/service.py",
+        "frontend/src/use-report.ts",
+    ]
+
+
 def test_snapshot_extracts_dependency_ci_ownership_and_graph_cycle_signals(tmp_path: Path):
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
