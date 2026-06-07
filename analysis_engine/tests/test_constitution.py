@@ -98,6 +98,35 @@ def test_dead_code_removal_phrase_maps_to_dead_code_category(tmp_path):
     assert c["allowed_fixes"]["autonomous"] == ["dead_code"]
 
 
+def test_path_only_protected_module_uses_path_as_name(tmp_path):
+    (tmp_path / "GARDENER.md").write_text(
+        "\n".join(
+            [
+                "# GARDENER.md",
+                "",
+                "## Protected Modules",
+                "",
+                "- `backend/app/**` because it appears security-sensitive or business-critical.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    c = build_repository_constitution(
+        tmp_path,
+        repository_id="repo_path_protected",
+        commit_sha="abc123",
+    )
+
+    assert c["protected_modules"] == [
+        {
+            "name": "backend/app/**",
+            "paths": ["backend/app/**"],
+            "reason": "it appears security-sensitive or business-critical.",
+        }
+    ]
+
+
 def test_boundary_rule_carries_file_evidence_with_section():
     c = _build("monorepo_repo")
 

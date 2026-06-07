@@ -28,8 +28,8 @@ promoted baseline. Automated triggers plan only from new or worsened drift.
 Manual triggers first use drift-relevant opportunities; if no drift-relevant
 opportunities exist, they may plan from current maintenance opportunities not
 already covered by an active unblocked Gardener PR plan. All PR creation still
-requires repository autonomy, add-on, constitution, protected-path, confidence,
-and implemented-fix gates.
+requires repository autonomy, constitution, protected-path, confidence, and
+implemented-fix gates.
 
 Every completed non-first-scan session promotes its current analysis as the
 latest relevant baseline. After all Gardener-authored PRs from that session are
@@ -86,17 +86,18 @@ Gardener must not directly modify these by default:
 
 ## Confidence policy
 
-- Creating any PR requires confidence >= 90 percent unless the Repository Constitution sets a stricter threshold.
+- Creating any autonomous Tier 1 PR requires confidence >= 85 percent unless the Repository Constitution sets a stricter threshold.
 - Dead-code removal should require stronger evidence than ordinary Tier 1 work.
 - Confidence must be explained in the PR body.
 - If confidence is below threshold, create a recommendation only.
 
 ## PR rules
 
-- If an organization's autonomous PR add-on is disabled, sessions may still create visible blocked PR plans and recommendations, but workers must not create GitHub PRs.
+- Billing add-on state does not block PR creation; repository autonomy policy, constitution rules, confidence, protected paths, and implemented-fix support are the execution gates.
 - Prefer multiple focused PRs that do not interfere with one another.
 - Do not mix unrelated maintenance categories in one PR.
 - Include evidence, risk tier, confidence, expected entropy impact, changed paths, and verification.
+- Required checks must come from repository source truth, detected configuration, or semantic review gates; do not invent stack-specific commands such as `pytest` without evidence the repository uses them.
 - For drift-aware sessions, PR body evidence must include the baseline commit, current commit, and why the opportunity is new or worse since the baseline.
 - Do not auto-merge in the v1 default policy.
 - If a session produces conflicting PR candidates, rank them and defer lower-priority work.
@@ -105,7 +106,7 @@ Gardener must not directly modify these by default:
 
 - Docs maintenance fixes use a deterministic author; other categories (dead-code, complexity, refactoring, layer violations, tests) are authored by an LLM (OpenRouter) that produces a minimal, validated edit.
 - AI edits are validated before a PR is opened (syntax/AST parse and a bounded-change guard); oversized files are chunked and analyzed with bounded parallel workers, and a failed validation fails the plan and creates no PR.
-- A session approves and executes tier_1 autonomous plans that have an implemented file fix, up to its per-session cap; PRs are labeled by risk tier and confidence; no auto-merge.
+- A session approves and executes Tier 1 autonomous plans as normal PRs and Tier 2 assisted plans as draft PRs when they have an implemented file fix, up to its per-session cap; PRs are labeled by risk tier and confidence; no auto-merge.
 - The user is notified on session completion with the authored PRs and their risk tiers.
 
 ## Learning rules

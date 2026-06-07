@@ -43,9 +43,9 @@
 - ComplexityMultiplier: multiplier based on LOC, modules, and contributors.
 - ComplexityMultiplier v1 uses equal-third weighting across LOC, module count, and contributor count. Input bands are LOC `<=25k / <=100k / <=250k / >250k`, modules `<=3 / <=8 / <=20 / >20`, and contributors `<=5 / <=20 / <=50 / >50`; band scores are `0 / 0.33 / 0.66 / 1.0`, and the final multiplier is `1 + 2 * weighted_score`, capped by the `1.0x` to `3.0x` range.
 - If analysis-derived complexity inputs are missing or partial, Gardener shows the known inputs but keeps the active multiplier neutral at `1.0x`.
-- Subscription: one organization-scoped billing plan. V1 uses plan code `managed_repository_base`, currency `USD`, a default base price of `$20` per managed repository per month, and a flat `$2` autonomous PR add-on per organization per month. The autonomous PR add-on defaults off until an owner, admin, or internal staff user enables it.
+- Subscription: one organization-scoped billing plan. V1 uses plan code `managed_repository_base`, currency `USD`, a default base price of `$20` per managed repository per month, and a flat `$2` autonomous PR add-on per organization per month. The autonomous PR add-on affects billing estimates and can be toggled by an owner, admin, or internal staff user, but repository automation policy controls PR creation.
 - Monthly billing estimate: sum each active managed repository's base price times its current complexity multiplier, rounded per repository to cents, then add the flat autonomous PR add-on amount when enabled.
-- If the autonomous PR add-on is disabled, Gardener may still analyze, report, and create visible blocked PR plans, but hosted workers must not create GitHub maintenance PRs for that organization.
+- Billing add-on state does not block hosted workers from creating GitHub maintenance PRs; repository autonomy mode, Repository Constitution rules, confidence, protected paths, and implemented-fix support remain the PR creation gates.
 - ROIEstimate: engineering hours saved, hotspots removed before incidents, and maintainability improvements.
 
 ## Relationship rules

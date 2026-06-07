@@ -223,6 +223,29 @@ def test_snapshot_extracts_dependency_ci_ownership_and_graph_cycle_signals(tmp_p
     _validate_analysis_snapshot(snapshot)
 
 
+def test_dependency_risks_ignore_temporal_coupling_without_static_dependency(tmp_path: Path):
+    repo_path = tmp_path / "repo"
+    (repo_path / "backend" / "app" / "api" / "v1").mkdir(parents=True)
+    (repo_path / "backend" / "app" / "api" / "v1" / "router.py").write_text(
+        "router = object()\n",
+        encoding="utf-8",
+    )
+    health = {
+        "findings": [
+            {
+                "biomarker_type": "temporal_coupling",
+                "file_path": "backend/app/api/v1/router.py",
+                "reason": (
+                    "frontend/src/services/api.ts co-changes with this file 7 times "
+                    "(58% of shared commits) but no static dependency exists"
+                ),
+            }
+        ]
+    }
+
+    assert repowise._dependency_risks(repo_path, health) == []
+
+
 def _copy_fixture_as_git_repo(name: str, tmp_path: Path) -> Path:
     fixture = load_fixture_repository(name)
     repo_path = tmp_path / name

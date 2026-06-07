@@ -392,7 +392,7 @@ def _evidence(path: Any, summary: str) -> list[JsonObject]:
 
 _ARCH_KEYWORDS = ("cycle", "coupling", "layer", "boundary")
 _DEPENDENCY_KEYWORDS = (
-    "dependency",
+    "manifest",
     "package",
     "lockfile",
     "outdated",

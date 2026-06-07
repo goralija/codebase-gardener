@@ -69,8 +69,8 @@ class FakeGitHubClient:
         self.put_content = content
         return {"commit": {"sha": "commit_sha"}}
 
-    def create_pull_request(self, owner, repo, *, title, head, base, body, token):
-        self.calls.append(("create_pull_request", owner, repo, head, base))
+    def create_pull_request(self, owner, repo, *, title, head, base, body, token, draft=False):
+        self.calls.append(("create_pull_request", owner, repo, head, base, draft))
         if self.create_pr_error is not None:
             raise self.create_pr_error
         if self.pr_response is not None:

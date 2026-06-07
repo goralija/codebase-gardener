@@ -19,9 +19,6 @@ LOC_BANDS = (25_000, 100_000, 250_000)
 MODULE_BANDS = (3, 8, 20)
 CONTRIBUTOR_BANDS = (5, 20, 50)
 SCORE_VALUES = (0.0, 0.33, 0.66, 1.0)
-AUTONOMOUS_PR_ADD_ON_DISABLED_REASON = (
-    "Autonomous PR add-on is disabled for this organization."
-)
 
 
 @dataclass(frozen=True)

@@ -109,7 +109,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "title", "blocked", "block_reason", "approval_status", "execution_status", "created_pr_url", "terminal_outcome", "terminal_outcome_at", "confidence", "confidence_threshold", "created_at"],
+        "required": ["id", "title", "blocked", "block_reason", "approval_status", "execution_status", "created_pr_url", "execution_error", "terminal_outcome", "terminal_outcome_at", "confidence", "confidence_threshold", "created_at"],
         "properties": {
           "id": { "type": "string" },
           "title": { "type": "string" },
@@ -118,6 +118,7 @@
           "approval_status": { "type": "string" },
           "execution_status": { "type": "string" },
           "created_pr_url": { "type": ["string", "null"] },
+          "execution_error": { "type": ["string", "null"] },
           "terminal_outcome": { "type": ["string", "null"] },
           "terminal_outcome_at": { "type": ["string", "null"], "format": "date-time" },
           "confidence": { "type": "number", "minimum": 0, "maximum": 1 },

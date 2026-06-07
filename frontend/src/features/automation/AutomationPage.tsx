@@ -717,7 +717,7 @@ function GatePanel({
         ) : (
           <AlertTriangle className="size-4 text-destructive" />
         )}
-        <h2>Autonomous PR gate</h2>
+        <h2>Autonomous PR readiness</h2>
       </div>
       <div className="mt-4 rounded-md border bg-background p-3">
         <div className="text-sm font-medium">
@@ -733,7 +733,7 @@ function GatePanel({
           <span>
             <span className="block font-medium">Autonomous PR add-on</span>
             <span className="block text-xs text-muted-foreground">
-              Organization gate
+              Billing option
             </span>
           </span>
           <input
@@ -860,6 +860,8 @@ function RecentPrPlans({
                     ? formatStatus(plan.terminal_outcome)
                     : plan.blocked
                       ? plan.block_reason
+                      : plan.execution_status === "failed" && plan.execution_error
+                        ? plan.execution_error
                       : `${formatPercent(plan.confidence)} confidence`}
                 </div>
               </div>

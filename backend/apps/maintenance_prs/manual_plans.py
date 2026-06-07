@@ -4,13 +4,14 @@ from collections.abc import Iterable
 from typing import Any
 
 from apps.maintenance_prs.models import MaintenancePRPlan
+from apps.maintenance_prs.policy import DEFAULT_CONFIDENCE_THRESHOLD
 
 DEFAULT_MANUAL_TITLE = "Manual AI maintenance"
 DEFAULT_MANUAL_CATEGORY = "complexity_reduction"
 DEFAULT_MANUAL_RISK_TIER = "tier_1_autonomous"
 DEFAULT_MANUAL_CONFIDENCE = 0.95
-DEFAULT_MANUAL_CONFIDENCE_THRESHOLD = 0.90
-DEFAULT_MANUAL_REQUIRED_CHECKS = ["pytest"]
+DEFAULT_MANUAL_CONFIDENCE_THRESHOLD = DEFAULT_CONFIDENCE_THRESHOLD
+DEFAULT_MANUAL_REQUIRED_CHECKS: list[str] = []
 DEFAULT_MANUAL_PR_BODY_SECTIONS = {
     "goal": "Manual maintenance run.",
     "evidence": "Manual trigger payload.",

@@ -83,7 +83,10 @@ export function ArchitectureConstitutionPanels({
 
         <div className="mt-4 grid gap-4">
           {constitution.protectedModules.map((module) => (
-            <div key={module.name} className="border-b pb-3 last:border-b-0">
+            <div
+              key={`${module.name}-${module.paths.join("|")}`}
+              className="border-b pb-3 last:border-b-0"
+            >
               <div className="flex flex-wrap items-center gap-2 sm:justify-between">
                 <span className="font-medium">{module.name}</span>
                 <Badge>protected module</Badge>

@@ -168,6 +168,7 @@ export const STATUS_TONE: Record<string, string> = {
   pending: "slate",
   queued: "slate",
   ready: "teal",
+  rejected: "red",
   reverted: "red",
   running: "teal",
 }
@@ -179,10 +180,14 @@ export const STATUS_ICON: Record<string, string> = {
   failed: "CircleX",
   merged: "GitMerge",
   open: "GitPullRequest",
+  pending: "CircleDot",
   ready: "CircleDot",
+  rejected: "CircleX",
   reverted: "RotateCcw",
   running: "Loader",
 }
+
+export const DEFAULT_CONFIDENCE_FLOOR = 85
 
 export type RepoModel = {
   id: string
@@ -361,7 +366,8 @@ export function oppsFromReport(
   report: FirstReport,
   automation?: RepositoryAutomationResponse
 ): OppModel[] {
-  const confidenceFloor = pct(automation?.effective.confidence_threshold) ?? 90
+  const confidenceFloor =
+    pct(automation?.effective.confidence_threshold) ?? DEFAULT_CONFIDENCE_FLOOR
   return report.maintenance_opportunities.map((o) => {
     const blocked = o.blocked_by.length > 0 ? o.blocked_by.join("; ") : null
     const evidence =
@@ -403,6 +409,32 @@ export type PlanModel = {
   branch: string
   prUrl: string | null
   confidenceFloor: number
+  executionError: string | null
+}
+
+function planExecutionStatus({
+  approvalStatus,
+  blocked,
+  executionStatus,
+  prUrl,
+  terminalOutcome,
+}: {
+  approvalStatus?: string
+  blocked: boolean
+  executionStatus?: string
+  prUrl: string | null
+  terminalOutcome?: string | null
+}): string {
+  if (blocked) return "blocked"
+  if (terminalOutcome) return terminalOutcome
+  if (prUrl) return "open"
+  if (executionStatus === "failed" || executionStatus === "running") {
+    return executionStatus
+  }
+  if (approvalStatus === "pending" || approvalStatus === "rejected") {
+    return approvalStatus
+  }
+  return "ready"
 }
 
 export function plansFromReport(
@@ -421,15 +453,20 @@ export function plansFromReport(
   return report.maintenance_pr_plans.map((p) => {
     const automationPlan = automationPlanById.get(p.maintenance_pr_plan_id)
     const blocked = p.blocked || Boolean(automationPlan?.blocked)
-    const status = blocked
-      ? "blocked"
-      : p.terminal_outcome
-        ? p.terminal_outcome
-        : automationPlan?.terminal_outcome
-          ? automationPlan.terminal_outcome
-          : automationPlan?.created_pr_url
-            ? "open"
-            : "ready"
+    const approvalStatus = automationPlan?.approval_status ?? p.approval_status
+    const executionStatus = automationPlan?.execution_status ?? p.execution_status
+    const prUrl = automationPlan?.created_pr_url ?? p.created_pr_url ?? null
+    const terminalOutcome =
+      p.terminal_outcome || automationPlan?.terminal_outcome || null
+    const executionError =
+      automationPlan?.execution_error ?? p.execution_error ?? null
+    const status = planExecutionStatus({
+      approvalStatus,
+      blocked,
+      executionStatus,
+      prUrl,
+      terminalOutcome,
+    })
     const category =
       p.maintenance_opportunity_ids
         .map((id) => oppCategory.get(id))
@@ -444,12 +481,13 @@ export function plansFromReport(
           automationPlan?.confidence_threshold ??
             p.confidence_threshold ??
             automation?.effective.confidence_threshold
-        ) ?? 90,
+        ) ?? DEFAULT_CONFIDENCE_FLOOR,
       confidence: pct(p.confidence) ?? 0,
       evidence: p.pr_body_sections.evidence,
+      executionError,
       id: p.maintenance_pr_plan_id,
       paths: p.changed_paths,
-      prUrl: automationPlan?.created_pr_url ?? null,
+      prUrl,
       repoId: p.repository_id,
       risk: riskFromTier(p.risk_tier),
       status,
@@ -496,21 +534,23 @@ export function plansFromAutomation(
   automation: RepositoryAutomationResponse
 ): PlanModel[] {
   return automation.recent_pr_plans.map((p) => {
-    const status = p.blocked
-      ? "blocked"
-      : p.terminal_outcome
-        ? p.terminal_outcome
-        : p.created_pr_url
-          ? "open"
-          : "ready"
+    const status = planExecutionStatus({
+      approvalStatus: p.approval_status,
+      blocked: p.blocked,
+      executionStatus: p.execution_status,
+      prUrl: p.created_pr_url,
+      terminalOutcome: p.terminal_outcome,
+    })
     return {
       blocked: p.block_reason,
       branch: "",
       category: "maintainability",
       checks: [],
-      confidenceFloor: pct(p.confidence_threshold) ?? 90,
+      confidenceFloor:
+        pct(p.confidence_threshold) ?? DEFAULT_CONFIDENCE_FLOOR,
       confidence: pct(p.confidence) ?? 0,
       evidence: "",
+      executionError: p.execution_error ?? null,
       id: p.id,
       paths: [],
       prUrl: p.created_pr_url,

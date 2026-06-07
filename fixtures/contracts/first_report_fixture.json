@@ -142,7 +142,7 @@
       "title": "Archive stale seed specification",
       "risk_tier": "tier_1_autonomous",
       "confidence": 0.94,
-      "confidence_threshold": 0.9,
+      "confidence_threshold": 0.85,
       "changed_paths": ["README.md", "docs/archive/original-seed-spec.md"],
       "pr_body_sections": {
         "goal": "Point contributors to current product truth.",

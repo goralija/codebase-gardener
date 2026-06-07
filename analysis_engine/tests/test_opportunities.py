@@ -121,10 +121,30 @@ def test_dependency_case():
     opp = _only(_generate(snap), "dependency_patch")
 
     assert opp["risk_tier"] == "tier_1_autonomous"
-    assert "dependency_audit" in opp["required_checks"]
+    assert opp["required_checks"] == []
 
 
-def test_dead_code_case_low_confidence_is_flagged():
+def test_confidence_below_autonomous_floor_is_flagged():
+    snap = _snapshot(
+        dependency_risks=[{"path": "pyproject.toml", "summary": "outdated"}]
+    )
+    opp = _only(_generate(snap), "dependency_patch")
+
+    assert opp["confidence"] == 0.85
+    assert "below_confidence_threshold" not in opp["blocked_by"]
+
+
+def test_confidence_threshold_override_allows_medium_confidence(monkeypatch):
+    monkeypatch.setenv("GARDENER_CONFIDENCE_THRESHOLD", "0.50")
+    snap = _snapshot(hotspots=[{"path": "core/service.py", "summary": "complex"}])
+    opp = _only(_generate(snap), "complexity_reduction")
+
+    assert opp["confidence"] == 0.6
+    assert "below_confidence_threshold" not in opp["blocked_by"]
+
+
+def test_dead_code_below_autonomous_floor_is_flagged(monkeypatch):
+    monkeypatch.delenv("GARDENER_CONFIDENCE_THRESHOLD", raising=False)
     snap = _snapshot(
         dead_code_candidates=[
             {"path": "core/util.py", "confidence": 0.5, "summary": "unused"}
@@ -146,6 +166,17 @@ def test_dead_code_high_confidence_not_flagged():
 
     assert opp["confidence"] == 0.97
     assert "below_confidence_threshold" not in opp["blocked_by"]
+
+
+def test_source_code_opportunities_do_not_assume_pytest():
+    snap = _snapshot(
+        dead_code_candidates=[
+            {"path": "src/app.ts", "confidence": 0.97, "summary": "unused"}
+        ]
+    )
+    opp = _only(_generate(snap), "dead_code")
+
+    assert opp["required_checks"] == []
 
 
 def test_architecture_case():
