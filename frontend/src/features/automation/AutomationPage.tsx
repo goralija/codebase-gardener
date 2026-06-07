@@ -62,6 +62,8 @@ type RepositorySelection = {
 
 const EMPTY_ORGANIZATIONS: Organization[] = []
 const EMPTY_REPOSITORIES: ManagedRepository[] = []
+const REPOSITORY_SELECTION_STORAGE_KEY =
+  "codebase-gardener:automation:repository-selection"
 
 const MODE_OPTIONS: Array<{
   label: string
@@ -91,7 +93,7 @@ export function AutomationPage() {
     string | null
   >(null)
   const [manualRepositorySelection, setManualRepositorySelection] =
-    useState<RepositorySelection | null>(null)
+    useState<RepositorySelection | null>(() => readStoredRepositorySelection())
   const [draftState, setDraftState] = useState<DraftState | null>(null)
 
   const organizationsQuery = useQuery({
@@ -102,8 +104,16 @@ export function AutomationPage() {
 
   const organizations =
     organizationsQuery.data?.organizations ?? EMPTY_ORGANIZATIONS
+  const storedOrganizationId =
+    manualRepositorySelection &&
+    organizations.some(
+      (organization) =>
+        organization.id === manualRepositorySelection.organizationId
+    )
+      ? manualRepositorySelection.organizationId
+      : null
   const selectedOrganizationId =
-    manualOrganizationId ?? organizations[0]?.id ?? null
+    manualOrganizationId ?? storedOrganizationId ?? organizations[0]?.id ?? null
 
   const repositoriesQuery = useQuery({
     queryKey: ["automation", "repositories", selectedOrganizationId],
@@ -305,10 +315,12 @@ export function AutomationPage() {
               label="Repository"
               onChange={(repositoryId) => {
                 if (selectedOrganizationId) {
-                  setManualRepositorySelection({
+                  const nextSelection = {
                     organizationId: selectedOrganizationId,
                     repositoryId,
-                  })
+                  }
+                  setManualRepositorySelection(nextSelection)
+                  storeRepositorySelection(nextSelection)
                 }
               }}
               value={selectedRepositoryId ?? ""}
@@ -945,6 +957,67 @@ function chooseRepositoryId(
     return manualRepositorySelection.repositoryId
   }
   return repositories[0]?.id ?? null
+}
+
+function readStoredRepositorySelection(): RepositorySelection | null {
+  let storedValue: string | null | undefined
+  try {
+    storedValue = getRepositorySelectionStorage()?.getItem(
+      REPOSITORY_SELECTION_STORAGE_KEY
+    )
+  } catch {
+    return null
+  }
+
+  if (!storedValue) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(storedValue)
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      typeof parsed.organizationId === "string" &&
+      typeof parsed.repositoryId === "string"
+    ) {
+      return {
+        organizationId: parsed.organizationId,
+        repositoryId: parsed.repositoryId,
+      }
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+function storeRepositorySelection(selection: RepositorySelection) {
+  try {
+    getRepositorySelectionStorage()?.setItem(
+      REPOSITORY_SELECTION_STORAGE_KEY,
+      JSON.stringify(selection)
+    )
+  } catch {
+    return
+  }
+}
+
+function getRepositorySelectionStorage() {
+  try {
+    const storage = window.localStorage
+    if (
+      typeof storage.getItem === "function" &&
+      typeof storage.setItem === "function"
+    ) {
+      return storage
+    }
+  } catch {
+    return null
+  }
+
+  return null
 }
 
 function currentPolicyDraft(

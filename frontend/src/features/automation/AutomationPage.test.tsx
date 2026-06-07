@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AutomationPage } from "./AutomationPage"
 
@@ -18,6 +18,29 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
     },
     status: 200,
     ...init,
+  })
+}
+
+function installLocalStorage() {
+  const entries = new Map<string, string>()
+  const storage = {
+    clear: () => entries.clear(),
+    getItem: (key: string) => entries.get(key) ?? null,
+    key: (index: number) => Array.from(entries.keys())[index] ?? null,
+    get length() {
+      return entries.size
+    },
+    removeItem: (key: string) => {
+      entries.delete(key)
+    },
+    setItem: (key: string, value: string) => {
+      entries.set(key, value)
+    },
+  } satisfies Storage
+
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: storage,
   })
 }
 
@@ -37,8 +60,13 @@ function renderPage() {
   )
 }
 
-function mockAutomationFetch() {
-  let automationState = automationPayload()
+function mockAutomationFetch(repositories = [repositoryPayload()]) {
+  const automationStates = new Map(
+    repositories.map((repository) => [
+      repository.id,
+      automationPayload(repository),
+    ])
+  )
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -47,18 +75,24 @@ function mockAutomationFetch() {
         return jsonResponse(organizationsPayload())
       }
       if (url.pathname === "/api/v1/organizations/org-1/repositories/") {
-        return jsonResponse(repositoriesPayload())
+        return jsonResponse(repositoriesPayload(repositories))
       }
       if (url.pathname === "/api/v1/organizations/org-1/billing/") {
         return jsonResponse(billingPayload())
       }
-      if (
-        url.pathname ===
-        "/api/v1/organizations/org-1/repositories/repo-1/automation/"
-      ) {
+      const automationMatch = url.pathname.match(
+        /^\/api\/v1\/organizations\/org-1\/repositories\/([^/]+)\/automation\/$/
+      )
+      if (automationMatch) {
+        const repositoryId = automationMatch[1]
+        const automationState = automationStates.get(repositoryId)
+        if (!automationState) {
+          return new Response(null, { status: 404 })
+        }
+
         if (init?.method === "PATCH" && init.body) {
           const patch = JSON.parse(String(init.body))
-          automationState = {
+          const nextAutomationState = {
             ...automationState,
             policy: {
               ...automationState.policy,
@@ -66,12 +100,15 @@ function mockAutomationFetch() {
               updated_at: "2026-06-06T08:05:00Z",
             },
           }
+          automationStates.set(repositoryId, nextAutomationState)
+          return jsonResponse(nextAutomationState)
         }
         return jsonResponse(automationState)
       }
       if (
-        url.pathname ===
-        "/api/v1/organizations/org-1/repositories/repo-1/automation/trigger/"
+        /^\/api\/v1\/organizations\/org-1\/repositories\/[^/]+\/automation\/trigger\/$/.test(
+          url.pathname
+        )
       ) {
         return jsonResponse({
           trigger: {
@@ -87,7 +124,12 @@ function mockAutomationFetch() {
 }
 
 describe("AutomationPage", () => {
+  beforeEach(() => {
+    installLocalStorage()
+  })
+
   afterEach(() => {
+    window.localStorage.clear()
     vi.unstubAllGlobals()
   })
 
@@ -178,6 +220,38 @@ describe("AutomationPage", () => {
     )
   })
 
+  it("preserves the selected repository across remounts", async () => {
+    const user = userEvent.setup()
+    mockAutomationFetch([
+      repositoryPayload(),
+      repositoryPayload({
+        id: "repo-2",
+        github_repository_id: 3002,
+        name: "worker",
+        full_name: "acme/worker",
+        html_url: "https://github.com/acme/worker",
+      }),
+    ])
+
+    const { unmount } = renderPage()
+
+    await screen.findByRole("heading", { name: "acme/api" })
+    await user.selectOptions(screen.getByLabelText("Repository"), "repo-2")
+
+    expect(screen.getByLabelText("Repository")).toHaveValue("repo-2")
+    expect(
+      await screen.findByRole("heading", { name: "acme/worker" })
+    ).toBeInTheDocument()
+
+    unmount()
+    renderPage()
+
+    expect(
+      await screen.findByRole("heading", { name: "acme/worker" })
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText("Repository")).toHaveValue("repo-2")
+  })
+
   it("runs a manual session from the automation page", async () => {
     const user = userEvent.setup()
     mockAutomationFetch()
@@ -213,7 +287,7 @@ function organizationsPayload() {
   }
 }
 
-function repositoriesPayload() {
+function repositoriesPayload(repositories = [repositoryPayload()]) {
   return {
     organization: {
       id: "org-1",
@@ -228,20 +302,23 @@ function repositoriesPayload() {
       html_url:
         "https://github.com/organizations/acme/settings/installations/2001",
     },
-    repositories: [
-      {
-        id: "repo-1",
-        github_repository_id: 3001,
-        name: "api",
-        full_name: "acme/api",
-        owner_login: "acme",
-        private: true,
-        default_branch: "main",
-        html_url: "https://github.com/acme/api",
-        selected_at: "2026-06-06T08:00:00Z",
-        complexity: completeComplexity(),
-      },
-    ],
+    repositories,
+  }
+}
+
+function repositoryPayload(overrides = {}) {
+  return {
+    id: "repo-1",
+    github_repository_id: 3001,
+    name: "api",
+    full_name: "acme/api",
+    owner_login: "acme",
+    private: true,
+    default_branch: "main",
+    html_url: "https://github.com/acme/api",
+    selected_at: "2026-06-06T08:00:00Z",
+    complexity: completeComplexity(),
+    ...overrides,
   }
 }
 
@@ -286,14 +363,14 @@ function billingPayload() {
   }
 }
 
-function automationPayload() {
+function automationPayload(repository = repositoryPayload()) {
   return {
     schema_version: "1.0",
     repository: {
-      id: "repo-1",
-      full_name: "acme/api",
-      default_branch: "main",
-      html_url: "https://github.com/acme/api",
+      id: repository.id,
+      full_name: repository.full_name,
+      default_branch: repository.default_branch,
+      html_url: repository.html_url,
     },
     baseline: {
       analysis_id: "analysis-1",
