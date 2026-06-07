@@ -1,6 +1,7 @@
 /* ============================================================
    Cockpit shared UI primitives — ported from the design prototype.
    ============================================================ */
+/* eslint-disable react-refresh/only-export-components */
 import {
   useEffect,
   useRef,

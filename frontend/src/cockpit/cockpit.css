@@ -104,10 +104,17 @@ input, select { font-family: inherit; }
 }
 .sb-logo {
   width: 30px; height: 30px; border-radius: 8px;
-  background: linear-gradient(150deg, #1d524a, #0f211e);
+  background: var(--panel);
   border: 1px solid var(--accent-bd);
-  display: grid; place-items: center; color: var(--accent-2);
+  display: grid; place-items: center;
+  overflow: hidden;
   flex: none;
+}
+.sb-logo-img {
+  width: 100%; height: 100%;
+  border-radius: inherit;
+  display: block;
+  object-fit: cover;
 }
 .sb-brand .name { font-weight: 600; font-size: 13px; letter-spacing: -0.01em; white-space: nowrap; line-height: 1.25; }
 .sb-brand .sub { font-size: 11px; color: var(--fg-3); font-family: var(--mono); }

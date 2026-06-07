@@ -10,6 +10,7 @@ import {
 
 import { Icon } from "@/cockpit/icon"
 import { entColor } from "@/cockpit/format"
+import { GardenerLogo } from "@/components/brand"
 import {
   EMPTY_REPOS,
   useAutomationMap,
@@ -22,7 +23,12 @@ import "@/cockpit/cockpit.css"
 const NAV = [
   { icon: "LayoutDashboard", id: "overview", label: "Overview", to: "/" },
   { icon: "FolderGit2", id: "repos", label: "Repositories", to: "/repos" },
-  { icon: "Github", id: "github", label: "GitHub setup", to: "/onboarding/github" },
+  {
+    icon: "Github",
+    id: "github",
+    label: "GitHub setup",
+    to: "/onboarding/github",
+  },
 ]
 
 const REPO_SECTION = new Set([
@@ -61,7 +67,10 @@ export function CockpitShell() {
   const { organization } = useSelectedOrganization()
   const repositoriesQuery = useRepositories(organization?.id)
   const repositories = repositoriesQuery.data?.repositories ?? EMPTY_REPOS
-  const { map: automationMap } = useAutomationMap(organization?.id, repositories)
+  const { map: automationMap } = useAutomationMap(
+    organization?.id,
+    repositories
+  )
   const { map: reportsMap } = useReportsMap(repositories)
 
   const top = topSegment(pathname)
@@ -76,7 +85,7 @@ export function CockpitShell() {
     if (!automation.baseline.commit_sha) missingBaseline += 1
     if (automation.recent_sessions[0]?.status === "failed") failedSessions += 1
     openPrs += automation.recent_pr_plans.filter(
-      (p) => !p.terminal_outcome && (p.created_pr_url || !p.blocked)
+      (p) => p.created_pr_url && !p.terminal_outcome
     ).length
   })
   const attention = missingBaseline + failedSessions
@@ -97,7 +106,7 @@ export function CockpitShell() {
       <aside className="sidebar">
         <div className="sb-brand">
           <div className="sb-logo">
-            <Icon name="Sprout" size={18} />
+            <GardenerLogo className="sb-logo-img" />
           </div>
           <div>
             <div className="name">Codebase Gardener</div>
@@ -107,8 +116,7 @@ export function CockpitShell() {
         <nav className="sb-nav">
           {NAV.map((item) => {
             const active =
-              top === item.id ||
-              (item.id === "repos" && REPO_SECTION.has(top))
+              top === item.id || (item.id === "repos" && REPO_SECTION.has(top))
             const count = item.id === "repos" ? repositories.length : null
             return (
               <Link
@@ -145,7 +153,10 @@ export function CockpitShell() {
         <div className="topbar">
           <div className="crumbs">
             {crumbs.map((crumb, index) => (
-              <span key={index} style={{ alignItems: "center", display: "flex", gap: 7 }}>
+              <span
+                key={index}
+                style={{ alignItems: "center", display: "flex", gap: 7 }}
+              >
                 {index > 0 && (
                   <Icon className="sep" name="ChevronRight" size={13} />
                 )}

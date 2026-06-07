@@ -71,6 +71,7 @@ export function AutomationPanel({
   const [dirty, setDirty] = useState(false)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft(draftFromPolicy(policy))
     setDirty(false)
   }, [policy])

@@ -1,6 +1,7 @@
 /* ============================================================
    Shared full-page states for the cockpit (loading / auth / empty).
    ============================================================ */
+/* eslint-disable react-refresh/only-export-components */
 import type { ReactNode } from "react"
 import { useNavigate } from "@tanstack/react-router"
 
@@ -49,12 +50,16 @@ export function PageShell({
 export function useGateState({
   authRequired,
   orgLoading,
+  dataLoading,
   isError,
+  dataError,
   organization,
 }: {
   authRequired: boolean
   orgLoading: boolean
+  dataLoading?: boolean
   isError: boolean
+  dataError?: boolean
   organization: unknown
 }): ReactNode | null {
   const navigate = useNavigate()
@@ -118,6 +123,27 @@ export function useGateState({
             icon="FolderGit2"
             sub="Install the Gardener GitHub App to connect repositories."
             title="No GitHub installation"
+          />
+        </div>
+      </div>
+    )
+  }
+  if (dataLoading) {
+    return (
+      <div className="page wide">
+        <div className="card">
+          <Empty icon="Loader" title="Loading operations data…" />
+        </div>
+      </div>
+    )
+  }
+  if (dataError) {
+    return (
+      <div className="page wide">
+        <div className="card">
+          <Empty
+            icon="TriangleAlert"
+            title="Could not load repository operations"
           />
         </div>
       </div>

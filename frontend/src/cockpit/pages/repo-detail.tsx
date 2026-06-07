@@ -2,6 +2,7 @@
    Repository detail — tabbed report (Summary / Entropy /
    Constitution / Opportunities / Sessions / PR Plans / Automation).
    ============================================================ */
+/* eslint-disable react-refresh/only-export-components */
 import { useMemo } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
@@ -73,8 +74,7 @@ export function RepoDetailPage({
   const reportQuery = useRepoReport(repoId)
 
   const trigger = useMutation({
-    mutationFn: () =>
-      triggerRepositorySession(organization?.id ?? "", repoId),
+    mutationFn: () => triggerRepositorySession(organization?.id ?? "", repoId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cockpit", "automation"] })
       queryClient.invalidateQueries({ queryKey: ["cockpit", "report", repoId] })
@@ -82,8 +82,7 @@ export function RepoDetailPage({
   })
 
   const model = useMemo(
-    () =>
-      repository ? toRepoModel(repository, automationQuery.data) : null,
+    () => (repository ? toRepoModel(repository, automationQuery.data) : null),
     [repository, automationQuery.data]
   )
 
@@ -129,7 +128,11 @@ export function RepoDetailPage({
               Repositories
             </a>
             <Icon name="ChevronRight" size={12} />
-            <RepoDot color={entColor(report ? entropyFromReport(report).overall : undefined)} />
+            <RepoDot
+              color={entColor(
+                report ? entropyFromReport(report).overall : undefined
+              )}
+            />
             <span
               className="mono"
               style={{ letterSpacing: 0, textTransform: "none" }}
@@ -165,13 +168,21 @@ export function RepoDetailPage({
             <Icon name="SlidersHorizontal" size={15} />
             Automation
           </button>
-          <a className="btn" href={model.htmlUrl} rel="noreferrer" target="_blank">
+          <a
+            className="btn"
+            href={model.htmlUrl}
+            rel="noreferrer"
+            target="_blank"
+          >
             <Icon name="ExternalLink" size={14} />
             GitHub
           </a>
           <button
             className="btn primary"
-            disabled={trigger.isPending || !automationQuery.data?.permissions.can_trigger_manual_session}
+            disabled={
+              trigger.isPending ||
+              !automationQuery.data?.permissions.can_trigger_manual_session
+            }
             onClick={() => trigger.mutate()}
             type="button"
           >
@@ -192,7 +203,10 @@ export function RepoDetailPage({
       {trigger.isSuccess && (
         <div
           className="card pad mb20"
-          style={{ background: "var(--accent-bg)", borderColor: "var(--accent-bd)" }}
+          style={{
+            background: "var(--accent-bg)",
+            borderColor: "var(--accent-bd)",
+          }}
         >
           <div className="row gap10">
             <Icon color="var(--accent-2)" name="CircleCheck" size={16} />
@@ -232,7 +246,10 @@ export function RepoDetailPage({
           { l: "Contributors", mono: true, v: model.contributors ?? "—" },
           { l: "Complexity", mono: true, v: model.multiplier.toFixed(2) + "×" },
         ].map((c) => (
-          <div key={c.l} style={{ background: "var(--panel)", padding: "13px 18px" }}>
+          <div
+            key={c.l}
+            style={{ background: "var(--panel)", padding: "13px 18px" }}
+          >
             <div
               className="tiny faint"
               style={{
@@ -316,13 +333,18 @@ function RepoTab({
       )
     }
     return (
-      <AutomationPanel automation={automation} organizationId={organizationId} />
+      <AutomationPanel
+        automation={automation}
+        organizationId={organizationId}
+      />
     )
   }
 
   if (tab === "sessions") {
     const sessions = automation ? sessionsFromAutomation(automation) : []
-    return <SessionsView repoName={repoName} sessions={sessions} showRepo={false} />
+    return (
+      <SessionsView repoName={repoName} sessions={sessions} showRepo={false} />
+    )
   }
 
   if (!report) {
@@ -346,7 +368,7 @@ function RepoTab({
   if (tab === "opportunities") {
     return (
       <OpportunitiesView
-        opps={oppsFromReport(report)}
+        opps={oppsFromReport(report, automation)}
         repoName={repoName}
         showRepo={false}
       />
@@ -354,7 +376,11 @@ function RepoTab({
   }
   if (tab === "prplans") {
     return (
-      <PullsView plans={plansFromReport(report)} repoName={repoName} showRepo={false} />
+      <PullsView
+        plans={plansFromReport(report, automation)}
+        repoName={repoName}
+        showRepo={false}
+      />
     )
   }
   if (tab === "entropy") {
@@ -434,7 +460,10 @@ function RepoSummary({
               <div className="sm muted">No logical systems detected.</div>
             </div>
           ) : (
-            <div className="tbl-wrap" style={{ border: "none", borderRadius: 0 }}>
+            <div
+              className="tbl-wrap"
+              style={{ border: "none", borderRadius: 0 }}
+            >
               <table className="tbl">
                 <tbody>
                   {systems.map((s) => (
@@ -496,9 +525,12 @@ function RepoSummary({
             </button>
           </div>
           <div className="card-b">
-            {constitution.present ? (
+            {constitution.hasSourceTruth ? (
               <>
-                <div className="row" style={{ justifyContent: "space-between" }}>
+                <div
+                  className="row"
+                  style={{ justifyContent: "space-between" }}
+                >
                   <span className="sm muted">Source-truth coverage</span>
                   <span
                     className="mono b6"
@@ -523,11 +555,19 @@ function RepoSummary({
                     }}
                   />
                 </div>
-                <div className="row mt16" style={{ justifyContent: "space-between" }}>
+                <div
+                  className="row mt16"
+                  style={{ justifyContent: "space-between" }}
+                >
                   <span className="sm muted">Protected modules</span>
-                  <span className="mono fg2">{constitution.protected.length}</span>
+                  <span className="mono fg2">
+                    {constitution.protected.length}
+                  </span>
                 </div>
-                <div className="row mt8" style={{ justifyContent: "space-between" }}>
+                <div
+                  className="row mt8"
+                  style={{ justifyContent: "space-between" }}
+                >
                   <span className="sm muted">Open questions</span>
                   {constitution.questions.length > 0 ? (
                     <Badge tone="amber">{constitution.questions.length}</Badge>
@@ -539,7 +579,7 @@ function RepoSummary({
             ) : (
               <div className="row gap10 sm" style={{ color: "var(--blue)" }}>
                 <Icon name="FileWarning" size={15} />
-                No GARDENER.md — inferred mode
+                No source truth — inferred mode
               </div>
             )}
           </div>
@@ -555,7 +595,10 @@ function RepoSummary({
           >
             <div
               className="a-ico"
-              style={{ background: "var(--accent-bg)", color: "var(--accent-2)" }}
+              style={{
+                background: "var(--accent-bg)",
+                color: "var(--accent-2)",
+              }}
             >
               <Icon name="Sparkles" size={16} />
             </div>
@@ -607,11 +650,16 @@ function RepoEntropy({ report }: { report: FirstReport }) {
         >
           <EntropyGauge score={entropy.overall} size={190} />
           <div className="row gap10">
-            <span className="sm muted">forecast {report.entropy_report.forecast.horizon_days}d</span>
+            <span className="sm muted">
+              forecast {report.entropy_report.forecast.horizon_days}d
+            </span>
             <Delta value={forecastDelta} />
           </div>
         </div>
-        <div className="card pad" style={{ display: "grid", placeItems: "center" }}>
+        <div
+          className="card pad"
+          style={{ display: "grid", placeItems: "center" }}
+        >
           <div className="sect-title" style={{ alignSelf: "flex-start" }}>
             Component radar
           </div>
@@ -631,7 +679,11 @@ function RepoEntropy({ report }: { report: FirstReport }) {
         </div>
         <div
           className="card-b"
-          style={{ display: "grid", gap: "0 36px", gridTemplateColumns: "1fr 1fr" }}
+          style={{
+            display: "grid",
+            gap: "0 36px",
+            gridTemplateColumns: "1fr 1fr",
+          }}
         >
           {COMPONENTS.map((c) => {
             const v = entropy.components[c.key]
@@ -642,9 +694,15 @@ function RepoEntropy({ report }: { report: FirstReport }) {
             return (
               <div
                 key={c.key}
-                style={{ borderBottom: "1px solid var(--border)", padding: "11px 0" }}
+                style={{
+                  borderBottom: "1px solid var(--border)",
+                  padding: "11px 0",
+                }}
               >
-                <div className="row" style={{ justifyContent: "space-between" }}>
+                <div
+                  className="row"
+                  style={{ justifyContent: "space-between" }}
+                >
                   <span className="row gap8 sm fg2">
                     <Icon color={entColor(v)} name={c.icon} size={14} />
                     {c.label}
@@ -672,7 +730,9 @@ function RepoEntropy({ report }: { report: FirstReport }) {
         <div className="card-h">
           <Icon color="var(--fg-3)" name="GitCompareArrows" size={15} />
           <h3>Forecast</h3>
-          <span className="ch-sub">{report.entropy_report.forecast.horizon_days}d horizon</span>
+          <span className="ch-sub">
+            {report.entropy_report.forecast.horizon_days}d horizon
+          </span>
         </div>
         <div className="card-b">
           <p className="sm fg2" style={{ lineHeight: 1.55 }}>
@@ -686,13 +746,13 @@ function RepoEntropy({ report }: { report: FirstReport }) {
 
 function RepoConstitution({ report }: { report: FirstReport }) {
   const c = constitutionFromReport(report)
-  if (!c.present) {
+  if (!c.hasSourceTruth) {
     return (
       <div className="card">
         <Empty
           icon="FileWarning"
-          sub="This repository has no machine-readable Repository Constitution. The Gardener runs in inferred mode with conservative defaults. Add a GARDENER.md to declare protected modules, allowed fixes, and source-truth files."
-          title="No GARDENER.md found"
+          sub="This repository has no machine-readable Repository Constitution. Gardener runs in inferred mode with conservative defaults. Add source truth to declare protected modules, allowed fixes, and never-touch paths."
+          title="No constitution source truth"
         />
       </div>
     )
@@ -715,7 +775,9 @@ function RepoConstitution({ report }: { report: FirstReport }) {
               </div>
               <div>
                 <div className="b6">Constitution present</div>
-                <div className="tiny muted mono">source-truth · machine-readable</div>
+                <div className="tiny muted mono">
+                  source-truth · machine-readable
+                </div>
               </div>
             </div>
             <Badge tone={c.coverage >= 80 ? "green" : "amber"}>
@@ -809,7 +871,11 @@ function RepoConstitution({ report }: { report: FirstReport }) {
           <div className="card-b" style={{ display: "grid", gap: 10 }}>
             {c.questions.length ? (
               c.questions.map((qq) => (
-                <div className="card pad" key={qq.id} style={{ background: "var(--panel-2)" }}>
+                <div
+                  className="card pad"
+                  key={qq.id}
+                  style={{ background: "var(--panel-2)" }}
+                >
                   <div className="row gap10">
                     <Icon
                       color="var(--amber)"

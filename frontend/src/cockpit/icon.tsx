@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react"
-import { icons } from "lucide-react"
+import { icons, type LucideIcon as LucideIconType } from "lucide-react"
 
 type IconProps = {
   name: string
@@ -24,7 +24,9 @@ export function Icon({
   style,
   color,
 }: IconProps) {
-  const LucideIcon = (icons as Record<string, React.ComponentType<any>>)[name]
+  const LucideIcon = icons[name as keyof typeof icons] as
+    | LucideIconType
+    | undefined
   const mergedStyle: CSSProperties = { flex: "none", color, ...style }
 
   if (!LucideIcon) {

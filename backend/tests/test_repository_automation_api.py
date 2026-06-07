@@ -280,7 +280,7 @@ def test_manual_trigger_endpoint_accepts_manual_plan_payload(monkeypatch):
 def test_manual_trigger_endpoint_respects_disabled_policy(monkeypatch):
     maintainer = User.objects.create_user("maintainer@example.com", password="secret")
     repository = create_repo_with_member(maintainer, Membership.Role.MAINTAINER)
-    GardeningSession.objects.create(
+    existing_session = GardeningSession.objects.create(
         repository=repository,
         trigger={"type": "first_scan", "subject_type": "repository", "subject_id": str(repository.id)},
     )
@@ -294,7 +294,9 @@ def test_manual_trigger_endpoint_respects_disabled_policy(monkeypatch):
 
     assert response.status_code == 403
     assert response.json()["code"] == "trigger_not_permitted"
-    assert not GardeningSession.objects.filter(repository=repository).exists()
+    sessions = GardeningSession.objects.filter(repository=repository)
+    assert list(sessions) == [existing_session]
+    assert not sessions.filter(trigger__type="manual").exists()
 
 
 def create_repo_with_member(user, role):
