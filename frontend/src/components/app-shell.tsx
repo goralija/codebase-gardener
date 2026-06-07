@@ -1,14 +1,7 @@
 import { Link, Outlet } from "@tanstack/react-router"
-import { FileText, GitBranch, Gauge, Workflow } from "lucide-react"
 
+import { NAV_ITEMS } from "@/components/app-nav"
 import { GardenerLogo } from "@/components/brand"
-
-const NAV_ITEMS = [
-  { icon: Gauge, label: "Overview", to: "/" },
-  { icon: Workflow, label: "Automation", to: "/automation" },
-  { icon: GitBranch, label: "GitHub", to: "/onboarding/github" },
-  { icon: FileText, label: "Report", to: "/report" },
-]
 
 export function AppShell() {
   return (
