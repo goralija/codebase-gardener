@@ -75,6 +75,11 @@ ANALYSIS_REPOWISE_PROJECT_DIR = env(
 ANALYSIS_CLONE_DEPTH = env.int("ANALYSIS_CLONE_DEPTH", default=100)
 ANALYSIS_CLONE_TIMEOUT_SECONDS = env.int("ANALYSIS_CLONE_TIMEOUT_SECONDS", default=600)
 
+# Bounded self-healing for Gardener-authored PRs whose GitHub checks fail.
+GARDENER_CI_REPAIR_ENABLED = env.bool("GARDENER_CI_REPAIR_ENABLED", default=True)
+GARDENER_CI_REPAIR_MAX_ATTEMPTS = env.int("GARDENER_CI_REPAIR_MAX_ATTEMPTS", default=1)
+GARDENER_CI_REPAIR_LOG_CHARS = env.int("GARDENER_CI_REPAIR_LOG_CHARS", default=12000)
+
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",

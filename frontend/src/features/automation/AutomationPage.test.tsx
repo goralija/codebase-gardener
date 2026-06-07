@@ -60,18 +60,20 @@ function renderPage() {
   )
 }
 
-<<<<<<< Updated upstream
-function mockAutomationFetch(repositories = [repositoryPayload()]) {
+function mockAutomationFetch(
+  repositoriesOrAutomationState = [repositoryPayload()]
+) {
+  const repositories = Array.isArray(repositoriesOrAutomationState)
+    ? repositoriesOrAutomationState
+    : [repositoryPayload()]
   const automationStates = new Map(
     repositories.map((repository) => [
       repository.id,
-      automationPayload(repository),
+      Array.isArray(repositoriesOrAutomationState)
+        ? automationPayload(repository)
+        : repositoriesOrAutomationState,
     ])
   )
-=======
-function mockAutomationFetch(initialAutomationState = automationPayload()) {
-  let automationState = initialAutomationState
->>>>>>> Stashed changes
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -314,7 +316,6 @@ describe("AutomationPage", () => {
     })
   })
 
-<<<<<<< Updated upstream
   it("refreshes active recent session statuses without a page reload", async () => {
     const fetchSequence = mockAutomationFetchSequence([
       automationWithSession({
@@ -342,7 +343,8 @@ describe("AutomationPage", () => {
     expect(screen.getByText("def456curren")).toBeInTheDocument()
     expect(screen.getByText("Drift")).toBeInTheDocument()
     expect(fetchSequence.automationReadCount()).toBeGreaterThanOrEqual(2)
-=======
+  })
+
   it("labels the first repository run as a first scan", async () => {
     mockAutomationFetch({
       ...automationPayload(),
@@ -363,7 +365,6 @@ describe("AutomationPage", () => {
     expect(
       screen.getByText(/The first scan promotes a baseline/)
     ).toBeInTheDocument()
->>>>>>> Stashed changes
   })
 })
 

@@ -258,6 +258,64 @@ class GitHubAppClient:
             json={"labels": labels},
         )
 
+    def list_check_runs_for_ref(
+        self,
+        owner: str,
+        repo: str,
+        ref: str,
+        *,
+        token: str,
+    ) -> list[dict[str, Any]]:
+        payload = self._api_request(
+            "GET",
+            f"/repos/{quote(owner)}/{quote(repo)}/commits/{quote(ref, safe='')}/check-runs",
+            token=token,
+            params={"per_page": 100},
+        )
+        check_runs = payload.get("check_runs")
+        if not isinstance(check_runs, list):
+            raise GitHubAPIError("GitHub check-runs response was invalid.")
+        return check_runs
+
+    def list_workflow_run_jobs(
+        self,
+        owner: str,
+        repo: str,
+        run_id: int,
+        *,
+        token: str,
+    ) -> list[dict[str, Any]]:
+        payload = self._api_request(
+            "GET",
+            f"/repos/{quote(owner)}/{quote(repo)}/actions/runs/{run_id}/jobs",
+            token=token,
+            params={"per_page": 100},
+        )
+        jobs = payload.get("jobs")
+        if not isinstance(jobs, list):
+            raise GitHubAPIError("GitHub workflow jobs response was invalid.")
+        return jobs
+
+    def get_workflow_job_logs(
+        self,
+        owner: str,
+        repo: str,
+        job_id: int,
+        *,
+        token: str,
+    ) -> str:
+        return self._text_request(
+            "GET",
+            self._api_url(
+                f"/repos/{quote(owner)}/{quote(repo)}/actions/jobs/{job_id}/logs"
+            ),
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {token}",
+                "X-GitHub-Api-Version": settings.GITHUB_API_VERSION,
+            },
+        )
+
     def find_pull_request(
         self,
         owner: str,
@@ -403,6 +461,48 @@ class GitHubAppClient:
         if payload.get("error"):
             raise GitHubAPIError("GitHub OAuth exchange failed.")
         return payload
+
+    def _text_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> str:
+        response: httpx.Response | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = httpx.request(
+                    method,
+                    url,
+                    headers=headers,
+                    params=params,
+                    timeout=self.timeout,
+                    follow_redirects=True,
+                )
+            except httpx.HTTPError as exc:
+                if attempt < self.max_retries:
+                    self._sleep_before_retry(attempt)
+                    continue
+                raise GitHubAPIError("GitHub request failed.") from exc
+
+            if (
+                response.status_code in RETRYABLE_STATUS_CODES
+                and attempt < self.max_retries
+            ):
+                self._sleep_before_retry(attempt)
+                continue
+            break
+
+        if response is None:
+            raise GitHubAPIError("GitHub request failed.")
+        if response.status_code >= 400:
+            raise GitHubAPIError(
+                "GitHub request failed.",
+                status_code=response.status_code,
+            )
+        return response.text
 
     def _api_url(self, path: str) -> str:
         return f"{self.api_base_url}/{path.lstrip('/')}"

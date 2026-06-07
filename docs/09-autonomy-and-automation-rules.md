@@ -106,6 +106,7 @@ Gardener must not directly modify these by default:
 - Docs maintenance fixes use a deterministic author; other categories (dead-code, complexity, refactoring, layer violations, tests) are authored by an LLM (OpenRouter) that produces a minimal, validated edit.
 - AI edits are validated before a PR is opened (syntax/AST parse and a bounded-change guard); oversized files are chunked and analyzed with bounded parallel workers, and a failed validation fails the plan and creates no PR.
 - A session approves and executes tier_1 autonomous plans that have an implemented file fix, up to its per-session cap; PRs are labeled by risk tier and confidence; no auto-merge.
+- Failed CI on a Gardener-authored PR may trigger one AI repair attempt on the same branch when the original plan is still eligible, the autonomous PR add-on is enabled, and the plan category/path is supported by the AI author. Repair commits include failed-check context and never auto-merge the PR.
 - The user is notified on session completion with the authored PRs and their risk tiers.
 
 ## Learning rules

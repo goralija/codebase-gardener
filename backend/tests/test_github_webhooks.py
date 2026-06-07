@@ -7,12 +7,14 @@ import pytest
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomerOrganization
+from apps.billing.models import Subscription
 from apps.common.models import AuditEvent
 from apps.github_app.models import GitHubInstallation, GitHubWebhookEvent
 from apps.github_app.services import (
     ingest_github_webhook_delivery,
     process_stored_github_webhook_event,
 )
+from apps.maintenance_prs.models import MaintenancePRPlan
 from apps.repositories.models import ManagedRepository
 from apps.sessions.models import GardeningSession
 from apps.triggers.models import RepositoryAutomationPolicy
@@ -503,6 +505,58 @@ def test_workflow_run_and_check_suite_create_sessions_only_for_failures(monkeypa
 
 
 @pytest.mark.django_db
+def test_failed_ci_on_gardener_pr_queues_repair(monkeypatch):
+    queued_sessions = patch_session_enqueue(monkeypatch)
+    queued_repairs = []
+    monkeypatch.setattr(
+        "apps.maintenance_prs.tasks.repair_failed_maintenance_pr.delay",
+        lambda plan_id, event_id: queued_repairs.append((plan_id, event_id)),
+    )
+    repository = create_repository()
+    Subscription.objects.create(
+        organization=repository.organization,
+        autonomous_pr_add_on_enabled=True,
+    )
+    plan = MaintenancePRPlan.objects.create(
+        repository=repository,
+        gardening_session_id="session-ci",
+        branch_name="gardener/dead-code",
+        title="Remove dead code",
+        category="dead_code",
+        risk_tier="tier_1_autonomous",
+        confidence=0.97,
+        changed_paths=["core/util.py"],
+        pr_body_sections={"goal": "Remove dead code."},
+        required_checks=["pytest"],
+        approval_status=MaintenancePRPlan.ApprovalStatus.APPROVED,
+        execution_status=MaintenancePRPlan.ExecutionStatus.SUCCEEDED,
+        created_pr_number=42,
+        created_pr_url="https://github.com/acme/api/pull/42",
+    )
+    event = create_webhook_event(
+        event_name="workflow_run",
+        payload=ci_payload(
+            repository,
+            key="workflow_run",
+            conclusion="failure",
+            identifier=901,
+            head_branch="gardener/dead-code",
+        ),
+        delivery_id="workflow-failed-gardener-pr",
+    )
+
+    process_stored_github_webhook_event(str(event.id))
+    event.refresh_from_db()
+    result = event.result
+
+    assert event.status == GitHubWebhookEvent.Status.PROCESSED
+    assert result["ci_repair_queued"] is True
+    assert result["maintenance_pr_plan_id"] == str(plan.id)
+    assert queued_repairs == [(str(plan.id), str(event.id))]
+    assert len(queued_sessions) == 1
+
+
+@pytest.mark.django_db
 def test_active_session_dedupe_prevents_noisy_webhook_sessions(monkeypatch):
     queued_sessions = patch_session_enqueue(monkeypatch)
     repository = create_repository()
@@ -827,6 +881,7 @@ def ci_payload(
     key: str,
     conclusion: str,
     identifier: int,
+    head_branch: str = "",
 ) -> dict:
     return {
         "action": "completed",
@@ -836,5 +891,6 @@ def ci_payload(
             "id": identifier,
             "status": "completed",
             "conclusion": conclusion,
+            "head_branch": head_branch,
         },
     }

@@ -1,6 +1,7 @@
 from celery import shared_task
 
 from apps.github_app.client import RETRYABLE_STATUS_CODES, GitHubAPIError
+from apps.maintenance_prs.ci_repair import repair_failed_maintenance_pr_plan
 from apps.maintenance_prs.executor import execute_maintenance_pr_plan
 from apps.maintenance_prs.models import MaintenancePRPlan
 
@@ -20,3 +21,15 @@ def execute_pr_plan(self, plan_id: str) -> dict[str, object]:
         "execution_status": result["execution_status"],
         "pr_number": result["created_pr_number"],
     }
+
+
+@shared_task(bind=True, max_retries=1)
+def repair_failed_maintenance_pr(
+    self,
+    maintenance_pr_plan_id: str,
+    webhook_event_id: str | None = None,
+) -> dict:
+    return repair_failed_maintenance_pr_plan(
+        plan_id=maintenance_pr_plan_id,
+        webhook_event_id=webhook_event_id,
+    )

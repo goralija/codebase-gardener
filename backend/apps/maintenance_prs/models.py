@@ -64,6 +64,13 @@ class MaintenancePRPlan(UUIDTimestampedModel):
         CLOSED = "closed", "Closed"
         REVERTED = "reverted", "Reverted"
 
+    class CIRepairStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+        SKIPPED = "skipped", "Skipped"
+
     repository = models.ForeignKey(
         "repositories.ManagedRepository",
         on_delete=models.CASCADE,
@@ -108,6 +115,15 @@ class MaintenancePRPlan(UUIDTimestampedModel):
     )
     terminal_outcome_at = models.DateTimeField(null=True, blank=True)
     outcome_history = models.JSONField(default=list, blank=True)
+    ci_repair_attempts = models.PositiveSmallIntegerField(default=0)
+    ci_repair_status = models.CharField(
+        max_length=32,
+        choices=CIRepairStatus.choices,
+        blank=True,
+        db_index=True,
+    )
+    ci_repair_error = models.TextField(blank=True)
+    ci_repair_history = models.JSONField(default=list, blank=True)
     execution_error = models.TextField(blank=True)
 
     objects = MaintenancePRPlanQuerySet.as_manager()
@@ -140,6 +156,8 @@ class MaintenancePRPlan(UUIDTimestampedModel):
             errors["pr_body_sections"] = "PR body sections must be an object."
         if not isinstance(self.outcome_history, list):
             errors["outcome_history"] = "Outcome history must be a list."
+        if not isinstance(self.ci_repair_history, list):
+            errors["ci_repair_history"] = "CI repair history must be a list."
         if errors:
             raise ValidationError(errors)
 

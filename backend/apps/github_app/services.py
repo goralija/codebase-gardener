@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from apps.common.models import AuditEvent
 from apps.github_app.client import GitHubAPIError, GitHubAppClient
 from apps.github_app.models import GitHubInstallation, GitHubWebhookEvent
 from apps.github_app.state import create_install_state, load_install_state
+from apps.maintenance_prs.ci_repair import enqueue_ci_repair_for_plan
 from apps.maintenance_prs.models import MaintenancePRPlan
 from apps.profiles.learning import (
     Outcome,
@@ -36,6 +38,7 @@ from apps.triggers.service import (
 
 
 WEBHOOK_AUDIT_SOURCE = "github_webhook"
+logger = logging.getLogger("gardener.github_app")
 REPOSITORY_REFRESH_AUDIT_SOURCE = "github_repository_refresh"
 PR_TRIGGER_ACTIONS = {"opened", "reopened", "synchronize"}
 PR_OUTCOME_ACTIONS = {"closed", "edited"}
@@ -840,7 +843,7 @@ def _process_ci_webhook(event: GitHubWebhookEvent) -> dict[str, Any]:
         return _ignored_result("missing_ci_subject_id")
 
     outcome_info: dict[str, Any] = {}
-    head_branch = str(ci_payload.get("head_branch") or "")
+    head_branch = _ci_head_branch(ci_payload, event.payload)
     if head_branch:
         plan = find_plan_for_pull_request(repository=repository, branch_name=head_branch)
         if plan is not None:
@@ -858,6 +861,7 @@ def _process_ci_webhook(event: GitHubWebhookEvent) -> dict[str, Any]:
                 "outcome": result.outcome,
                 "maintenance_pr_plan_id": result.maintenance_pr_plan_id,
                 "outcome_recorded": result.recorded,
+                "ci_repair_queued": _enqueue_ci_repair(plan, event),
             }
 
     session = _create_or_get_webhook_session(
@@ -869,6 +873,46 @@ def _process_ci_webhook(event: GitHubWebhookEvent) -> dict[str, Any]:
         extra={f"{event.event}_id": int(subject_id)},
     )
     return _processed_result(sessions_created=[session], **outcome_info)
+
+
+def _enqueue_ci_repair(plan, event: GitHubWebhookEvent) -> bool:
+    try:
+        return enqueue_ci_repair_for_plan(plan, str(event.id))
+    except Exception:
+        logger.exception(
+            "github_webhook.ci_repair_enqueue_failed",
+            extra={
+                "repository_id": str(plan.repository_id),
+                "maintenance_pr_plan_id": str(plan.id),
+                "webhook_event_id": str(event.id),
+            },
+        )
+        return False
+
+
+def _ci_head_branch(ci_payload: dict[str, Any], payload: dict[str, Any]) -> str:
+    candidates: list[Any] = [
+        ci_payload.get("head_branch"),
+        ci_payload.get("head_branch_name"),
+        payload.get("head_branch"),
+        payload.get("head_branch_name"),
+    ]
+    head = ci_payload.get("head")
+    if isinstance(head, dict):
+        candidates.append(head.get("ref"))
+    pull_requests = ci_payload.get("pull_requests")
+    if isinstance(pull_requests, list):
+        for pull_request in pull_requests:
+            if not isinstance(pull_request, dict):
+                continue
+            pr_head = pull_request.get("head")
+            if isinstance(pr_head, dict):
+                candidates.append(pr_head.get("ref"))
+
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return ""
 
 
 def _parse_installation_id(installation_id: str | int) -> int:

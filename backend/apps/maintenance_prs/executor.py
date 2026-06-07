@@ -355,6 +355,7 @@ def _write_updated_file(
     branch: str,
     token: str,
     plan: MaintenancePRPlan,
+    message: str | None = None,
 ) -> None:
     if updated == original:
         return
@@ -364,7 +365,7 @@ def _write_updated_file(
         owner,
         repo,
         path,
-        message=plan.title,
+        message=message or plan.title,
         content=updated,
         branch=branch,
         token=token,
