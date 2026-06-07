@@ -18,5 +18,15 @@ def organizations(request):
             .distinct()
         )
 
-    serializer = CustomerOrganizationSerializer(organizations_queryset, many=True)
+    # Live-verify each organization's installation against GitHub so an app that
+    # was uninstalled (no delivered webhook) stops reporting as installed.
+    from apps.github_app.services import verify_organization_installations
+
+    live_organizations = [
+        organization
+        for organization in organizations_queryset
+        if verify_organization_installations(organization)
+    ]
+
+    serializer = CustomerOrganizationSerializer(live_organizations, many=True)
     return Response({"organizations": serializer.data})

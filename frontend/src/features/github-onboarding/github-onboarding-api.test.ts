@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import {
   buildGithubOnboardingApiUrl,
+  deleteManagedRepository,
   fetchOrganizationBilling,
   fetchInstallationStart,
   fetchOrganizations,
@@ -209,6 +210,28 @@ describe("github onboarding API", () => {
           "X-CSRFToken": "test-token",
         }),
       })
+    )
+    document.cookie = "csrftoken=; Max-Age=0"
+  })
+
+  it("deletes a managed repository with CSRF credentials", async () => {
+    document.cookie = "csrftoken=delete-token"
+    const fetcher = fetcherReturning(new Response(null, { status: 204 }))
+
+    await deleteManagedRepository("org-1", "repo-1", { fetcher })
+
+    expect(fetcher).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "/api/v1/organizations/org-1/repositories/repo-1/"
+      ),
+      {
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+          "X-CSRFToken": "delete-token",
+        },
+        method: "DELETE",
+      }
     )
     document.cookie = "csrftoken=; Max-Age=0"
   })

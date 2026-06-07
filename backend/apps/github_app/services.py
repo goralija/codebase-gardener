@@ -269,6 +269,62 @@ def refresh_installation_repositories_from_github(
     return repository_sync
 
 
+def _github_app_configured() -> bool:
+    return bool(
+        getattr(settings, "GITHUB_APP_ID", "")
+        and getattr(settings, "GITHUB_APP_PRIVATE_KEY", "")
+    )
+
+
+def verify_installation_liveness(
+    installation: GitHubInstallation,
+    *,
+    client: GitHubAppClient | None = None,
+) -> bool:
+    """Live-check one installation against GitHub.
+
+    Returns True when the installation is still present and usable. A GitHub
+    404/410 means the app was uninstalled, so the installation is soft-deleted
+    (and its repositories unselected) to correct stale "installed" state.
+    Transient GitHub or configuration errors leave stored state untouched.
+    """
+    if installation.deleted_at is not None:
+        return False
+    if not _github_app_configured():
+        return installation.suspended_at is None
+
+    github_client = client or GitHubAppClient()
+    try:
+        github_client.get_installation(installation.github_installation_id)
+    except GitHubAPIError as exc:
+        if exc.status_code in (404, 410):
+            _mark_installation_deleted(installation)
+            return False
+        return installation.suspended_at is None
+    except ImproperlyConfigured:
+        return installation.suspended_at is None
+    return installation.suspended_at is None
+
+
+def verify_organization_installations(
+    organization: CustomerOrganization,
+    *,
+    client: GitHubAppClient | None = None,
+) -> bool:
+    """Live-check every active installation for an organization.
+
+    Returns True if at least one installation is still live on GitHub.
+    """
+    github_client = client or GitHubAppClient()
+    has_live_installation = False
+    for installation in organization.github_installations.filter(
+        deleted_at__isnull=True
+    ):
+        if verify_installation_liveness(installation, client=github_client):
+            has_live_installation = True
+    return has_live_installation
+
+
 def ingest_github_webhook_delivery(
     *,
     delivery_id: str,
