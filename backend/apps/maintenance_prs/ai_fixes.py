@@ -46,7 +46,7 @@ SUPPORTED_AI_CATEGORIES = frozenset(
 )
 
 _SOURCE_EXTENSIONS = frozenset(
-    {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".rb"}
+    {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".kt", ".rb"}
 )
 
 _CATEGORY_GUIDANCE = {

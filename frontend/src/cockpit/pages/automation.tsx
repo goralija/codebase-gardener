@@ -114,12 +114,6 @@ export function AutomationPanel({
       val: automation.baseline.commit_sha ? "ready" : "missing",
     },
     {
-      label: "Autonomous PR add-on",
-      pass: eff.autonomous_pr_add_on_enabled,
-      sub: "organization billing gate",
-      val: eff.autonomous_pr_add_on_enabled ? "enabled" : "off",
-    },
-    {
       label: "Autonomy mode",
       pass: draft.autonomy_mode === "autonomous",
       sub: "must be Autonomous",
@@ -317,7 +311,7 @@ export function AutomationPanel({
               name="ShieldCheck"
               size={15}
             />
-            <h3>Autonomous PR gate</h3>
+            <h3>Autonomous PR readiness</h3>
           </div>
           <div className="card-b">
             <div

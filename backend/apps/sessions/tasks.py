@@ -1,3 +1,5 @@
+import logging
+
 from celery import shared_task
 from django.utils import timezone
 from gardener_analysis import build_analysis_drift_report
@@ -8,7 +10,10 @@ from apps.analysis.constitution_pr import maybe_open_constitution_pr
 from apps.analysis.runner import AnalysisRunError, run_repository_analysis
 from apps.common.models import AuditEvent
 from apps.github_app.client import RETRYABLE_STATUS_CODES, GitHubAPIError
-from apps.maintenance_prs.docs_fixes import has_implemented_file_fix
+from apps.maintenance_prs.docs_fixes import (
+    has_implemented_file_fix,
+    missing_implemented_file_fix_reason,
+)
 from apps.maintenance_prs.manual_plans import (
     ManualPlanPayloadError,
     create_manual_session_pr_plan,
@@ -26,6 +31,7 @@ from apps.sessions.models import GardeningSession
 from apps.triggers import registry
 
 MAX_AUTO_APPROVED_SESSION_PLANS = 3
+logger = logging.getLogger(__name__)
 
 
 class RetryableSessionError(Exception):
@@ -112,7 +118,8 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
                 artifacts=planning_artifacts,
                 first_report=planning_report,
             )
-            _approve_auto_executable_pr_plans(planned_pr_plans)
+            approved_pr_plans = _approve_auto_executable_pr_plans(planned_pr_plans)
+            _log_pr_planning_summary(session, planned_pr_plans, approved_pr_plans)
             current_phase = "execute"
             executed_plan_ids, execution_errors = execute_session_pr_plans(session)
             session.result = build_gardening_session_result(
@@ -536,7 +543,14 @@ def _manual_session_pr_plans(session: GardeningSession) -> list[MaintenancePRPla
         return []
     try:
         return [create_manual_session_pr_plan(session, payload)]
-    except ManualPlanPayloadError:
+    except ManualPlanPayloadError as exc:
+        logger.info(
+            "gardening_session.manual_pr_plan.invalid",
+            extra={
+                **_session_log_extra(session),
+                "skip_reason": str(exc) or "Manual PR plan payload is invalid.",
+            },
+        )
         return []
 
 
@@ -553,24 +567,131 @@ def _approve_auto_executable_pr_plans(plans: list[MaintenancePRPlan]) -> list[Ma
         enumerate(plans),
         key=lambda item: (0 if has_implemented_file_fix(item[1]) else 1, item[0]),
     ):
+        skip_reason = _auto_approval_skip_reason(plan)
+        if skip_reason:
+            plan.execution_error = skip_reason
+            plan.save(update_fields=["execution_error", "updated_at"])
+            logger.info(
+                "gardening_session.maintenance_pr_plan.not_auto_approved",
+                extra=_session_plan_log_extra(plan, skip_reason=skip_reason),
+            )
+            continue
         if len(approved) >= MAX_AUTO_APPROVED_SESSION_PLANS:
-            break
-        if not _safe_for_auto_execution(plan):
+            skip_reason = _auto_approval_cap_reason()
+            plan.execution_error = skip_reason
+            plan.save(update_fields=["execution_error", "updated_at"])
+            logger.info(
+                "gardening_session.maintenance_pr_plan.not_auto_approved",
+                extra=_session_plan_log_extra(plan, skip_reason=skip_reason),
+            )
             continue
         plan.approval_status = MaintenancePRPlan.ApprovalStatus.APPROVED
-        plan.save(update_fields=["approval_status", "updated_at"])
+        plan.execution_error = ""
+        plan.save(update_fields=["approval_status", "execution_error", "updated_at"])
+        logger.info(
+            "gardening_session.maintenance_pr_plan.auto_approved",
+            extra=_session_plan_log_extra(plan),
+        )
         approved.append(plan)
     return approved
 
 
 def _safe_for_auto_execution(plan: MaintenancePRPlan) -> bool:
-    return (
-        not plan.blocked
-        and plan.risk_tier == "tier_1_autonomous"
-        and plan.confidence >= plan.confidence_threshold
-        and plan.repository.is_active
-        and has_implemented_file_fix(plan)
+    return _auto_approval_skip_reason(plan) is None
+
+
+def _auto_approval_skip_reason(plan: MaintenancePRPlan) -> str | None:
+    if plan.blocked:
+        return f"Plan is blocked: {_sentence(plan.block_reason)}"
+    if plan.approval_status == MaintenancePRPlan.ApprovalStatus.REJECTED:
+        return "Plan was rejected for execution."
+    if plan.risk_tier not in {"tier_1_autonomous", "tier_2_assisted"}:
+        return f"Risk tier {plan.risk_tier or 'unknown'} is not eligible for PR execution."
+    if plan.confidence < plan.confidence_threshold:
+        return (
+            f"Confidence {plan.confidence:.2f} is below "
+            f"{plan.confidence_threshold:.2f} threshold."
+        )
+    if not plan.repository.is_active:
+        return "Repository is not active."
+    if not has_implemented_file_fix(plan):
+        return missing_implemented_file_fix_reason(plan)
+    return None
+
+
+def _auto_approval_cap_reason() -> str:
+    return f"Session auto-approval cap reached ({MAX_AUTO_APPROVED_SESSION_PLANS} plans)."
+
+
+def _log_pr_planning_summary(
+    session: GardeningSession,
+    plans: list[MaintenancePRPlan],
+    approved: list[MaintenancePRPlan],
+) -> None:
+    approved_ids = {str(plan.id) for plan in approved}
+    skip_reason_counts: dict[str, int] = {}
+    for plan in plans:
+        if str(plan.id) in approved_ids:
+            continue
+        reason = _auto_approval_skip_reason(plan)
+        if not reason and plan.approval_status != MaintenancePRPlan.ApprovalStatus.APPROVED:
+            reason = _auto_approval_cap_reason()
+        if not reason:
+            continue
+        skip_reason_counts[reason] = skip_reason_counts.get(reason, 0) + 1
+
+    logger.info(
+        "gardening_session.pr_planning.summary",
+        extra={
+            **_session_log_extra(session),
+            "maintenance_pr_plan_count": len(plans),
+            "auto_approved_pr_plan_count": len(approved),
+            "blocked_pr_plan_count": sum(1 for plan in plans if plan.blocked),
+            "pending_pr_plan_count": sum(
+                1
+                for plan in plans
+                if plan.approval_status == MaintenancePRPlan.ApprovalStatus.PENDING
+            ),
+            "skip_reason_counts": skip_reason_counts,
+            "no_pr_reason": ""
+            if plans
+            else "No maintenance PR plans were produced for this session.",
+        },
     )
+
+
+def _session_plan_log_extra(plan: MaintenancePRPlan, *, skip_reason: str = "") -> dict:
+    return {
+        "organization_id": str(plan.repository.organization_id),
+        "repository_id": str(plan.repository_id),
+        "gardening_session_id": plan.gardening_session_id,
+        "maintenance_pr_plan_id": str(plan.id),
+        "category": plan.category,
+        "risk_tier": plan.risk_tier,
+        "confidence": plan.confidence,
+        "confidence_threshold": plan.confidence_threshold,
+        "approval_status": plan.approval_status,
+        "execution_status": plan.execution_status,
+        "blocked": plan.blocked,
+        "block_reason": plan.block_reason or "",
+        "skip_reason": skip_reason,
+        "changed_path_count": len(plan.changed_paths or []),
+        "required_check_count": len(plan.required_checks or []),
+    }
+
+
+def _session_log_extra(session: GardeningSession) -> dict:
+    return {
+        "organization_id": str(session.repository.organization_id),
+        "repository_id": str(session.repository_id),
+        "gardening_session_id": str(session.id),
+        "trigger_type": str(session.trigger.get("type") or ""),
+    }
+
+
+def _sentence(value: str | None) -> str:
+    text = (value or "Blocked by PR planning policy.").strip()
+    return text if text.endswith((".", "!", "?")) else f"{text}."
 
 
 def _emit_completion_notification(

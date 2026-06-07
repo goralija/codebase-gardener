@@ -17,7 +17,7 @@
       "type": "number",
       "minimum": 0,
       "maximum": 1,
-      "default": 0.9,
+      "default": 0.85,
       "description": "Optional in schema_version 1.0 for backward compatibility; omitted values use the default autonomous PR threshold."
     },
     "changed_paths": { "type": "array", "items": { "type": "string" } },
@@ -36,6 +36,12 @@
     "required_checks": { "type": "array", "items": { "type": "string" } },
     "blocked": { "type": "boolean" },
     "block_reason": { "type": ["string", "null"] },
+    "approval_status": { "type": "string" },
+    "execution_status": { "type": "string" },
+    "created_pr_number": { "type": ["integer", "null"], "minimum": 1 },
+    "created_pr_url": { "type": ["string", "null"] },
+    "created_branch_ref": { "type": ["string", "null"] },
+    "execution_error": { "type": ["string", "null"] },
     "terminal_outcome": { "type": ["string", "null"] },
     "terminal_outcome_at": { "type": ["string", "null"], "format": "date-time" }
   },

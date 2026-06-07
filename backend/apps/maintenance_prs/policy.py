@@ -1,9 +1,27 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import os
 from typing import Any
 
-DEFAULT_CONFIDENCE_THRESHOLD = 0.90
+CONFIDENCE_THRESHOLD_ENV = "GARDENER_CONFIDENCE_THRESHOLD"
+PRODUCT_DEFAULT_CONFIDENCE_THRESHOLD = 0.85
+
+
+def configured_confidence_threshold(default: float = PRODUCT_DEFAULT_CONFIDENCE_THRESHOLD) -> float:
+    raw = os.getenv(CONFIDENCE_THRESHOLD_ENV)
+    if raw is None:
+        return default
+    try:
+        threshold = float(raw)
+    except ValueError:
+        return default
+    if threshold > 1:
+        threshold = threshold / 100
+    return max(0.0, min(threshold, 1.0))
+
+
+DEFAULT_CONFIDENCE_THRESHOLD = configured_confidence_threshold()
 DEAD_CODE_CONFIDENCE_THRESHOLD = 0.95
 STALE_RUNNING_TIMEOUT = timedelta(minutes=30)
 

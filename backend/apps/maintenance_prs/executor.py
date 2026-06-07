@@ -8,10 +8,6 @@ from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
-from apps.billing.services import (
-    AUTONOMOUS_PR_ADD_ON_DISABLED_REASON,
-    autonomous_pr_add_on_enabled,
-)
 from apps.common.models import AuditEvent
 from apps.github_app.client import GitHubAPIError, GitHubAppClient
 from apps.maintenance_prs import ai_fixes
@@ -19,14 +15,19 @@ from apps.maintenance_prs.docs_fixes import (
     apply_docs_maintenance_note,
     docs_actual_fix_paths,
     has_implemented_file_fix,
+    missing_implemented_file_fix_reason,
 )
 from apps.maintenance_prs.models import MaintenancePRPlan
 from apps.maintenance_prs.policy import STALE_RUNNING_TIMEOUT
 from apps.triggers.models import RepositoryAutomationPolicy
-from apps.triggers.policy import autonomous_pr_execution_block_reason
+from apps.triggers.policy import (
+    ASSISTED_AUTONOMY_PR_BLOCK_REASON,
+    CONSERVATIVE_AUTONOMY_PR_BLOCK_REASON,
+)
 
 WORKER_AUDIT_SOURCE = "gardening_worker"
 DEFAULT_AI_FIX_WORKERS = 8
+BRANCH_COLLISION_ATTEMPTS = 10
 
 
 class PRExecutionError(Exception):
@@ -84,23 +85,17 @@ def execute_maintenance_pr_plan(
 
         base_sha = client.get_branch_ref(owner, repo, base_branch, token=token)
         body = render_pr_body(plan)
+        branch = _create_or_reuse_plan_branch(
+            client,
+            owner,
+            repo,
+            preferred_branch=branch,
+            base_sha=base_sha,
+            token=token,
+            plan=plan,
+        )
         marker_path = f".gardener/plans/{_marker_filename(branch)}"
         marker_content = _marker_content(plan, body)
-        try:
-            client.create_branch_ref(owner, repo, branch=branch, sha=base_sha, token=token)
-        except GitHubAPIError as exc:
-            # 422 = reference already exists; tolerate only if marker proves same plan.
-            if exc.status_code != 422:
-                raise
-            _verify_existing_branch_belongs_to_plan(
-                client,
-                owner,
-                repo,
-                marker_path=marker_path,
-                branch=branch,
-                token=token,
-                plan=plan,
-            )
 
         _put_marker_file(
             client,
@@ -138,6 +133,7 @@ def execute_maintenance_pr_plan(
             head=branch,
             base=base_branch,
             body=body,
+            draft=_requires_draft_pr(plan),
             token=token,
         )
         pr_number, pr_url = _validated_pull_request_result(pull_request)
@@ -197,11 +193,19 @@ def _create_or_find_pull_request(
     head: str,
     base: str,
     body: str,
+    draft: bool = False,
     token: str,
 ) -> dict[str, Any]:
     try:
         return client.create_pull_request(
-            owner, repo, title=title, head=head, base=base, body=body, token=token
+            owner,
+            repo,
+            title=title,
+            head=head,
+            base=base,
+            body=body,
+            draft=draft,
+            token=token,
         )
     except GitHubAPIError as exc:
         # 422 = a PR already exists for this head; reuse it for idempotent re-runs.
@@ -294,6 +298,65 @@ def _apply_actual_file_fixes(
                 plan=plan,
             )
     return existing_paths
+
+
+def _create_or_reuse_plan_branch(
+    client: GitHubAppClient,
+    owner: str,
+    repo: str,
+    *,
+    preferred_branch: str,
+    base_sha: str,
+    token: str,
+    plan: MaintenancePRPlan,
+) -> str:
+    sibling_branches = set(
+        MaintenancePRPlan.objects.filter(
+            repository=plan.repository,
+            gardening_session_id=plan.gardening_session_id,
+        )
+        .exclude(id=plan.id)
+        .values_list("branch_name", flat=True)
+    )
+    for branch in _branch_candidates(preferred_branch):
+        if branch in sibling_branches:
+            continue
+        marker_path = f".gardener/plans/{_marker_filename(branch)}"
+        try:
+            client.create_branch_ref(owner, repo, branch=branch, sha=base_sha, token=token)
+        except GitHubAPIError as exc:
+            if exc.status_code != 422:
+                raise
+            if _existing_branch_belongs_to_plan(
+                client,
+                owner,
+                repo,
+                marker_path=marker_path,
+                branch=branch,
+                token=token,
+                plan=plan,
+            ):
+                return _persist_plan_branch(plan, branch)
+            continue
+        return _persist_plan_branch(plan, branch)
+    raise PlanNotExecutableError(
+        "No available maintenance PR branch name after branch collisions."
+    )
+
+
+def _branch_candidates(preferred_branch: str):
+    yield preferred_branch
+    for index in range(2, BRANCH_COLLISION_ATTEMPTS + 1):
+        suffix = f"-{index}"
+        yield f"{preferred_branch[:255 - len(suffix)]}{suffix}"
+
+
+def _persist_plan_branch(plan: MaintenancePRPlan, branch: str) -> str:
+    if plan.branch_name == branch:
+        return branch
+    plan.branch_name = branch
+    plan.save(update_fields=["branch_name", "updated_at"])
+    return branch
 
 
 def _author_ai_file_fixes(
@@ -461,7 +524,7 @@ def _marker_content(plan: MaintenancePRPlan, body: str) -> str:
     )
 
 
-def _verify_existing_branch_belongs_to_plan(
+def _existing_branch_belongs_to_plan(
     client: GitHubAppClient,
     owner: str,
     repo: str,
@@ -481,14 +544,9 @@ def _verify_existing_branch_belongs_to_plan(
         )
     except GitHubAPIError as exc:
         if exc.status_code == 404:
-            raise PlanNotExecutableError(
-                "Branch already exists and does not belong to this maintenance PR plan."
-            ) from exc
+            return False
         raise
-    if f"gardener-maintenance-pr-plan-id: {plan.id}" not in marker:
-        raise PlanNotExecutableError(
-            "Branch already exists and does not belong to this maintenance PR plan."
-        )
+    return f"gardener-maintenance-pr-plan-id: {plan.id}" in marker
 
 
 def _guard_executable(plan: MaintenancePRPlan) -> None:
@@ -503,9 +561,9 @@ def _guard_executable(plan: MaintenancePRPlan) -> None:
         and plan.updated_at >= _stale_running_cutoff()
     ):
         raise PlanNotExecutableError("Plan is already running.")
-    if plan.risk_tier != "tier_1_autonomous":
+    if plan.risk_tier not in {"tier_1_autonomous", "tier_2_assisted"}:
         raise PlanNotExecutableError(
-            "Only tier_1_autonomous plans can be executed autonomously."
+            "Only tier_1_autonomous and tier_2_assisted plans can be executed."
         )
     if plan.confidence < plan.confidence_threshold:
         raise PlanNotExecutableError(
@@ -516,15 +574,11 @@ def _guard_executable(plan: MaintenancePRPlan) -> None:
         raise PlanNotExecutableError(
             "Plan repository is not active (unselected, suspended, or deactivated)."
         )
-    automation_block_reason = autonomous_pr_execution_block_reason(plan.repository)
+    automation_block_reason = _automation_execution_block_reason(plan)
     if automation_block_reason:
         raise PlanNotExecutableError(automation_block_reason)
-    if not autonomous_pr_add_on_enabled(plan.repository.organization):
-        raise PlanNotExecutableError(AUTONOMOUS_PR_ADD_ON_DISABLED_REASON)
     if not has_implemented_file_fix(plan):
-        raise PlanNotExecutableError(
-            "Plan has no implemented autonomous file fix."
-        )
+        raise PlanNotExecutableError(missing_implemented_file_fix_reason(plan))
 
 
 def _claim_plan_for_execution(plan: MaintenancePRPlan) -> None:
@@ -534,7 +588,6 @@ def _claim_plan_for_execution(plan: MaintenancePRPlan) -> None:
         pk=plan.pk,
         blocked=False,
         approval_status=MaintenancePRPlan.ApprovalStatus.APPROVED,
-        risk_tier="tier_1_autonomous",
         confidence__gte=F("confidence_threshold"),
         repository__unselected_at__isnull=True,
         repository__deleted_at__isnull=True,
@@ -542,10 +595,20 @@ def _claim_plan_for_execution(plan: MaintenancePRPlan) -> None:
         repository__github_installation__suspended_at__isnull=True,
         repository__github_installation__deleted_at__isnull=True,
         repository__github_installation__organization_id=F("repository__organization_id"),
-        repository__automation_policy__autonomy_mode=(
-            RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS
-        ),
-        repository__organization__subscription__autonomous_pr_add_on_enabled=True,
+    ).filter(
+        Q(
+            risk_tier="tier_1_autonomous",
+            repository__automation_policy__autonomy_mode=(
+                RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS
+            ),
+        )
+        | Q(
+            risk_tier="tier_2_assisted",
+            repository__automation_policy__autonomy_mode__in=[
+                RepositoryAutomationPolicy.AutonomyMode.ASSISTED,
+                RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS,
+            ],
+        )
     ).filter(
         Q(
             execution_status__in=[
@@ -566,6 +629,27 @@ def _claim_plan_for_execution(plan: MaintenancePRPlan) -> None:
         plan.refresh_from_db()
         raise PlanNotExecutableError("Plan could not be claimed for execution.")
     plan.refresh_from_db()
+
+
+def _requires_draft_pr(plan: MaintenancePRPlan) -> bool:
+    return plan.risk_tier == "tier_2_assisted"
+
+
+def _automation_execution_block_reason(plan: MaintenancePRPlan) -> str | None:
+    policy = RepositoryAutomationPolicy.get_or_create_for_repository(plan.repository)
+    if _requires_draft_pr(plan):
+        if policy.autonomy_mode in {
+            RepositoryAutomationPolicy.AutonomyMode.ASSISTED,
+            RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS,
+        }:
+            return None
+        return CONSERVATIVE_AUTONOMY_PR_BLOCK_REASON
+
+    if policy.autonomy_mode == RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS:
+        return None
+    if policy.autonomy_mode == RepositoryAutomationPolicy.AutonomyMode.ASSISTED:
+        return ASSISTED_AUTONOMY_PR_BLOCK_REASON
+    return CONSERVATIVE_AUTONOMY_PR_BLOCK_REASON
 
 
 def _marker_filename(branch: str) -> str:

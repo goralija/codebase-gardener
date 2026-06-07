@@ -41,6 +41,12 @@ The chosen stack must support:
 
 The default Docker Compose host ports are `15432` for PostgreSQL and `16379` for Redis to avoid collisions with common local services. Developers may override `POSTGRES_PORT`, `REDIS_PORT`, `DATABASE_URL`, and `REDIS_URL` per worktree or machine.
 
+For local PR-creation testing, developers may set
+`GARDENER_CONFIDENCE_THRESHOLD=0.50` in `.env` and restart the API/worker. This
+lowers the analysis and PR planning confidence gate for the local process only;
+staging and production should keep the product default of `0.85` or a stricter
+repository-specific threshold.
+
 Start the local product stack from the repository root:
 
 ```bash

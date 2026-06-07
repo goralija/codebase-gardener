@@ -29,6 +29,12 @@ def has_implemented_file_fix(plan: MaintenancePRPlan) -> bool:
     return has_docs_actual_fix(plan) or has_ai_fix(plan)
 
 
+def missing_implemented_file_fix_reason(plan: MaintenancePRPlan) -> str:
+    paths = ", ".join(plan.changed_paths or [])
+    suffix = f" on changed paths: {paths}" if paths else ""
+    return f"No implemented file fix for category {plan.category or 'unknown'}{suffix}."
+
+
 def apply_docs_maintenance_note(content: str, plan: MaintenancePRPlan) -> str:
     block = _maintenance_note_block(plan)
     start = _start_marker(plan)

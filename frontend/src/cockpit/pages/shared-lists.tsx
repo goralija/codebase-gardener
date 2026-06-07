@@ -469,6 +469,13 @@ function PRDrawer({
   onClose: () => void
   repoName: string
 }) {
+  let pendingReasonTitle = "Pending approval — not opened"
+  if (pr.executionError) {
+    pendingReasonTitle = pr.executionError.startsWith("No implemented file fix")
+      ? "Not executable — not opened"
+      : "Deferred — not opened"
+  }
+
   return (
     <Drawer onClose={onClose}>
       <div className="drawer-h">
@@ -513,6 +520,50 @@ function PRDrawer({
                   Blocked — not opened
                 </div>
                 <div className="sm fg2 mt8">{pr.blocked}</div>
+              </div>
+            </div>
+          </div>
+        )}
+        {pr.status === "failed" && pr.executionError && (
+          <div
+            className="card pad mb16"
+            style={{
+              background: "var(--red-bg)",
+              borderColor: "var(--red-bd)",
+            }}
+          >
+            <div className="row gap10">
+              <Icon color="var(--red)" name="CircleX" size={16} />
+              <div>
+                <div
+                  className="b6"
+                  style={{ color: "var(--red)", fontSize: 13 }}
+                >
+                  Execution failed — not opened
+                </div>
+                <div className="sm fg2 mt8">{pr.executionError}</div>
+              </div>
+            </div>
+          </div>
+        )}
+        {pr.status === "pending" && (
+          <div
+            className="card pad mb16"
+            style={{
+              background: "var(--panel-2)",
+              borderColor: "var(--border-2)",
+            }}
+          >
+            <div className="row gap10">
+              <Icon color="var(--fg-3)" name="CircleDot" size={16} />
+              <div>
+                <div className="b6" style={{ fontSize: 13 }}>
+                  {pendingReasonTitle}
+                </div>
+                <div className="sm fg2 mt8">
+                  {pr.executionError ||
+                    "Gardener planned this PR but did not approve it for execution."}
+                </div>
               </div>
             </div>
           </div>
@@ -639,6 +690,8 @@ export function PullsView({
             { count: plans.length, label: "All", value: "all" },
             { count: cnt("ready"), label: "Ready", value: "ready" },
             { count: cnt("open"), label: "Open", value: "open" },
+            { count: cnt("pending"), label: "Pending", value: "pending" },
+            { count: cnt("failed"), label: "Failed", value: "failed" },
             { count: cnt("blocked"), label: "Blocked", value: "blocked" },
             {
               count: cnt("merged") + cnt("closed") + cnt("reverted"),

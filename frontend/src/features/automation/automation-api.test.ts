@@ -189,7 +189,7 @@ export function automationPayload() {
       pr_creation_status:
         "Repository autonomy mode is Conservative; sessions report recommendations without PR creation.",
       default_commit_threshold: 10,
-      confidence_threshold: 0.9,
+      confidence_threshold: 0.85,
     },
     permissions: {
       can_edit: true,
@@ -222,7 +222,7 @@ export function automationPayload() {
         terminal_outcome: "merged",
         terminal_outcome_at: "2026-06-06T09:00:00Z",
         confidence: 0.94,
-        confidence_threshold: 0.9,
+        confidence_threshold: 0.85,
         created_at: "2026-06-06T08:02:00Z",
       },
     ],

@@ -5,7 +5,10 @@ from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.common.models import UUIDTimestampedModel
-from apps.maintenance_prs.policy import DEFAULT_CONFIDENCE_THRESHOLD, STALE_RUNNING_TIMEOUT
+from apps.maintenance_prs.policy import (
+    PRODUCT_DEFAULT_CONFIDENCE_THRESHOLD,
+    STALE_RUNNING_TIMEOUT,
+)
 from apps.triggers.models import RepositoryAutomationPolicy
 
 
@@ -18,7 +21,6 @@ class MaintenancePRPlanQuerySet(models.QuerySet):
         return self.filter(
             blocked=False,
             approval_status=MaintenancePRPlan.ApprovalStatus.APPROVED,
-            risk_tier="tier_1_autonomous",
             confidence__gte=F("confidence_threshold"),
             repository__unselected_at__isnull=True,
             repository__deleted_at__isnull=True,
@@ -27,11 +29,18 @@ class MaintenancePRPlanQuerySet(models.QuerySet):
             repository__github_installation__deleted_at__isnull=True,
             repository__github_installation__organization_id=F("repository__organization_id"),
         ).filter(
-            Q(repository__automation_policy__isnull=True)
-            | Q(
+            Q(
+                risk_tier="tier_1_autonomous",
                 repository__automation_policy__autonomy_mode=(
                     RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS
-                )
+                ),
+            )
+            | Q(
+                risk_tier="tier_2_assisted",
+                repository__automation_policy__autonomy_mode__in=[
+                    RepositoryAutomationPolicy.AutonomyMode.ASSISTED,
+                    RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS,
+                ],
             )
         ).filter(
             Q(
@@ -76,7 +85,7 @@ class MaintenancePRPlan(UUIDTimestampedModel):
     risk_tier = models.CharField(max_length=64, db_index=True)
     confidence = models.FloatField(validators=[MinValueValidator(0), MaxValueValidator(1)])
     confidence_threshold = models.FloatField(
-        default=DEFAULT_CONFIDENCE_THRESHOLD,
+        default=PRODUCT_DEFAULT_CONFIDENCE_THRESHOLD,
         validators=[MinValueValidator(0), MaxValueValidator(1)],
     )
     changed_paths = models.JSONField(default=list, blank=True)
@@ -169,6 +178,12 @@ class MaintenancePRPlan(UUIDTimestampedModel):
             "required_checks": self.required_checks,
             "blocked": self.blocked,
             "block_reason": self.block_reason,
+            "approval_status": self.approval_status,
+            "execution_status": self.execution_status,
+            "created_pr_number": self.created_pr_number,
+            "created_pr_url": self.created_pr_url or None,
+            "created_branch_ref": self.created_branch_ref or None,
+            "execution_error": self.execution_error or None,
             "terminal_outcome": self.terminal_outcome or None,
             "terminal_outcome_at": self.terminal_outcome_at.isoformat().replace("+00:00", "Z")
             if self.terminal_outcome_at

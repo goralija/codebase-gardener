@@ -1,4 +1,5 @@
 import copy
+import logging
 from itertools import count
 from types import SimpleNamespace
 
@@ -18,6 +19,7 @@ from apps.github_app.client import GitHubAPIError
 from apps.github_app.models import GitHubInstallation
 from apps.maintenance_prs.executor import PlanNotExecutableError
 from apps.maintenance_prs.models import MaintenancePRPlan
+from apps.maintenance_prs.policy import DEFAULT_CONFIDENCE_THRESHOLD
 from apps.repositories.models import ManagedRepository
 from apps.sessions.lifecycle import build_gardening_session_result
 from apps.sessions.models import GardeningSession
@@ -291,9 +293,11 @@ def test_first_scan_stores_baseline_without_maintenance_pr_plans(
 def test_run_gardening_session_plans_and_executes_real_opportunities(
     settings,
     monkeypatch,
+    caplog,
 ):
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = True
+    caplog.set_level(logging.INFO, logger="apps.sessions.tasks")
     repository = create_repository(1)
     promote_baseline(repository)
     session = GardeningSession.objects.create(
@@ -369,17 +373,101 @@ def test_run_gardening_session_plans_and_executes_real_opportunities(
     assert session.result["opportunities_deferred"] == [
         {
             "maintenance_opportunity_id": "opp_lint",
-            "reason": "Plan is pending approval for autonomous execution.",
+            "reason": "No implemented file fix for category lint_format on changed paths: src/client.py.",
         },
         {
             "maintenance_opportunity_id": "opp_generated",
-            "reason": "Plan is pending approval for autonomous execution.",
+            "reason": "No implemented file fix for category generated_refresh on changed paths: schema/openapi.json.",
         },
         {
             "maintenance_opportunity_id": "opp_dependency",
-            "reason": "Plan is pending approval for autonomous execution.",
+            "reason": "No implemented file fix for category dependency_patch on changed paths: requirements.txt.",
         },
     ]
+    assert session.result["errors"] == []
+    skip_reasons = {
+        record.category: record.skip_reason
+        for record in caplog.records
+        if record.message == "gardening_session.maintenance_pr_plan.not_auto_approved"
+    }
+    assert skip_reasons == {
+        "lint_format": "No implemented file fix for category lint_format on changed paths: src/client.py.",
+        "generated_refresh": "No implemented file fix for category generated_refresh on changed paths: schema/openapi.json.",
+        "dependency_patch": "No implemented file fix for category dependency_patch on changed paths: requirements.txt.",
+    }
+    summary_records = [
+        record
+        for record in caplog.records
+        if record.message == "gardening_session.pr_planning.summary"
+    ]
+    assert len(summary_records) == 1
+    assert summary_records[0].maintenance_pr_plan_count == 4
+    assert summary_records[0].auto_approved_pr_plan_count == 1
+
+
+@pytest.mark.django_db
+def test_run_gardening_session_executes_assisted_draft_plan(
+    settings,
+    monkeypatch,
+):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    repository = create_repository(11)
+    promote_baseline(repository)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "manual"},
+    )
+    opportunities = [
+        opportunity(
+            "opp_tests",
+            "Add tenant coverage",
+            ["tests/test_tenants.py"],
+            category="tests",
+            risk_tier="tier_2_assisted",
+            confidence=0.94,
+            required_checks=["test_review"],
+        ),
+    ]
+    artifacts = {
+        "constitution": worker_constitution(repository),
+        "opportunities": opportunities,
+    }
+    report = report_for_repository(repository, opportunities)
+    executed: list[str] = []
+
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+            repository,
+            artifacts=artifacts,
+            source=source,
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.storage_service.load_first_report",
+        lambda _analysis: report,
+    )
+
+    def execute(plan):
+        executed.append(str(plan.id))
+        MaintenancePRPlan.objects.filter(id=plan.id).update(
+            execution_status=MaintenancePRPlan.ExecutionStatus.SUCCEEDED
+        )
+
+    monkeypatch.setattr("apps.maintenance_prs.executor.execute_maintenance_pr_plan", execute)
+
+    run_gardening_session.delay(str(session.id)).get()
+
+    session.refresh_from_db()
+    plan = MaintenancePRPlan.objects.get(gardening_session_id=str(session.id))
+    assert not plan.blocked
+    assert plan.approval_status == MaintenancePRPlan.ApprovalStatus.APPROVED
+    assert plan.risk_tier == "tier_2_assisted"
+    assert executed == [str(plan.id)]
+    assert session.result["maintenance_pr_plans"] == executed
+    assert session.result["opportunities_selected"] == ["opp_tests"]
+    assert session.result["opportunities_deferred"] == []
     assert session.result["errors"] == []
 
 
@@ -564,7 +652,7 @@ def test_run_gardening_session_defers_safe_docs_plans_over_auto_approval_cap(
     assert session.result["opportunities_deferred"] == [
         {
             "maintenance_opportunity_id": "opp_docs_9",
-            "reason": "Plan is pending approval for autonomous execution.",
+            "reason": "Session auto-approval cap reached (3 plans).",
         }
     ]
 
@@ -573,22 +661,25 @@ def test_run_gardening_session_defers_safe_docs_plans_over_auto_approval_cap(
 def test_run_gardening_session_does_not_approve_blocked_protected_or_low_confidence(
     settings,
     monkeypatch,
+    caplog,
 ):
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = True
+    caplog.set_level(logging.INFO, logger="apps.sessions.tasks")
     repository = create_repository(1)
     promote_baseline(repository)
     session = GardeningSession.objects.create(
         repository=repository,
         trigger={"type": "manual"},
     )
+    low_confidence = max(0.0, DEFAULT_CONFIDENCE_THRESHOLD - 0.01)
     opportunities = [
         worker_opportunity(
             "opp_low",
             "Refresh low confidence docs",
             ["docs/low.md"],
             "docs",
-            0.50,
+            low_confidence,
         ),
         worker_opportunity(
             "opp_protected",
@@ -638,6 +729,21 @@ def test_run_gardening_session_does_not_approve_blocked_protected_or_low_confide
         item["maintenance_opportunity_id"]
         for item in session.result["opportunities_deferred"]
     ) == ["opp_low", "opp_protected"]
+    skip_reasons = [
+        record.skip_reason
+        for record in caplog.records
+        if record.message == "gardening_session.maintenance_pr_plan.not_auto_approved"
+    ]
+    assert (
+        f"Plan is blocked: Confidence below {DEFAULT_CONFIDENCE_THRESHOLD:.2f} "
+        "PR creation threshold."
+    ) in skip_reasons
+    assert any(
+        reason.startswith(
+            "Plan is blocked: Path secret/guide.md matches never-touch rule:"
+        )
+        for reason in skip_reasons
+    )
 
 
 @pytest.mark.django_db
@@ -1012,6 +1118,89 @@ def test_run_gardening_session_reports_pr_policy_failure_and_continues(settings,
             "message": "Plan became unsafe.",
         }
     ]
+    assert_gardening_session_result_contract(session.result)
+
+
+@pytest.mark.django_db
+def test_run_gardening_session_reports_ai_fix_failure_and_continues(
+    settings, monkeypatch, caplog
+):
+    from apps.maintenance_prs.ai_fixes import AIFixError
+
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = False
+    caplog.set_level(logging.WARNING, logger="apps.sessions.lifecycle")
+    repository = create_repository(1)
+    promote_baseline(repository)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "manual"},
+    )
+    failed = MaintenancePRPlan.objects.create(
+        repository=repository,
+        gardening_session_id=str(session.id),
+        branch_name="gardener/layer-violation",
+        title="Repair layer violation",
+        category="layer_violation_repair",
+        risk_tier="tier_2_assisted",
+        confidence=0.94,
+        changed_paths=[
+            "backend/alembic/versions/6d2f57fdbf10_add_starred_repositories.py"
+        ],
+        approval_status=MaintenancePRPlan.ApprovalStatus.APPROVED,
+    )
+    succeeded = MaintenancePRPlan.objects.create(
+        repository=repository,
+        gardening_session_id=str(session.id),
+        branch_name="gardener/docs-other",
+        title="Refresh other docs",
+        category="docs",
+        risk_tier="tier_1_autonomous",
+        confidence=0.94,
+        changed_paths=["README.md"],
+        approval_status=MaintenancePRPlan.ApprovalStatus.APPROVED,
+    )
+
+    def execute_or_fail(plan):
+        if plan.id == failed.id:
+            raise AIFixError(
+                "AI fix for backend/alembic/versions/6d2f57fdbf10_add_starred_repositories.py: "
+                "no SEARCH block matched the file (1 skipped)."
+            )
+
+    monkeypatch.setattr(
+        "apps.maintenance_prs.executor.execute_maintenance_pr_plan",
+        execute_or_fail,
+    )
+
+    result = run_gardening_session.apply(args=[str(session.id)], throw=False)
+
+    session.refresh_from_db()
+    assert result.successful()
+    assert session.status == GardeningSession.Status.COMPLETED
+    assert session.last_error == ""
+    assert session.result["maintenance_pr_plans"] == [str(succeeded.id)]
+    assert session.result["errors"] == [
+        {
+            "phase": "execute",
+            "maintenance_pr_plan_id": str(failed.id),
+            "message": (
+                "AI fix for backend/alembic/versions/6d2f57fdbf10_add_starred_repositories.py: "
+                "no SEARCH block matched the file (1 skipped)."
+            ),
+        }
+    ]
+    failure_records = [
+        record
+        for record in caplog.records
+        if record.message == "gardening_session.maintenance_pr_plan.execution_failed"
+    ]
+    assert len(failure_records) == 1
+    assert failure_records[0].maintenance_pr_plan_id == str(failed.id)
+    assert failure_records[0].branch_name == "gardener/layer-violation"
+    assert failure_records[0].category == "layer_violation_repair"
+    assert failure_records[0].error_type == "AIFixError"
+    assert "no SEARCH block matched" in failure_records[0].execution_error
     assert_gardening_session_result_contract(session.result)
 
 

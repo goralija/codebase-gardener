@@ -1,4 +1,5 @@
 import copy
+import logging
 from pathlib import Path
 
 import pytest
@@ -7,8 +8,11 @@ from jsonschema import Draft202012Validator
 
 from apps.analysis.fixtures import _schema_registry, _schema_path, _load_json
 from apps.billing.models import Subscription
-from apps.billing.services import AUTONOMOUS_PR_ADD_ON_DISABLED_REASON
 from apps.maintenance_prs.models import MaintenancePRPlanOpportunity
+from apps.maintenance_prs.policy import (
+    DEFAULT_CONFIDENCE_THRESHOLD,
+    configured_confidence_threshold,
+)
 from apps.maintenance_prs.planner import (
     plan_maintenance_prs,
     serialize_maintenance_pr_plan,
@@ -82,6 +86,17 @@ def test_maintenance_pr_plan_contract_accepts_legacy_threshold_omission():
     assert not list(validator.iter_errors(contract))
 
 
+def test_confidence_threshold_env_override_parser(monkeypatch):
+    monkeypatch.setenv("GARDENER_CONFIDENCE_THRESHOLD", "0.50")
+    assert configured_confidence_threshold() == 0.5
+
+    monkeypatch.setenv("GARDENER_CONFIDENCE_THRESHOLD", "50")
+    assert configured_confidence_threshold() == 0.5
+
+    monkeypatch.setenv("GARDENER_CONFIDENCE_THRESHOLD", "not-a-number")
+    assert configured_confidence_threshold() == 0.85
+
+
 @pytest.mark.django_db
 def test_planner_keeps_groups_focused_by_size_category_and_path_conflict():
     repository = demo_repository()
@@ -147,10 +162,11 @@ def test_planner_does_not_bundle_into_force_blocked_group():
 
 
 @pytest.mark.django_db
-def test_planner_blocks_low_confidence_protected_and_assisted_work():
+def test_planner_blocks_low_confidence_and_protected_work_but_allows_assisted_drafts():
     repository = demo_repository()
+    low_confidence = max(0.0, DEFAULT_CONFIDENCE_THRESHOLD - 0.01)
     opportunities = [
-        opportunity("opp_low", "Low confidence", ["docs/low.md"], confidence=0.89),
+        opportunity("opp_low", "Low confidence", ["docs/low.md"], confidence=low_confidence),
         opportunity("opp_protected", "Billing docs", ["backend/apps/billing/models.py"]),
         opportunity(
             "opp_assisted",
@@ -170,10 +186,132 @@ def test_planner_blocks_low_confidence_protected_and_assisted_work():
 
     assert len(plans) == 3
     reasons = {plan.opportunity_links.first().maintenance_opportunity_id: plan.block_reason for plan in plans}
-    assert reasons["opp_low"] == "Confidence below 0.90 PR creation threshold."
+    assert reasons["opp_low"] == (
+        f"Confidence below {DEFAULT_CONFIDENCE_THRESHOLD:.2f} PR creation threshold."
+    )
     assert reasons["opp_protected"].startswith("Path backend/apps/billing/models.py matches protected module")
-    assert reasons["opp_assisted"] == "Opportunity category requires assisted draft PR handling."
-    assert all(plan.blocked for plan in plans)
+    assert reasons["opp_assisted"] is None
+    assert {plan.blocked for plan in plans} == {False, True}
+
+
+@pytest.mark.django_db
+def test_planner_logs_blocked_plan_reason(caplog):
+    caplog.set_level(logging.INFO, logger="apps.maintenance_prs.planner")
+    repository = demo_repository()
+    low_confidence = max(0.0, DEFAULT_CONFIDENCE_THRESHOLD - 0.01)
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_blocked_logs",
+        opportunities=[
+            opportunity(
+                "opp_low",
+                "Low confidence",
+                ["docs/low.md"],
+                confidence=low_confidence,
+            )
+        ],
+        constitution=constitution(),
+    )
+
+    blocked_records = [
+        record
+        for record in caplog.records
+        if record.message == "maintenance_pr_plan.blocked"
+    ]
+    assert len(blocked_records) == 1
+    record = blocked_records[0]
+    assert record.maintenance_pr_plan_id == str(plans[0].id)
+    assert record.gardening_session_id == "session_blocked_logs"
+    assert record.maintenance_opportunity_ids == ["opp_low"]
+    assert record.block_reason == (
+        f"Confidence below {DEFAULT_CONFIDENCE_THRESHOLD:.2f} PR creation threshold."
+    )
+    assert record.changed_path_count == 1
+
+
+@pytest.mark.django_db
+def test_planner_sanitizes_legacy_generated_required_checks():
+    repository = demo_repository()
+    stale = opportunity("opp_stale", "Refresh docs", ["docs/guide.md"])
+    stale["required_checks"] = [
+        "pytest",
+        "python -m pytest",
+        "uv run pytest",
+        "dependency_audit",
+        "docs_review",
+    ]
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_legacy_checks",
+        opportunities=[stale],
+        constitution=constitution(),
+    )
+
+    assert plans[0].required_checks == ["docs_review"]
+    verification = plans[0].pr_body_sections["verification"]
+    assert "Required checks: docs_review." in verification
+    assert "pytest" not in verification
+    assert "dependency_audit" not in verification
+
+
+@pytest.mark.django_db
+def test_planner_reports_policy_markers_as_concrete_block_reasons():
+    repository = demo_repository()
+    low_confidence_value = max(0.0, DEFAULT_CONFIDENCE_THRESHOLD - 0.01)
+    low_confidence = opportunity(
+        "opp_low_marker",
+        "Patch dependency",
+        ["backend/pyproject.toml"],
+        category="dependency_patch",
+        confidence=low_confidence_value,
+    )
+    low_confidence["blocked_by"] = ["below_confidence_threshold"]
+    protected = opportunity(
+        "opp_protected_marker",
+        "Refresh billing docs",
+        ["backend/apps/billing/models.py"],
+        risk_tier="tier_3_advisory",
+    )
+    protected["blocked_by"] = ["protected_module:billing"]
+    prerequisite = opportunity(
+        "opp_prerequisite",
+        "Refresh follow-up docs",
+        ["docs/follow-up.md"],
+    )
+    prerequisite["blocked_by"] = ["opp_low_marker"]
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_policy_markers",
+        opportunities=[low_confidence, protected, prerequisite],
+        constitution=constitution(),
+    )
+
+    reasons = {
+        plan.opportunity_links.first().maintenance_opportunity_id: plan.block_reason
+        for plan in plans
+    }
+    verification = {
+        plan.opportunity_links.first().maintenance_opportunity_id: plan.pr_body_sections[
+            "verification"
+        ]
+        for plan in plans
+    }
+    assert reasons["opp_low_marker"] == (
+        f"Confidence below {DEFAULT_CONFIDENCE_THRESHOLD:.2f} PR creation threshold."
+    )
+    assert verification["opp_low_marker"].startswith(
+        f"Blocked: Confidence below {DEFAULT_CONFIDENCE_THRESHOLD:.2f} "
+        "PR creation threshold. Required checks:"
+    )
+    assert reasons["opp_protected_marker"].startswith(
+        "Path backend/apps/billing/models.py matches protected module billing"
+    )
+    assert reasons["opp_prerequisite"] == (
+        "Opportunity is blocked by prerequisite work: opp_low_marker."
+    )
 
 
 @pytest.mark.django_db
@@ -192,6 +330,30 @@ def test_planner_persists_stricter_confidence_threshold_from_constitution():
     assert plans[0].blocked
     assert plans[0].confidence_threshold == 0.95
     assert plans[0].block_reason == "Confidence below 0.95 PR creation threshold."
+
+
+@pytest.mark.django_db
+def test_dependency_patch_at_default_threshold_can_plan_autonomous_pr():
+    repository = demo_repository()
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_dependency_threshold",
+        opportunities=[
+            opportunity(
+                "opp_dependency",
+                "Patch dependency",
+                ["backend/pyproject.toml"],
+                category="dependency_patch",
+                confidence=DEFAULT_CONFIDENCE_THRESHOLD,
+            )
+        ],
+        constitution=constitution(),
+    )
+
+    assert len(plans) == 1
+    assert not plans[0].blocked
+    assert plans[0].confidence_threshold == DEFAULT_CONFIDENCE_THRESHOLD
 
 
 @pytest.mark.django_db
@@ -422,7 +584,7 @@ def test_constitution_block_reason_wins_over_profile_rejection():
 
 
 @pytest.mark.django_db
-def test_autonomous_pr_add_on_disabled_blocks_otherwise_allowed_plans():
+def test_autonomous_pr_add_on_disabled_does_not_block_allowed_plans():
     repository = demo_repository(autonomous_pr_add_on_enabled=False)
 
     plans = plan_maintenance_prs(
@@ -436,8 +598,8 @@ def test_autonomous_pr_add_on_disabled_blocks_otherwise_allowed_plans():
     )
 
     assert len(plans) == 1
-    assert plans[0].blocked
-    assert plans[0].block_reason == AUTONOMOUS_PR_ADD_ON_DISABLED_REASON
+    assert not plans[0].blocked
+    assert plans[0].block_reason is None
     assert sorted(plans[0].opportunity_links.values_list("maintenance_opportunity_id", flat=True)) == [
         "opp_docs_a",
         "opp_docs_b",
