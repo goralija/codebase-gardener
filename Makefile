@@ -1,4 +1,4 @@
-.PHONY: setup services dev backend-dev frontend-dev worker-dev check backend-check backend-test analysis-test fixtures-validate docs-skills-validate frontend-lint frontend-test frontend-build frontend-e2e
+.PHONY: setup services dev backend-dev frontend-dev cloudflare-tunnel-dev worker-dev check backend-check backend-test analysis-test fixtures-validate docs-skills-validate frontend-lint frontend-test frontend-build frontend-e2e
 .PHONY: services-check runtime-check backend-migrate
 
 PYTHON_VERSION ?= 3.12
@@ -6,6 +6,10 @@ DOCKER ?= docker
 COMPOSE ?= $(shell if $(DOCKER) compose version >/dev/null 2>&1; then printf '$(DOCKER) compose'; fi)
 PNPM ?= corepack pnpm
 VITE_API_BASE_URL ?= http://localhost:8000/api/v1
+CLOUDFLARED ?= cloudflared
+CLOUDFLARE_TUNNEL_URL ?= http://localhost:8000
+CLOUDFLARE_TUNNEL_HOST_HEADER ?= localhost:8000
+GITHUB_WEBHOOK_PATH ?= /api/v1/github-app/webhooks/
 
 setup:
 	uv sync --python $(PYTHON_VERSION) --all-packages --all-groups
@@ -33,7 +37,7 @@ services-check:
 runtime-check: services backend-migrate backend-check
 
 dev: services
-	$(MAKE) -j2 backend-dev frontend-dev
+	$(MAKE) -j3 backend-dev frontend-dev cloudflare-tunnel-dev
 
 backend-dev:
 	cd backend && uv run python manage.py runserver 0.0.0.0:8000
@@ -43,6 +47,9 @@ worker-dev:
 
 frontend-dev:
 	VITE_API_BASE_URL=$(VITE_API_BASE_URL) $(PNPM) --dir frontend dev --host 0.0.0.0
+
+cloudflare-tunnel-dev:
+	scripts/run_cloudflare_quick_tunnel.sh "$(CLOUDFLARED)" "$(CLOUDFLARE_TUNNEL_URL)" "$(CLOUDFLARE_TUNNEL_HOST_HEADER)" "$(GITHUB_WEBHOOK_PATH)"
 
 check: services-check fixtures-validate docs-skills-validate backend-check backend-test analysis-test frontend-lint frontend-test frontend-build frontend-e2e
 

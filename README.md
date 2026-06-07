@@ -44,6 +44,12 @@ This starts the local product services:
 
 - Django API: `http://localhost:8000`
 - Vite dashboard: `http://localhost:5173`
+- Cloudflare Quick Tunnel for GitHub webhooks, when `cloudflared` is installed
+
+`make dev` prints a `GitHub App webhook URL` once Cloudflare assigns a public
+Quick Tunnel hostname. Use that full URL in the GitHub App webhook settings.
+Quick Tunnel hostnames are temporary and usually change each run; use a named
+Cloudflare Tunnel and DNS route when you need a stable GitHub App URL.
 
 If you only need the frontend shell, run:
 

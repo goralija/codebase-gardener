@@ -48,7 +48,12 @@ make services
 make dev
 ```
 
-`make dev` runs the Django API at `http://localhost:8000` and the Vite dashboard at `http://localhost:5173`.
+`make dev` runs the Django API at `http://localhost:8000`, the Vite dashboard
+at `http://localhost:5173`, and a Cloudflare Quick Tunnel for local GitHub
+webhook testing when `cloudflared` is installed. The tunnel output includes the
+full GitHub App webhook URL for `/api/v1/github-app/webhooks/`. Quick Tunnel
+hostnames are temporary and usually change each run; staging and production must
+use stable hostnames.
 
 Lane B repository-intelligence development uses the vendored Repowise checkout at `RepoWise/`. Run it through its own project environment from the Codebase Gardener root:
 
