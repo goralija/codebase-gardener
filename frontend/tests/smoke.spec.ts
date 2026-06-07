@@ -77,7 +77,7 @@ test("loads the API-backed dashboard shell", async ({ page }) => {
   ).toBeVisible()
   await expect(
     page.getByRole("img", { name: "Codebase Gardener mascot" })
-  ).toBeVisible()
+  ).toHaveCount(0)
   await expect(page.getByText("Repository Entropy Score")).toBeVisible()
   await expect(
     page.getByRole("heading", { name: "Architecture violations" })

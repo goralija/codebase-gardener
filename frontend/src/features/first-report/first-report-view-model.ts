@@ -130,7 +130,7 @@ export function buildFirstReportViewModel(report: FirstReport) {
       id: session.gardening_session_id,
       status: titleCase(session.status),
       trigger: titleCase(session.trigger.type),
-      actor: session.trigger.actor,
+      actor: session.trigger.actor ?? "system",
       duration: formatDuration(session.started_at, session.finished_at),
       phaseResults: session.phase_results.map((phase) => ({
         phase: titleCase(phase.phase),

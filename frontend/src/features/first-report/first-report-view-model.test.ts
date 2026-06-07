@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import firstReportFixture from "../../../../fixtures/contracts/first_report_fixture.json"
+import { parseFirstReport } from "./first-report-contract"
 import {
   buildFirstReportViewModel,
   formatConfidence,
@@ -67,6 +68,28 @@ describe("first report view model", () => {
     expect(view.architecture.boundaryRuleCount).toBe(1)
     expect(view.architecture.violationCount).toBe(0)
     expect(view.architecture.hasViolations).toBe(false)
+  })
+
+  it("accepts real session trigger metadata without an actor", () => {
+    const report = {
+      ...firstReportFixture,
+      gardening_session_result: {
+        ...firstReportFixture.gardening_session_result,
+        trigger: {
+          type: "manual",
+          source: "manual",
+          source_view: "repository_automation",
+          subject_type: "manual",
+          subject_id: "user-1",
+        },
+      },
+    }
+
+    const parsed = parseFirstReport(report)
+    const view = buildFirstReportViewModel(parsed)
+
+    expect(view.session.trigger).toBe("Manual")
+    expect(view.session.actor).toBe("system")
   })
 
   it("surfaces entropy contributors and constitution questions", () => {

@@ -100,6 +100,10 @@ describe("AutomationPage", () => {
     expect(await screen.findByText("Autonomous PR gate")).toBeInTheDocument()
     expect(screen.getByLabelText("Autonomous PR add-on")).toBeChecked()
     expect(screen.getByLabelText("Commit threshold")).toHaveValue(10)
+    expect(screen.getByRole("link", { name: "abc123baseli" })).toHaveAttribute(
+      "href",
+      "/report?repositoryId=repo-1&baseline=1"
+    )
     expect(screen.getByText("Refresh docs")).toBeInTheDocument()
 
     await user.click(screen.getByLabelText(/Schedule/))

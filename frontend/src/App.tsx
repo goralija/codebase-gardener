@@ -7,11 +7,11 @@ import {
   CircleOff,
   FileText,
   GitBranch,
+  Gauge,
   Settings,
   Zap,
 } from "lucide-react"
 
-import { GardenerLogo, GardenerMascot } from "@/components/brand"
 import { Button } from "@/components/ui/button"
 import {
   fetchOrganizationBilling,
@@ -91,7 +91,7 @@ export function App() {
         <header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <GardenerLogo className="size-5" />
+              <Gauge className="size-5" />
               Overview
             </div>
             <h1 className="mt-2 text-3xl font-semibold tracking-normal">
@@ -101,7 +101,6 @@ export function App() {
               {selectedOrganization.github_login}
             </p>
           </div>
-          <GardenerMascot className="size-20 shrink-0 sm:size-24" />
         </header>
 
         <section className="grid gap-4 md:grid-cols-3">
@@ -126,7 +125,11 @@ export function App() {
             }
           />
           <OverviewLink
-            href="/report"
+            href={
+              repositories[0]
+                ? `/report?repositoryId=${repositories[0].id}&baseline=1`
+                : "/report"
+            }
             icon={<FileText className="size-4" />}
             label="First report"
             value="Open report"
@@ -250,12 +253,9 @@ function OverviewState({
     <main className="min-h-svh bg-background text-foreground">
       <div className="mx-auto flex min-h-svh w-full max-w-3xl items-center justify-center px-5 py-10">
         <section className="w-full rounded-md border bg-card p-6 text-card-foreground">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              {icon}
-              <h1 className="text-xl font-semibold tracking-normal">{title}</h1>
-            </div>
-            <GardenerMascot className="size-20 shrink-0" />
+          <div className="flex items-center gap-3">
+            {icon}
+            <h1 className="text-xl font-semibold tracking-normal">{title}</h1>
           </div>
           {action ? <div className="mt-5">{action}</div> : null}
         </section>

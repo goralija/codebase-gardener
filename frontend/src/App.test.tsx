@@ -80,10 +80,13 @@ describe("App", () => {
     expect(screen.getByText("First report")).toBeInTheDocument()
     expect(await screen.findByText("PR add-on on")).toBeInTheDocument()
     expect(await screen.findByText("acme/api")).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "First reportOpen report" })
+    ).toHaveAttribute("href", "/report?repositoryId=repo-1&baseline=1")
     expect(screen.getByText("2.10x")).toBeInTheDocument()
     expect(
-      screen.getByRole("img", { name: "Codebase Gardener mascot" })
-    ).toBeInTheDocument()
+      screen.queryByRole("img", { name: "Codebase Gardener mascot" })
+    ).not.toBeInTheDocument()
   })
 
   it("shows the setup state before a GitHub installation is available", async () => {

@@ -4,10 +4,17 @@ from pathlib import Path
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.analysis.fixtures import validate_first_report_fixture_contract
+from apps.analysis.models import RepositoryAnalysis
 from apps.analysis.serializers import FirstReportFixtureSerializer
+from tests.test_product_models import (
+    create_installation,
+    create_organization,
+    create_repository,
+)
 
 
 def load_first_report_fixture():
@@ -100,5 +107,63 @@ def test_first_report_endpoint_treats_invalid_fixture_as_server_error(monkeypatc
     assert response.json() == {
         "code": "server_configuration_error",
         "message": "First report fixture is not available.",
+        "details": {},
+    }
+
+
+@pytest.mark.django_db
+def test_repository_baseline_report_returns_latest_promoted_baseline(monkeypatch):
+    organization = create_organization(1)
+    installation = create_installation(organization, 1)
+    repository = create_repository(organization, installation, 1)
+    older_baseline = RepositoryAnalysis.objects.create(
+        organization=organization,
+        repository=repository,
+        commit_sha="base111",
+        source=RepositoryAnalysis.Source.FIRST_SCAN,
+        baseline_promoted_at=timezone.now(),
+    )
+    unpromoted_latest = RepositoryAnalysis.objects.create(
+        organization=organization,
+        repository=repository,
+        commit_sha="latest222",
+        source=RepositoryAnalysis.Source.SESSION,
+    )
+    loaded_analysis_ids = []
+
+    def load_report(analysis):
+        loaded_analysis_ids.append(analysis.id)
+        payload = load_first_report_fixture()
+        payload["analysis_snapshot"]["commit_sha"] = analysis.commit_sha
+        return payload
+
+    monkeypatch.setattr("apps.analysis.views.storage_service.load_first_report", load_report)
+
+    response = APIClient().get(f"/api/v1/reports/repository/{repository.id}/baseline/")
+
+    assert response.status_code == 200
+    assert response.json()["analysis_snapshot"]["commit_sha"] == "base111"
+    assert loaded_analysis_ids == [older_baseline.id]
+    assert unpromoted_latest.baseline_promoted_at is None
+
+
+@pytest.mark.django_db
+def test_repository_baseline_report_404_when_no_baseline_promoted():
+    organization = create_organization(1)
+    installation = create_installation(organization, 1)
+    repository = create_repository(organization, installation, 1)
+    RepositoryAnalysis.objects.create(
+        organization=organization,
+        repository=repository,
+        commit_sha="latest222",
+        source=RepositoryAnalysis.Source.SESSION,
+    )
+
+    response = APIClient().get(f"/api/v1/reports/repository/{repository.id}/baseline/")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "code": "no_baseline_analysis",
+        "message": "No baseline analysis has been promoted for this repository yet.",
         "details": {},
     }

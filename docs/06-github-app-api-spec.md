@@ -77,7 +77,9 @@ Hosted workers must:
 
 ## Shared contracts
 
-Report APIs expose responses matching `docs/19-shared-json-contracts.md`. Hosted
-Gardening Sessions refresh real repository analysis and persist it for first
-report serving; fixture fallback remains a local/demo affordance when no stored
-analysis exists.
+Report APIs expose responses matching `docs/19-shared-json-contracts.md`.
+`/api/v1/reports/repository/{repository_id}/baseline/` returns the latest
+promoted baseline analysis for that repository; `/api/v1/reports/repository/{repository_id}/`
+continues to return the latest stored analysis. Hosted Gardening Sessions refresh
+real repository analysis and persist it for first report serving; fixture
+fallback remains a local/demo affordance when no stored analysis exists.

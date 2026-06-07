@@ -125,7 +125,7 @@ const gardeningSessionResultSchema = v.object({
   repository_id: v.string(),
   trigger: v.object({
     type: v.string(),
-    actor: v.string(),
+    actor: v.optional(v.string()),
   }),
   status: v.string(),
   baseline_analysis_id: v.optional(v.nullable(v.string())),

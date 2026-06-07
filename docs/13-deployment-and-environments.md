@@ -49,10 +49,11 @@ make services
 make dev
 ```
 
-`make dev` runs the Django API at `http://localhost:8000`, the Vite dashboard
-at `http://localhost:5173`, and a Cloudflare Quick Tunnel for local GitHub
-webhook testing when `cloudflared` is installed. The tunnel output includes the
-full GitHub App webhook URL for `/api/v1/github-app/webhooks/`. Quick Tunnel
+`make dev` applies Django migrations, then runs the Django API at
+`http://localhost:8000`, the Celery worker, the Vite dashboard at
+`http://localhost:5173`, and a Cloudflare Quick Tunnel for local GitHub webhook
+testing when `cloudflared` is installed. The tunnel output includes the full
+GitHub App webhook URL for `/api/v1/github-app/webhooks/`. Quick Tunnel
 hostnames are temporary and usually change each run; staging and production must
 use stable hostnames.
 

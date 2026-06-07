@@ -17,7 +17,6 @@ import {
   Workflow,
 } from "lucide-react"
 
-import { GardenerLogo } from "@/components/brand"
 import { Button } from "@/components/ui/button"
 import {
   fetchOrganizationBilling,
@@ -265,7 +264,7 @@ export function AutomationPage() {
         <header className="flex flex-col gap-4 border-b pb-5 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <GardenerLogo className="size-5" />
+              <Workflow className="size-5" />
               Automation
             </div>
             <h1 className="mt-2 text-3xl font-semibold tracking-normal">
@@ -664,14 +663,29 @@ function GatePanel({
         />
         <MetricLine
           label="Latest baseline"
-          value={
-            automation.baseline.commit_sha
-              ? shortSha(automation.baseline.commit_sha)
-              : "Not promoted"
-          }
+          value={<BaselineReportLink automation={automation} />}
         />
       </div>
     </aside>
+  )
+}
+
+function BaselineReportLink({
+  automation,
+}: {
+  automation: RepositoryAutomationResponse
+}) {
+  if (!automation.baseline.commit_sha) {
+    return <>Not promoted</>
+  }
+
+  return (
+    <a
+      className="text-primary underline-offset-4 hover:underline"
+      href={`/report?repositoryId=${automation.repository.id}&baseline=1`}
+    >
+      {shortSha(automation.baseline.commit_sha)}
+    </a>
   )
 }
 
@@ -843,7 +857,7 @@ function EmptyRepositories() {
   )
 }
 
-function MetricLine({ label, value }: { label: string; value: string }) {
+function MetricLine({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2">
       <span className="text-muted-foreground">{label}</span>
