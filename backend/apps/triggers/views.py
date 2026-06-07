@@ -24,7 +24,12 @@ from apps.triggers.policy import (
     autonomous_pr_execution_block_reason,
 )
 from apps.triggers.serializers import RepositoryAutomationPolicySerializer
-from apps.triggers.service import SessionEnqueueError, trigger_manual_session
+from apps.triggers import registry
+from apps.triggers.service import (
+    SessionEnqueueError,
+    enqueue_session_for_trigger,
+    trigger_manual_session,
+)
 from apps.triggers.thresholds import DEFAULT_COMMIT_THRESHOLD
 
 
@@ -99,11 +104,22 @@ def repository_automation_trigger(request, organization_id, repository_id):
         extra["manual_plan"] = manual_plan
 
     try:
-        result = trigger_manual_session(
-            repository=repository,
-            actor=request.user,
-            extra=extra,
-        )
+        if _should_run_first_scan(repository, manual_plan):
+            result = enqueue_session_for_trigger(
+                repository=repository,
+                kind=registry.FIRST_SCAN,
+                subject_type="repository",
+                subject_id=str(repository.id),
+                source="first_scan",
+                extra=extra,
+                actor=request.user,
+            )
+        else:
+            result = trigger_manual_session(
+                repository=repository,
+                actor=request.user,
+                extra=extra,
+            )
     except TriggerNotPermittedError as exc:
         return api_error_response(
             "trigger_not_permitted",
@@ -118,6 +134,10 @@ def repository_automation_trigger(request, organization_id, repository_id):
         )
 
     return Response({"trigger": result}, status=status.HTTP_202_ACCEPTED)
+
+
+def _should_run_first_scan(repository, manual_plan) -> bool:
+    return manual_plan is None and not repository.gardening_sessions.exists()
 
 
 def _manual_plan_from_request(data):

@@ -177,7 +177,7 @@ def test_viewer_can_view_but_not_update_repository_automation_policy():
 
 
 @pytest.mark.django_db
-def test_manual_trigger_endpoint_enqueues_session(monkeypatch):
+def test_trigger_endpoint_enqueues_first_scan_when_repository_has_no_sessions(monkeypatch):
     maintainer = User.objects.create_user("maintainer@example.com", password="secret")
     repository = create_repo_with_member(maintainer, Membership.Role.MAINTAINER)
 
@@ -195,9 +195,38 @@ def test_manual_trigger_endpoint_enqueues_session(monkeypatch):
 
     assert response.status_code == 202
     session = GardeningSession.objects.get(repository=repository)
-    assert session.trigger["type"] == "manual"
+    assert session.trigger["type"] == "first_scan"
+    assert session.trigger["subject_type"] == "repository"
+    assert session.trigger["subject_id"] == str(repository.id)
     assert session.trigger["source_view"] == "repository_automation"
     assert response.json()["trigger"]["gardening_session_id"] == str(session.id)
+
+
+@pytest.mark.django_db
+def test_trigger_endpoint_enqueues_manual_session_after_first_scan(monkeypatch):
+    maintainer = User.objects.create_user("maintainer@example.com", password="secret")
+    repository = create_repo_with_member(maintainer, Membership.Role.MAINTAINER)
+    GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "first_scan", "subject_type": "repository", "subject_id": str(repository.id)},
+    )
+
+    class FakeResult:
+        id = "task-1"
+
+    monkeypatch.setattr(
+        "apps.triggers.service.run_gardening_session.delay",
+        lambda _session_id: FakeResult(),
+    )
+    client = APIClient()
+    client.force_authenticate(user=maintainer)
+
+    response = client.post(f"{automation_url(repository)}trigger/", {}, format="json")
+
+    assert response.status_code == 202
+    session = GardeningSession.objects.filter(repository=repository).order_by("-created_at").first()
+    assert session.trigger["type"] == "manual"
+    assert session.trigger["source_view"] == "repository_automation"
 
 
 @pytest.mark.django_db
@@ -251,6 +280,10 @@ def test_manual_trigger_endpoint_accepts_manual_plan_payload(monkeypatch):
 def test_manual_trigger_endpoint_respects_disabled_policy(monkeypatch):
     maintainer = User.objects.create_user("maintainer@example.com", password="secret")
     repository = create_repo_with_member(maintainer, Membership.Role.MAINTAINER)
+    GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "first_scan", "subject_type": "repository", "subject_id": str(repository.id)},
+    )
     policy = RepositoryAutomationPolicy.get_or_create_for_repository(repository)
     policy.manual_trigger_enabled = False
     policy.save(update_fields=["manual_trigger_enabled", "updated_at"])
