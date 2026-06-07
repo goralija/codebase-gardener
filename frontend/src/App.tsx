@@ -17,7 +17,7 @@ import {
   fetchOrganizationBilling,
   fetchOrganizationRepositories,
   fetchOrganizations,
-  GithubOnboardingRequestError,
+  isGithubOnboardingAuthenticationRequired,
   type ManagedRepository,
 } from "@/features/github-onboarding/github-onboarding-api"
 
@@ -46,9 +46,9 @@ export function App() {
 
   const repositories = repositoriesQuery.data?.repositories ?? EMPTY_REPOSITORIES
   const topRepositories = repositories.slice(0, 4)
-  const isPreInstallForbidden =
-    organizationsQuery.error instanceof GithubOnboardingRequestError &&
-    organizationsQuery.error.status === 403
+  const isAuthenticationRequired = isGithubOnboardingAuthenticationRequired(
+    organizationsQuery.error
+  )
 
   if (organizationsQuery.isLoading) {
     return (
@@ -59,7 +59,7 @@ export function App() {
     )
   }
 
-  if (organizationsQuery.isError && !isPreInstallForbidden) {
+  if (organizationsQuery.isError && !isAuthenticationRequired) {
     return (
       <OverviewState
         icon={<AlertTriangle className="size-5 text-destructive" />}
@@ -68,7 +68,24 @@ export function App() {
     )
   }
 
-  if (isPreInstallForbidden || !selectedOrganization) {
+  if (isAuthenticationRequired) {
+    return (
+      <OverviewState
+        action={
+          <Button asChild>
+            <a href="/onboarding/github">
+              <GitBranch />
+              GitHub setup
+            </a>
+          </Button>
+        }
+        icon={<CircleOff className="size-5 text-muted-foreground" />}
+        title="GitHub session required"
+      />
+    )
+  }
+
+  if (!selectedOrganization) {
     return (
       <OverviewState
         action={

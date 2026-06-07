@@ -5,6 +5,7 @@ cloudflared_bin="${1:-cloudflared}"
 tunnel_url="${2:-http://localhost:8000}"
 host_header="${3:-localhost:8000}"
 webhook_path="${4:-/api/v1/github-app/webhooks/}"
+transport_loglevel="${5:-fatal}"
 
 if ! command -v "$cloudflared_bin" >/dev/null 2>&1; then
   printf 'cloudflared is not installed; skipping public webhook tunnel.\n' >&2
@@ -19,7 +20,8 @@ printed_webhook_url=0
 set +e
 "$cloudflared_bin" tunnel \
   --url "$tunnel_url" \
-  --http-host-header "$host_header" 2>&1 | while IFS= read -r line; do
+  --http-host-header "$host_header" \
+  --transport-loglevel "$transport_loglevel" 2>&1 | while IFS= read -r line; do
     printf '%s\n' "$line"
     if [[ "$printed_webhook_url" -eq 0 && "$line" =~ https://[-[:alnum:]]+\.trycloudflare\.com ]]; then
       public_url="${BASH_REMATCH[0]}"

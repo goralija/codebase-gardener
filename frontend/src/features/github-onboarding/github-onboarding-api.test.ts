@@ -7,7 +7,6 @@ import {
   fetchOrganizations,
   fetchOrganizationRepositories,
   GithubOnboardingContractError,
-  GithubOnboardingRequestError,
   updateOrganizationBilling,
   parseRepositoriesResponse,
 } from "./github-onboarding-api"
@@ -217,9 +216,21 @@ describe("github onboarding API", () => {
   it("rejects request failures", async () => {
     await expect(
       fetchOrganizations({
-        fetcher: fetcherReturning(new Response(null, { status: 403 })),
+        fetcher: fetcherReturning(
+          jsonResponse(
+            {
+              code: "not_authenticated",
+              message: "Authentication credentials were not provided.",
+              details: {},
+            },
+            { status: 403 }
+          )
+        ),
       })
-    ).rejects.toBeInstanceOf(GithubOnboardingRequestError)
+    ).rejects.toMatchObject({
+      code: "not_authenticated",
+      status: 403,
+    })
   })
 
   it("rejects repository payloads that drift from the onboarding contract", () => {

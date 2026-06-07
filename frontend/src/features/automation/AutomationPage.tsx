@@ -22,7 +22,7 @@ import {
   fetchOrganizationBilling,
   fetchOrganizationRepositories,
   fetchOrganizations,
-  GithubOnboardingRequestError,
+  isGithubOnboardingAuthenticationRequired,
   updateOrganizationBilling,
   type ManagedRepository,
   type Organization,
@@ -208,9 +208,9 @@ export function AutomationPage() {
   const dirty = Boolean(
     automation && currentDraft && !draftMatchesPolicy(currentDraft, automation.policy)
   )
-  const isPreInstallForbidden =
-    organizationsQuery.error instanceof GithubOnboardingRequestError &&
-    organizationsQuery.error.status === 403
+  const isAuthenticationRequired = isGithubOnboardingAuthenticationRequired(
+    organizationsQuery.error
+  )
 
   if (organizationsQuery.isLoading) {
     return (
@@ -221,7 +221,7 @@ export function AutomationPage() {
     )
   }
 
-  if (organizationsQuery.isError && !isPreInstallForbidden) {
+  if (organizationsQuery.isError && !isAuthenticationRequired) {
     return (
       <AutomationState
         action={
@@ -241,7 +241,24 @@ export function AutomationPage() {
     )
   }
 
-  if (isPreInstallForbidden || organizations.length === 0) {
+  if (isAuthenticationRequired) {
+    return (
+      <AutomationState
+        action={
+          <Button asChild>
+            <a href="/onboarding/github">
+              <Settings />
+              Open GitHub setup
+            </a>
+          </Button>
+        }
+        icon={<CircleOff className="size-5 text-muted-foreground" />}
+        title="GitHub session required"
+      />
+    )
+  }
+
+  if (organizations.length === 0) {
     return (
       <AutomationState
         action={

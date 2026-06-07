@@ -120,11 +120,13 @@ const CSRF_COOKIE_NAME = "csrftoken"
 
 export class GithubOnboardingRequestError extends Error {
   readonly status: number
+  readonly code?: string
 
-  constructor(status: number, statusText: string) {
+  constructor(status: number, statusText: string, code?: string) {
     super(`GitHub onboarding request failed with ${status} ${statusText}.`)
     this.name = "GithubOnboardingRequestError"
     this.status = status
+    this.code = code
   }
 }
 
@@ -147,6 +149,14 @@ export function buildGithubOnboardingApiUrl(
   const normalizedPath = path.startsWith("/") ? path : `/${path}`
 
   return `${normalizedBase}${normalizedPath}`
+}
+
+export function isGithubOnboardingAuthenticationRequired(error: unknown) {
+  return (
+    error instanceof GithubOnboardingRequestError &&
+    error.status === 403 &&
+    error.code === "not_authenticated"
+  )
 }
 
 export function parseInstallationStart(input: unknown) {
@@ -251,7 +261,11 @@ async function requestJson<T>(
   )
 
   if (!response.ok) {
-    throw new GithubOnboardingRequestError(response.status, response.statusText)
+    throw new GithubOnboardingRequestError(
+      response.status,
+      response.statusText,
+      await readErrorCode(response)
+    )
   }
 
   let payload: unknown
@@ -267,6 +281,24 @@ async function requestJson<T>(
   } catch {
     throw new GithubOnboardingContractError()
   }
+}
+
+async function readErrorCode(response: Response) {
+  try {
+    const payload: unknown = await response.clone().json()
+    if (
+      payload &&
+      typeof payload === "object" &&
+      "code" in payload &&
+      typeof payload.code === "string"
+    ) {
+      return payload.code
+    }
+  } catch {
+    return undefined
+  }
+
+  return undefined
 }
 
 function requestHeaders(body: unknown) {

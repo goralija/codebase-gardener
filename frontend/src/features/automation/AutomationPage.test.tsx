@@ -85,6 +85,35 @@ describe("AutomationPage", () => {
     vi.unstubAllGlobals()
   })
 
+  it("shows an auth state when the session is missing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost")
+        if (url.pathname === "/api/v1/organizations/") {
+          return jsonResponse(
+            {
+              code: "not_authenticated",
+              message: "Authentication credentials were not provided.",
+              details: {},
+            },
+            { status: 403 }
+          )
+        }
+        return new Response(null, { status: 404 })
+      })
+    )
+
+    renderPage()
+
+    expect(
+      await screen.findByRole("heading", { name: "GitHub session required" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Open GitHub setup" })
+    ).toHaveAttribute("href", "/onboarding/github")
+  })
+
   it("renders automation controls and saves trigger settings", async () => {
     const user = userEvent.setup()
     mockAutomationFetch()

@@ -91,7 +91,30 @@ describe("App", () => {
 
   it("shows the setup state before a GitHub installation is available", async () => {
     mockOverviewFetch({
-      organizations: new Response(null, { status: 403 }),
+      organizations: jsonResponse(
+        {
+          code: "not_authenticated",
+          message: "Authentication credentials were not provided.",
+          details: {},
+        },
+        { status: 403 }
+      ),
+    })
+
+    renderApp()
+
+    expect(
+      await screen.findByRole("heading", { name: "GitHub session required" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "GitHub setup" })).toHaveAttribute(
+      "href",
+      "/onboarding/github"
+    )
+  })
+
+  it("shows the empty installation state for authenticated users without organizations", async () => {
+    mockOverviewFetch({
+      organizations: { organizations: [] },
     })
 
     renderApp()
@@ -99,10 +122,6 @@ describe("App", () => {
     expect(
       await screen.findByRole("heading", { name: "No GitHub installation" })
     ).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "GitHub setup" })).toHaveAttribute(
-      "href",
-      "/onboarding/github"
-    )
   })
 })
 
