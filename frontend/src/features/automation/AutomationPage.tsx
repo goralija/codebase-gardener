@@ -467,9 +467,10 @@ function AutomationWorkspace({
   }
 
   const canEdit = automation.permissions.can_edit
+  const isFirstScan = automation.recent_sessions.length === 0
   const canRunNow =
     automation.permissions.can_trigger_manual_session &&
-    automation.policy.manual_trigger_enabled
+    (isFirstScan || automation.policy.manual_trigger_enabled)
 
   return (
     <>
@@ -482,7 +483,9 @@ function AutomationWorkspace({
                 <h2>{repository.full_name}</h2>
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
-                Default branch: {repository.default_branch || "unknown"}
+                {isFirstScan
+                  ? "No sessions yet. The first scan promotes a baseline and can open a GARDENER.md PR if the repository constitution is missing."
+                  : `Default branch: ${repository.default_branch || "unknown"}`}
               </p>
             </div>
             <div className="flex gap-2">
@@ -497,7 +500,7 @@ function AutomationWorkspace({
                 ) : (
                   <Play />
                 )}
-                Run now
+                {isFirstScan ? "Run first scan" : "Run now"}
               </Button>
               <Button
                 disabled={!canEdit || !isDirty || isSaving}
