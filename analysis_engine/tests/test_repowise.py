@@ -120,6 +120,8 @@ def test_test_gap_parser_ignores_source_truth_docs_and_existing_tests():
         "metrics": [
             {"file_path": "GARDENER.md", "has_test_file": False},
             {"file_path": "docs/guide.md", "has_test_file": False},
+            {"file_path": "prisma.config.ts", "has_test_file": False},
+            {"file_path": "src/frontend/eslint.config.js", "has_test_file": False},
             {"file_path": "tests/test_service.py", "has_test_file": False},
             {"file_path": "src/service.py", "has_test_file": False},
         ],
@@ -132,6 +134,11 @@ def test_test_gap_parser_ignores_source_truth_docs_and_existing_tests():
             {
                 "biomarker_type": "untested_hotspot",
                 "file_path": "frontend/src/use-report.ts",
+                "reason": "No paired test.",
+            },
+            {
+                "biomarker_type": "untested_hotspot",
+                "file_path": "src/frontend/vite.config.ts",
                 "reason": "No paired test.",
             },
         ],
@@ -221,6 +228,24 @@ def test_snapshot_extracts_dependency_ci_ownership_and_graph_cycle_signals(tmp_p
         for s in signals["ownership_risks"]
     )
     _validate_analysis_snapshot(snapshot)
+
+
+def test_dependency_risks_accept_workspace_root_lockfile(tmp_path: Path):
+    repo_path = tmp_path / "repo"
+    (repo_path / "src" / "frontend").mkdir(parents=True)
+    (repo_path / "pnpm-workspace.yaml").write_text("packages:\n  - src/frontend\n")
+    (repo_path / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n")
+    (repo_path / "src" / "frontend" / "package.json").write_text(
+        '{"dependencies":{"react":"19.0.0"}}\n'
+    )
+
+    risks = repowise._dependency_risks(repo_path, {"findings": []})
+
+    assert not any(
+        risk["kind"] == "dependency_manifest_without_lockfile"
+        and risk["path"] == "src/frontend/package.json"
+        for risk in risks
+    )
 
 
 def test_dependency_risks_ignore_temporal_coupling_without_static_dependency(tmp_path: Path):

@@ -179,6 +179,25 @@ def test_source_code_opportunities_do_not_assume_pytest():
     assert opp["required_checks"] == []
 
 
+def test_test_gap_opportunities_are_file_scoped():
+    snap = _snapshot(
+        test_gaps=[
+            {"path": "src/frontend/src/App.tsx", "summary": "no test"},
+            {"path": "src/frontend/src/features/auth/AuthLayout.tsx", "summary": "no test"},
+        ]
+    )
+
+    opportunities = [
+        opp for opp in _generate(snap) if opp["category"] == "tests"
+    ]
+
+    assert [opp["affected_paths"] for opp in opportunities] == [
+        ["src/frontend/src/App.tsx"],
+        ["src/frontend/src/features/auth/AuthLayout.tsx"],
+    ]
+    assert all(opp["title"].startswith("Address tests in ") for opp in opportunities)
+
+
 def test_architecture_case():
     snap = _snapshot(dependency_cycles=[{"path": "core/a.py", "summary": "cycle"}])
     opp = _only(_generate(snap), "layer_violation_repair")

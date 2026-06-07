@@ -15,6 +15,7 @@ import os
 import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import PurePosixPath
 
 from apps.common.llm import LLMError, complete
 from apps.maintenance_prs.models import MaintenancePRPlan
@@ -48,6 +49,7 @@ SUPPORTED_AI_CATEGORIES = frozenset(
 _SOURCE_EXTENSIONS = frozenset(
     {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".kt", ".rb"}
 )
+_TEST_SOURCE_EXTENSIONS = frozenset({".py", ".ts", ".tsx", ".js", ".jsx"})
 
 _CATEGORY_GUIDANCE = {
     "dead_code": (
@@ -97,7 +99,9 @@ def ai_fixable_paths(plan: MaintenancePRPlan) -> list[str]:
     return [
         path
         for path in (plan.changed_paths or [])
-        if isinstance(path, str) and _is_safe_source_path(path)
+        if isinstance(path, str)
+        and _is_safe_source_path(path)
+        and (plan.category != "tests" or not _is_config_source_path(path))
     ]
 
 
@@ -144,6 +148,51 @@ def apply_ai_fix(
 
     _validate(path, content, updated, plan.category)
     _report(progress, 100, "done", f"{path}: fix ready")
+    return updated
+
+
+def apply_ai_test_fix(
+    source_path: str,
+    source_content: str,
+    test_path: str,
+    test_content: str,
+    plan: MaintenancePRPlan,
+    opportunity: dict | None = None,
+    progress: ProgressCallback | None = None,
+) -> str:
+    """Return complete test-file content for a tests plan."""
+
+    opportunity = opportunity or {}
+    if len(source_content) > _MAX_FILE_CHARS:
+        raise AIFixError(
+            f"{source_path} is too large ({len(source_content)} chars) for AI test authoring."
+        )
+    if len(test_content) > _MAX_FILE_CHARS:
+        raise AIFixError(
+            f"{test_path} is too large ({len(test_content)} chars) for AI test authoring."
+        )
+
+    _report(progress, 0, "reading", f"{source_path}: reading source for tests")
+    prompt = _build_test_prompt(
+        source_path,
+        source_content,
+        test_path,
+        test_content,
+        plan,
+        opportunity,
+    )
+    try:
+        raw = complete(prompt, system=_TEST_SYSTEM_PROMPT, max_tokens=_MODEL_OUTPUT_TOKEN_CAP)
+    except LLMError as exc:
+        raise AIFixError(f"LLM test fix failed for {source_path}: {exc}") from exc
+
+    _report(progress, 90, "analyzing", f"{test_path}: drafting tests")
+    fenced = _FENCE_RE.search(raw)
+    if not fenced:
+        raise AIFixError(f"AI test fix for {test_path} produced no fenced test file.")
+    updated = fenced.group(1).strip("\n") + "\n"
+    _validate(test_path, test_content, updated, "tests")
+    _report(progress, 100, "done", f"{test_path}: tests ready")
     return updated
 
 
@@ -266,6 +315,12 @@ _SYSTEM_PROMPT = (
     "The SEARCH text must match the current file exactly (including indentation). "
     "Use as few, as small blocks as possible. To delete code, leave the REPLACE side empty."
 )
+_TEST_SYSTEM_PROMPT = (
+    "You are a careful senior engineer adding focused regression tests. Return ONLY "
+    "the complete contents of the test file inside one fenced code block, no prose. "
+    "Preserve existing tests when existing test content is provided. Do not modify "
+    "production source code."
+)
 
 
 def _build_prompt(
@@ -303,6 +358,36 @@ def _build_prompt(
         f"{scope}"
         "Respond with SEARCH/REPLACE edit blocks only; do not return the whole file.\n\n"
         f"{label}:\n```\n{content}\n```"
+    )
+
+
+def _build_test_prompt(
+    source_path: str,
+    source_content: str,
+    test_path: str,
+    test_content: str,
+    plan: MaintenancePRPlan,
+    opportunity: dict,
+) -> str:
+    summary = opportunity.get("summary") or plan.title
+    evidence = opportunity.get("evidence") or []
+    evidence_lines = "\n".join(
+        f"- {e.get('path', source_path)}: {e.get('summary', '')}"
+        for e in evidence
+        if isinstance(e, dict)
+    ) or "- (no extra evidence)"
+    existing = test_content if test_content.strip() else "(new test file)"
+    return (
+        "Category: tests\n"
+        f"Source file: {source_path}\n"
+        f"Test file: {test_path}\n"
+        f"Finding: {summary}\n"
+        f"Evidence:\n{evidence_lines}\n\n"
+        "Instruction: Add focused tests for observable behavior from the source file. "
+        "Use the repository's apparent test framework and imports. Keep the change "
+        "small and reviewable. Return the full test file only.\n\n"
+        f"Existing test file content:\n```\n{existing}\n```\n\n"
+        f"Source file content:\n```\n{source_content}\n```"
     )
 
 
@@ -406,3 +491,40 @@ def _is_safe_source_path(path: str) -> bool:
     if path.startswith("/") or any(part in {"", ".", ".."} for part in path.split("/")):
         return False
     return not any(char in path for char in "*?[]")
+
+
+def _is_config_source_path(path: str) -> bool:
+    name = PurePosixPath(path).name.lower()
+    return ".config." in name or name in {"vite-env.d.ts"}
+
+
+def is_test_file_path(path: str) -> bool:
+    relative = PurePosixPath(path)
+    parts = {part.lower() for part in relative.parts}
+    name = relative.name.lower()
+    return bool(
+        parts & {"test", "tests", "__tests__", "spec", "specs"}
+        or name.startswith("test_")
+        or name.endswith("_test.py")
+        or ".test." in name
+        or ".spec." in name
+    )
+
+
+def paired_test_path(path: str) -> str | None:
+    if not _is_safe_source_path(path):
+        return None
+    relative = PurePosixPath(path)
+    if relative.suffix not in _TEST_SOURCE_EXTENSIONS:
+        return None
+    if is_test_file_path(path):
+        return path
+    if relative.suffix == ".py":
+        stem_parts = [
+            part
+            for part in [*relative.with_suffix("").parts[:-1], relative.stem]
+            if part not in {"src", "lib"}
+        ]
+        test_name = "test_" + "_".join(stem_parts) + ".py"
+        return PurePosixPath("tests", test_name).as_posix()
+    return relative.with_name(f"{relative.stem}.test{relative.suffix}").as_posix()

@@ -28,6 +28,7 @@ from apps.triggers.policy import (
 WORKER_AUDIT_SOURCE = "gardening_worker"
 DEFAULT_AI_FIX_WORKERS = 8
 BRANCH_COLLISION_ATTEMPTS = 10
+MAX_TEST_SOURCE_FIXES_PER_PLAN = 1
 
 
 class PRExecutionError(Exception):
@@ -242,6 +243,16 @@ def _apply_actual_file_fixes(
     if plan.category == "docs":
         paths = docs_actual_fix_paths(plan)
         opportunity = {}
+    elif plan.category == "tests":
+        return _apply_test_file_fixes(
+            client,
+            owner,
+            repo,
+            branch=branch,
+            token=token,
+            plan=plan,
+            progress=progress,
+        )
     else:
         paths = ai_fixes.ai_fixable_paths(plan)
         opportunity = _lookup_opportunity(plan)
@@ -298,6 +309,89 @@ def _apply_actual_file_fixes(
                 plan=plan,
             )
     return existing_paths
+
+
+def _apply_test_file_fixes(
+    client: GitHubAppClient,
+    owner: str,
+    repo: str,
+    *,
+    branch: str,
+    token: str,
+    plan: MaintenancePRPlan,
+    progress=None,
+) -> list[str]:
+    opportunity = _lookup_opportunity(plan)
+    updated_paths: list[str] = []
+    for source_path in ai_fixes.ai_fixable_paths(plan)[:MAX_TEST_SOURCE_FIXES_PER_PLAN]:
+        try:
+            source_content = client.get_file_contents(
+                owner,
+                repo,
+                source_path,
+                branch=branch,
+                token=token,
+            )
+        except GitHubAPIError as exc:
+            if exc.status_code == 404:
+                continue
+            raise
+
+        if ai_fixes.is_test_file_path(source_path):
+            test_path = source_path
+            test_content = source_content
+            updated = ai_fixes.apply_ai_fix(
+                test_path,
+                test_content,
+                plan,
+                opportunity,
+                progress=progress,
+            )
+        else:
+            test_path = ai_fixes.paired_test_path(source_path)
+            if test_path is None:
+                continue
+            test_sha = client.get_file_sha(
+                owner,
+                repo,
+                test_path,
+                branch=branch,
+                token=token,
+            )
+            test_content = (
+                client.get_file_contents(
+                    owner,
+                    repo,
+                    test_path,
+                    branch=branch,
+                    token=token,
+                )
+                if test_sha
+                else ""
+            )
+            updated = ai_fixes.apply_ai_test_fix(
+                source_path,
+                source_content,
+                test_path,
+                test_content,
+                plan,
+                opportunity,
+                progress=progress,
+            )
+
+        _write_updated_file(
+            client,
+            owner,
+            repo,
+            path=test_path,
+            original=test_content,
+            updated=updated,
+            branch=branch,
+            token=token,
+            plan=plan,
+        )
+        updated_paths.append(test_path)
+    return updated_paths
 
 
 def _create_or_reuse_plan_branch(
