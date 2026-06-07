@@ -31,8 +31,12 @@ export function OpportunitiesPage() {
   const gate = useGateState(cockpit)
   const repoName = useRepoNameLookup(cockpit.repositories)
   const opps = useMemo(() => {
-    return [...cockpit.reportsMap.values()].flatMap(oppsFromReport)
-  }, [cockpit.reportsMap])
+    return cockpit.repositories.flatMap((repo) => {
+      const report = cockpit.reportsMap.get(repo.id)
+      if (!report) return []
+      return oppsFromReport(report, cockpit.automationMap.get(repo.id))
+    })
+  }, [cockpit.repositories, cockpit.reportsMap, cockpit.automationMap])
 
   if (gate) return gate
   return (
@@ -83,8 +87,8 @@ export function PullsPage() {
   const plans = useMemo(() => {
     return cockpit.repositories.flatMap((repo) => {
       const report = cockpit.reportsMap.get(repo.id)
-      if (report) return plansFromReport(report)
       const automation = cockpit.automationMap.get(repo.id)
+      if (report) return plansFromReport(report, automation)
       return automation ? plansFromAutomation(automation) : []
     })
   }, [cockpit.repositories, cockpit.reportsMap, cockpit.automationMap])

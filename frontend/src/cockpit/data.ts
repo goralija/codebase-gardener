@@ -35,8 +35,7 @@ export function useOrganizations() {
 
 export function useSelectedOrganization() {
   const query = useOrganizations()
-  const organization: Organization | null =
-    query.data?.organizations[0] ?? null
+  const organization: Organization | null = query.data?.organizations[0] ?? null
   return {
     authRequired: isGithubOnboardingAuthenticationRequired(query.error),
     isError: query.isError,
@@ -88,13 +87,14 @@ export function useAutomationMap(
   return useMemo(() => {
     const map = new Map<string, RepositoryAutomationResponse>()
     let isLoading = false
+    let isError = false
     repositories.forEach((repository, index) => {
       const result = results[index]
       if (result?.isLoading) isLoading = true
+      if (result?.isError) isError = true
       if (result?.data) map.set(repository.id, result.data)
     })
-    return { isLoading, map }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return { isError, isLoading, map }
   }, [results, repositories])
 }
 
@@ -143,13 +143,14 @@ export function useReportsMap(repositories: ManagedRepository[]) {
   return useMemo(() => {
     const map = new Map<string, FirstReport>()
     let isLoading = false
+    let isError = false
     repositories.forEach((repository, index) => {
       const result = results[index]
       if (result?.isLoading) isLoading = true
+      if (result?.isError) isError = true
       if (result?.data) map.set(repository.id, result.data)
     })
-    return { isLoading, map }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return { isError, isLoading, map }
   }, [results, repositories])
 }
 
@@ -169,6 +170,10 @@ export function useCockpit() {
   return {
     authRequired,
     automationMap: automation.map,
+    dataError:
+      repositoriesQuery.isError || automation.isError || reports.isError,
+    dataLoading:
+      repositoriesQuery.isLoading || automation.isLoading || reports.isLoading,
     isError,
     organization,
     orgLoading: isLoading,

@@ -33,7 +33,11 @@ import { COMPONENTS } from "@/cockpit/model"
 
 type RepoLookup = (id: string) => string
 
-function gotoRepo(navigate: ReturnType<typeof useNavigate>, repoId: string, tab?: string) {
+function gotoRepo(
+  navigate: ReturnType<typeof useNavigate>,
+  repoId: string,
+  tab?: string
+) {
   navigate({
     search: tab ? { tab } : undefined,
     to: "/repo/$repoId",
@@ -64,7 +68,11 @@ function OpportunityDrawer({
             width: 34,
           }}
         >
-          <Icon color="var(--fg-2)" name={CAT_ICON[opp.category] || "FileText"} size={17} />
+          <Icon
+            color="var(--fg-2)"
+            name={CAT_ICON[opp.category] || "FileText"}
+            size={17}
+          />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="row gap6 mb8 wrap">
@@ -96,12 +104,18 @@ function OpportunityDrawer({
         {opp.blocked && (
           <div
             className="card pad mb16"
-            style={{ background: "var(--amber-bg)", borderColor: "var(--amber-bd)" }}
+            style={{
+              background: "var(--amber-bg)",
+              borderColor: "var(--amber-bd)",
+            }}
           >
             <div className="row gap10">
               <Icon color="var(--amber)" name="Ban" size={16} />
               <div>
-                <div className="b6" style={{ color: "var(--amber)", fontSize: 13 }}>
+                <div
+                  className="b6"
+                  style={{ color: "var(--amber)", fontSize: 13 }}
+                >
                   Blocked — won't be opened
                 </div>
                 <div className="sm fg2 mt8">{opp.blocked}</div>
@@ -123,18 +137,24 @@ function OpportunityDrawer({
         <div className="card pad mb20">
           <div className="row" style={{ justifyContent: "space-between" }}>
             <div className="row gap10">
-              <ConfidenceBadge value={opp.confidence} />
+              <ConfidenceBadge
+                floor={opp.confidenceFloor}
+                value={opp.confidence}
+              />
               <span className="sm muted">
-                {opp.confidence >= 90
-                  ? "Above autonomous floor (90%)"
-                  : "Below autonomous floor (90%)"}
+                {opp.confidence >= opp.confidenceFloor
+                  ? `Above autonomous floor (${opp.confidenceFloor}%)`
+                  : `Below autonomous floor (${opp.confidenceFloor}%)`}
               </span>
             </div>
           </div>
           <div className="meter mt12" style={{ height: 7 }}>
             <span
               style={{
-                background: opp.confidence >= 90 ? "var(--green)" : "var(--amber)",
+                background:
+                  opp.confidence >= opp.confidenceFloor
+                    ? "var(--green)"
+                    : "var(--amber)",
                 width: opp.confidence + "%",
               }}
             />
@@ -222,7 +242,11 @@ export function OpportunitiesView({
           options={[
             { count: opps.length, label: "All", value: "all" },
             { count: cnt("status", "ready"), label: "Ready", value: "ready" },
-            { count: cnt("status", "blocked"), label: "Blocked", value: "blocked" },
+            {
+              count: cnt("status", "blocked"),
+              label: "Blocked",
+              value: "blocked",
+            },
           ]}
           value={status}
         />
@@ -232,7 +256,11 @@ export function OpportunitiesView({
           onChange={setCat}
           options={[
             { label: "All categories", value: "all" },
-            ...COMPONENTS.map((c) => ({ icon: c.icon, label: c.label, value: c.key })),
+            ...COMPONENTS.map((c) => ({
+              icon: c.icon,
+              label: c.label,
+              value: c.key,
+            })),
           ]}
           value={cat === "all" ? "All categories" : cat}
           width={200}
@@ -311,7 +339,11 @@ export function OpportunitiesView({
                 <div className="col" style={{ alignItems: "flex-end", gap: 6 }}>
                   <StatusBadge status={o.status} />
                   <span className="row gap6 tiny muted nowrap">
-                    conf <ConfidenceBadge value={o.confidence} />
+                    conf{" "}
+                    <ConfidenceBadge
+                      floor={o.confidenceFloor}
+                      value={o.confidence}
+                    />
                   </span>
                 </div>
                 <Icon color="var(--fg-4)" name="ChevronRight" size={16} />
@@ -446,7 +478,10 @@ function PRDrawer({
             <CategoryBadge cat={pr.category} />
             <RiskBadge risk={pr.risk} />
           </div>
-          <div className="mono" style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.35 }}>
+          <div
+            className="mono"
+            style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.35 }}
+          >
             {pr.title}
           </div>
           <div className="row gap6 mt8 mono tiny muted">
@@ -463,12 +498,18 @@ function PRDrawer({
         {pr.blocked && (
           <div
             className="card pad mb16"
-            style={{ background: "var(--amber-bg)", borderColor: "var(--amber-bd)" }}
+            style={{
+              background: "var(--amber-bg)",
+              borderColor: "var(--amber-bd)",
+            }}
           >
             <div className="row gap10">
               <Icon color="var(--amber)" name="Ban" size={16} />
               <div>
-                <div className="b6" style={{ color: "var(--amber)", fontSize: 13 }}>
+                <div
+                  className="b6"
+                  style={{ color: "var(--amber)", fontSize: 13 }}
+                >
                   Blocked — not opened
                 </div>
                 <div className="sm fg2 mt8">{pr.blocked}</div>
@@ -484,9 +525,11 @@ function PRDrawer({
           </dd>
           <dt>Confidence</dt>
           <dd className="row gap10">
-            <ConfidenceBadge value={pr.confidence} />
+            <ConfidenceBadge floor={pr.confidenceFloor} value={pr.confidence} />
             <span className="sm muted">
-              {pr.confidence >= 90 ? "above floor" : "below floor"}
+              {pr.confidence >= pr.confidenceFloor
+                ? "above floor"
+                : "below floor"}
             </span>
           </dd>
           <dt>Risk tier</dt>
@@ -537,7 +580,9 @@ function PRDrawer({
                   key={i}
                   style={{
                     borderBottom:
-                      i < pr.checks.length - 1 ? "1px solid var(--border)" : "none",
+                      i < pr.checks.length - 1
+                        ? "1px solid var(--border)"
+                        : "none",
                     padding: "6px 0",
                   }}
                 >
@@ -658,7 +703,10 @@ export function PullsView({
                     <StatusBadge status={p.status} />
                   </td>
                   <td className="num">
-                    <ConfidenceBadge value={p.confidence} />
+                    <ConfidenceBadge
+                      floor={p.confidenceFloor}
+                      value={p.confidence}
+                    />
                   </td>
                   <td>
                     <RiskBadge risk={p.risk} />

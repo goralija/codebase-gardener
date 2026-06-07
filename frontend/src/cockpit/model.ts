@@ -222,7 +222,8 @@ export function toRepoModel(
         : "never"
 
   return {
-    autonomy: (automation?.policy.autonomy_mode as AutonomyMode) ?? "conservative",
+    autonomy:
+      (automation?.policy.autonomy_mode as AutonomyMode) ?? "conservative",
     baseSha: automation?.baseline.commit_sha ?? null,
     branch: repo.default_branch || "—",
     contributors: repo.complexity.contributor_count,
@@ -276,12 +277,11 @@ export function systemsFromReport(report: FirstReport): SystemModel[] {
   const scopeByName = new Map(
     report.entropy_report.scopes.map((s) => [s.name, s.overall])
   )
-  const protectedPaths = report.repository_constitution.protected_modules.flatMap(
-    (m) => m.paths
-  )
+  const protectedPaths =
+    report.repository_constitution.protected_modules.flatMap((m) => m.paths)
   return report.analysis_snapshot.logical_systems.map((sys) => {
     const isProtected = sys.paths.some((p) =>
-      protectedPaths.some((pp) => pp.startsWith(p) || p.startsWith(pp))
+      protectedPaths.some((pp) => pathPatternsOverlap(p, pp))
     )
     const entropy = scopeByName.get(sys.name)
     return {
@@ -293,8 +293,21 @@ export function systemsFromReport(report: FirstReport): SystemModel[] {
   })
 }
 
+function pathPatternsOverlap(left: string, right: string): boolean {
+  const a = globPrefix(left)
+  const b = globPrefix(right)
+  if (!a || !b) return false
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
+}
+
+function globPrefix(pattern: string): string {
+  const wildcard = pattern.search(/[*?[{]/)
+  const prefix = wildcard >= 0 ? pattern.slice(0, wildcard) : pattern
+  return prefix.replace(/\/+$/, "")
+}
+
 export type ConstitutionModel = {
-  present: boolean
+  hasSourceTruth: boolean
   coverage: number
   protected: { name: string; paths: string[]; reason: string }[]
   neverTouch: { path: string; reason: string }[]
@@ -316,8 +329,8 @@ export function constitutionFromReport(report: FirstReport): ConstitutionModel {
   return {
     allowed,
     coverage: pct(c.completeness_score) ?? 0,
+    hasSourceTruth: present,
     neverTouch: c.never_touch,
-    present,
     protected: c.protected_modules,
     questions: c.open_questions.map((q) => ({
       id: q.question_id,
@@ -335,6 +348,7 @@ export type OppModel = {
   category: string
   risk: string
   confidence: number
+  confidenceFloor: number
   status: "ready" | "blocked"
   paths: string[]
   evidence: string
@@ -343,14 +357,22 @@ export type OppModel = {
   entropyDelta: number
 }
 
-export function oppsFromReport(report: FirstReport): OppModel[] {
+export function oppsFromReport(
+  report: FirstReport,
+  automation?: RepositoryAutomationResponse
+): OppModel[] {
+  const confidenceFloor = pct(automation?.effective.confidence_threshold) ?? 90
   return report.maintenance_opportunities.map((o) => {
     const blocked = o.blocked_by.length > 0 ? o.blocked_by.join("; ") : null
     const evidence =
-      o.evidence.map((e) => e.summary).filter(Boolean).join(" ") || o.summary
+      o.evidence
+        .map((e) => e.summary)
+        .filter(Boolean)
+        .join(" ") || o.summary
     return {
       blocked,
       category: o.category,
+      confidenceFloor,
       confidence: pct(o.confidence) ?? 0,
       entropyDelta: o.expected_entropy_delta,
       evidence,
@@ -380,35 +402,54 @@ export type PlanModel = {
   evidence: string
   branch: string
   prUrl: string | null
+  confidenceFloor: number
 }
 
-export function plansFromReport(report: FirstReport): PlanModel[] {
+export function plansFromReport(
+  report: FirstReport,
+  automation?: RepositoryAutomationResponse
+): PlanModel[] {
   const oppCategory = new Map(
     report.maintenance_opportunities.map((o) => [
       o.maintenance_opportunity_id,
       o.category,
     ])
   )
+  const automationPlanById = new Map(
+    (automation?.recent_pr_plans ?? []).map((p) => [p.id, p])
+  )
   return report.maintenance_pr_plans.map((p) => {
-    const status = p.blocked
+    const automationPlan = automationPlanById.get(p.maintenance_pr_plan_id)
+    const blocked = p.blocked || Boolean(automationPlan?.blocked)
+    const status = blocked
       ? "blocked"
       : p.terminal_outcome
         ? p.terminal_outcome
-        : "ready"
+        : automationPlan?.terminal_outcome
+          ? automationPlan.terminal_outcome
+          : automationPlan?.created_pr_url
+            ? "open"
+            : "ready"
     const category =
       p.maintenance_opportunity_ids
         .map((id) => oppCategory.get(id))
         .find(Boolean) ?? "maintainability"
     return {
-      blocked: p.block_reason,
+      blocked: automationPlan?.block_reason ?? p.block_reason,
       branch: p.branch_name,
       category,
       checks: p.required_checks,
+      confidenceFloor:
+        pct(
+          automationPlan?.confidence_threshold ??
+            p.confidence_threshold ??
+            automation?.effective.confidence_threshold
+        ) ?? 90,
       confidence: pct(p.confidence) ?? 0,
       evidence: p.pr_body_sections.evidence,
       id: p.maintenance_pr_plan_id,
       paths: p.changed_paths,
-      prUrl: null,
+      prUrl: automationPlan?.created_pr_url ?? null,
       repoId: p.repository_id,
       risk: riskFromTier(p.risk_tier),
       status,
@@ -467,6 +508,7 @@ export function plansFromAutomation(
       branch: "",
       category: "maintainability",
       checks: [],
+      confidenceFloor: pct(p.confidence_threshold) ?? 90,
       confidence: pct(p.confidence) ?? 0,
       evidence: "",
       id: p.id,

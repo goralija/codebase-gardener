@@ -29,7 +29,11 @@ function gotoRepo(
   repoId: string,
   tab: string
 ) {
-  navigate({ params: { repoId }, search: { tab }, to: "/repo/$repoId" } as never)
+  navigate({
+    params: { repoId },
+    search: { tab },
+    to: "/repo/$repoId",
+  } as never)
 }
 
 export function EntropyPage() {
@@ -42,7 +46,11 @@ export function EntropyPage() {
       .map((repo) => {
         const report = cockpit.reportsMap.get(repo.id)
         if (!report) return null
-        return { entropy: entropyFromReport(report), loc: repo.complexity.loc, repo }
+        return {
+          entropy: entropyFromReport(report),
+          loc: repo.complexity.loc,
+          repo,
+        }
       })
       .filter((x): x is NonNullable<typeof x> => x !== null)
       .sort((a, b) => b.entropy.overall - a.entropy.overall)
@@ -69,10 +77,36 @@ export function EntropyPage() {
   })
 
   const bands = [
-    { color: "var(--e-high)", key: "high", label: "High", n: scored.filter((s) => s.entropy.overall >= 70).length, range: "70–100" },
-    { color: "var(--e-elev)", key: "elev", label: "Elevated", n: scored.filter((s) => s.entropy.overall >= 50 && s.entropy.overall < 70).length, range: "50–69" },
-    { color: "var(--e-mod)", key: "mod", label: "Moderate", n: scored.filter((s) => s.entropy.overall >= 30 && s.entropy.overall < 50).length, range: "30–49" },
-    { color: "var(--e-low)", key: "low", label: "Low", n: scored.filter((s) => s.entropy.overall < 30).length, range: "0–29" },
+    {
+      color: "var(--e-high)",
+      key: "high",
+      label: "High",
+      n: scored.filter((s) => s.entropy.overall >= 70).length,
+      range: "70–100",
+    },
+    {
+      color: "var(--e-elev)",
+      key: "elev",
+      label: "Elevated",
+      n: scored.filter((s) => s.entropy.overall >= 50 && s.entropy.overall < 70)
+        .length,
+      range: "50–69",
+    },
+    {
+      color: "var(--e-mod)",
+      key: "mod",
+      label: "Moderate",
+      n: scored.filter((s) => s.entropy.overall >= 30 && s.entropy.overall < 50)
+        .length,
+      range: "30–49",
+    },
+    {
+      color: "var(--e-low)",
+      key: "low",
+      label: "Low",
+      n: scored.filter((s) => s.entropy.overall < 30).length,
+      range: "0–29",
+    },
   ]
 
   return (
@@ -136,7 +170,10 @@ export function EntropyPage() {
                         }}
                       />
                     </div>
-                    <span className="mono b6" style={{ textAlign: "right", width: 20 }}>
+                    <span
+                      className="mono b6"
+                      style={{ textAlign: "right", width: 20 }}
+                    >
                       {b.n}
                     </span>
                   </div>
@@ -249,8 +286,10 @@ export function ConstitutionPage() {
 
   if (gate) return gate
 
-  const withConstitution = rows.filter((r) => r.constitution?.present)
-  const missing = rows.filter((r) => r.constitution && !r.constitution.present)
+  const withConstitution = rows.filter((r) => r.constitution?.hasSourceTruth)
+  const missing = rows.filter(
+    (r) => r.constitution && !r.constitution.hasSourceTruth
+  )
   const avgCov =
     withConstitution.length > 0
       ? Math.round(
@@ -293,7 +332,7 @@ export function ConstitutionPage() {
             )
           }
           icon="FileCheck2"
-          label="With GARDENER.md"
+          label="With source truth"
           unit={`/ ${rows.length}`}
           value={withConstitution.length}
         />
@@ -329,7 +368,7 @@ export function ConstitutionPage() {
             <thead>
               <tr>
                 <th>Repository</th>
-                <th>GARDENER.md</th>
+                <th>Source truth</th>
                 <th>Coverage</th>
                 <th className="num">Protected</th>
                 <th className="num">Allowed fixes</th>
@@ -348,7 +387,7 @@ export function ConstitutionPage() {
                     <RepoName name={repo.name} />
                   </td>
                   <td>
-                    {constitution?.present ? (
+                    {constitution?.hasSourceTruth ? (
                       <Badge icon="FileCheck2" tone="green">
                         present
                       </Badge>
@@ -359,7 +398,7 @@ export function ConstitutionPage() {
                     )}
                   </td>
                   <td style={{ width: 200 }}>
-                    {constitution?.present ? (
+                    {constitution?.hasSourceTruth ? (
                       <div className="row gap10">
                         <div className="meter grow">
                           <span
@@ -414,7 +453,7 @@ export function ConstitutionPage() {
                       <Badge tone="amber">
                         {constitution.questions.length} open
                       </Badge>
-                    ) : constitution?.present ? (
+                    ) : constitution?.hasSourceTruth ? (
                       <Badge icon="Check" tone="green">
                         clear
                       </Badge>
