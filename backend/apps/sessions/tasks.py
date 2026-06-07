@@ -23,6 +23,7 @@ from apps.sessions.lifecycle import (
     execute_session_pr_plans,
 )
 from apps.sessions.models import GardeningSession
+from apps.triggers import registry
 
 MAX_AUTO_APPROVED_SESSION_PLANS = 3
 
@@ -64,11 +65,10 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
         session.save(update_fields=["current_analysis", "updated_at"])
 
         first_report = storage_service.load_first_report(analysis_result.analysis)
-        if _is_first_scan(session):
-            maybe_open_constitution_pr(
-                repository=session.repository,
-                artifacts=analysis_result.artifacts,
-            )
+        maybe_open_constitution_pr(
+            repository=session.repository,
+            artifacts=analysis_result.artifacts,
+        )
 
         if _baseline_only_session(session, baseline_analysis):
             current_phase = "learn"
@@ -93,7 +93,8 @@ def run_gardening_session(self, session_id: str) -> dict[str, str]:
             session.save(update_fields=["drift_report", "updated_at"])
 
             current_phase = "plan"
-            drift_opportunities = _drift_relevant_opportunities(
+            drift_opportunities = _planning_opportunities(
+                session=session,
                 opportunities=analysis_result.artifacts.get("opportunities") or [],
                 drift_report=drift_report,
             )
@@ -395,6 +396,61 @@ def _drift_relevant_opportunities(
     return relevant
 
 
+def _planning_opportunities(
+    *,
+    session: GardeningSession,
+    opportunities: list[dict],
+    drift_report: dict,
+) -> list[dict]:
+    drift_opportunities = _drift_relevant_opportunities(
+        opportunities=opportunities,
+        drift_report=drift_report,
+    )
+    if drift_opportunities or not _is_manual_session(session):
+        return drift_opportunities
+    return _current_manual_backlog_opportunities(session, opportunities)
+
+
+def _current_manual_backlog_opportunities(
+    session: GardeningSession,
+    opportunities: list[dict],
+) -> list[dict]:
+    """Let explicit manual runs act on current safe backlog when drift is empty.
+
+    Automated triggers stay drift-scoped. Manual triggers are user intent to do
+    useful maintenance now, so they may plan from current opportunities that do
+    not already have an active unblocked PR plan.
+    """
+    from apps.maintenance_prs.models import MaintenancePRPlan, MaintenancePRPlanOpportunity
+
+    opportunity_ids = [
+        opportunity.get("maintenance_opportunity_id")
+        for opportunity in opportunities
+        if opportunity.get("maintenance_opportunity_id")
+    ]
+    if not opportunity_ids:
+        return []
+
+    active_opportunity_ids = set(
+        MaintenancePRPlanOpportunity.objects.filter(
+            repository=session.repository,
+            maintenance_opportunity_id__in=opportunity_ids,
+            plan__blocked=False,
+            plan__terminal_outcome="",
+            plan__execution_status__in=[
+                MaintenancePRPlan.ExecutionStatus.PENDING,
+                MaintenancePRPlan.ExecutionStatus.RUNNING,
+                MaintenancePRPlan.ExecutionStatus.SUCCEEDED,
+            ],
+        ).values_list("maintenance_opportunity_id", flat=True)
+    )
+    return [
+        opportunity
+        for opportunity in opportunities
+        if opportunity.get("maintenance_opportunity_id") not in active_opportunity_ids
+    ]
+
+
 def _opportunity_paths(opportunity: dict) -> set[str]:
     paths = {str(path) for path in opportunity.get("affected_paths", []) if str(path)}
     for evidence in opportunity.get("evidence") or []:
@@ -468,6 +524,10 @@ def _plan_session_prs(
         constitution=constitution,
         profile=profile,
     ) + _manual_session_pr_plans(session)
+
+
+def _is_manual_session(session: GardeningSession) -> bool:
+    return session.trigger.get("type") == registry.MANUAL
 
 
 def _manual_session_pr_plans(session: GardeningSession) -> list[MaintenancePRPlan]:

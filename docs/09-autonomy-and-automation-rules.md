@@ -18,10 +18,18 @@ Every Gardening Session follows:
 
 First scans are baseline-only. They run repository analysis, store and promote
 the initial baseline, and may propose a starter `GARDENER.md`, but they do not
-create maintenance PR plans. A later non-first-scan session compares current
-analysis against the latest promoted baseline and plans only from new or
-worsened drift. If a manual or automated session runs before any baseline
-exists, it promotes the current analysis and stops without maintenance PRs.
+create maintenance PR plans. If any hosted session analysis finds that
+`GARDENER.md` is missing, Gardener may propose the same starter constitution PR.
+If a manual or automated session runs before any baseline exists, it promotes
+the current analysis and stops without maintenance PRs.
+
+A later non-first-scan session compares current analysis against the latest
+promoted baseline. Automated triggers plan only from new or worsened drift.
+Manual triggers first use drift-relevant opportunities; if no drift-relevant
+opportunities exist, they may plan from current maintenance opportunities not
+already covered by an active unblocked Gardener PR plan. All PR creation still
+requires repository autonomy, add-on, constitution, protected-path, confidence,
+and implemented-fix gates.
 
 Every completed non-first-scan session promotes its current analysis as the
 latest relevant baseline. After all Gardener-authored PRs from that session are

@@ -192,6 +192,50 @@ def test_run_gardening_session_offers_constitution_pr_from_analysis_artifacts(
 
 
 @pytest.mark.django_db
+def test_manual_baseline_only_session_offers_constitution_pr_from_analysis_artifacts(
+    settings,
+    monkeypatch,
+):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "manual"},
+    )
+    artifacts = {
+        "constitution": {
+            "open_questions": [
+                {
+                    "severity": "blocking",
+                    "question": "No repository constitution (GARDENER.md) found.",
+                }
+            ]
+        }
+    }
+    calls = []
+
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+            repository,
+            artifacts=artifacts,
+            source=source,
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.maybe_open_constitution_pr",
+        lambda **kwargs: calls.append(kwargs) or {"created": True},
+    )
+
+    run_gardening_session.delay(str(session.id)).get()
+
+    assert len(calls) == 1
+    assert calls[0]["repository"] == repository
+    assert calls[0]["artifacts"]["constitution"] == artifacts["constitution"]
+
+
+@pytest.mark.django_db
 def test_first_scan_stores_baseline_without_maintenance_pr_plans(
     settings,
     monkeypatch,
@@ -335,6 +379,118 @@ def test_run_gardening_session_plans_and_executes_real_opportunities(
             "reason": "Plan is pending approval for autonomous execution.",
         },
     ]
+    assert session.result["errors"] == []
+
+
+@pytest.mark.django_db
+def test_manual_session_plans_current_opportunities_when_drift_is_empty(
+    settings,
+    monkeypatch,
+):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    repository = create_repository(1)
+    promote_baseline(repository)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "manual"},
+    )
+    opportunities = [
+        worker_opportunity("opp_docs", "Refresh README", ["README.md"], "docs", 0.94),
+    ]
+    artifacts = {
+        "constitution": worker_constitution(repository),
+        "opportunities": opportunities,
+    }
+    report = report_for_repository(repository, opportunities)
+    executed: list[str] = []
+
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+            repository,
+            artifacts=artifacts,
+            source=source,
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.storage_service.load_first_report",
+        lambda _analysis: report,
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks._build_session_drift_report",
+        lambda **kwargs: empty_drift_report(repository, **kwargs),
+    )
+
+    def execute(plan):
+        executed.append(str(plan.id))
+        MaintenancePRPlan.objects.filter(id=plan.id).update(
+            execution_status=MaintenancePRPlan.ExecutionStatus.SUCCEEDED
+        )
+
+    monkeypatch.setattr("apps.maintenance_prs.executor.execute_maintenance_pr_plan", execute)
+
+    run_gardening_session.delay(str(session.id)).get()
+
+    session.refresh_from_db()
+    plans = list(MaintenancePRPlan.objects.for_session(str(session.id)))
+    assert len(plans) == 1
+    assert plans[0].approval_status == MaintenancePRPlan.ApprovalStatus.APPROVED
+    assert executed == [str(plans[0].id)]
+    assert session.result["opportunities_selected"] == ["opp_docs"]
+    assert session.result["maintenance_pr_plans"] == executed
+    assert session.result["errors"] == []
+
+
+@pytest.mark.django_db
+def test_automated_session_does_not_plan_current_opportunities_when_drift_is_empty(
+    settings,
+    monkeypatch,
+):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    repository = create_repository(1)
+    promote_baseline(repository)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "schedule"},
+    )
+    opportunities = [
+        worker_opportunity("opp_docs", "Refresh README", ["README.md"], "docs", 0.94),
+    ]
+    artifacts = {
+        "constitution": worker_constitution(repository),
+        "opportunities": opportunities,
+    }
+    report = report_for_repository(repository, opportunities)
+
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+            repository,
+            artifacts=artifacts,
+            source=source,
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.storage_service.load_first_report",
+        lambda _analysis: report,
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks._build_session_drift_report",
+        lambda **kwargs: empty_drift_report(repository, **kwargs),
+    )
+    monkeypatch.setattr(
+        "apps.maintenance_prs.executor.execute_maintenance_pr_plan",
+        lambda _plan: (_ for _ in ()).throw(AssertionError("should not execute")),
+    )
+
+    run_gardening_session.delay(str(session.id)).get()
+
+    session.refresh_from_db()
+    assert MaintenancePRPlan.objects.for_session(str(session.id)).count() == 0
+    assert session.result["opportunities_selected"] == []
+    assert session.result["maintenance_pr_plans"] == []
     assert session.result["errors"] == []
 
 
@@ -1006,6 +1162,39 @@ def repo_root():
     from pathlib import Path
 
     return Path(__file__).resolve().parents[2]
+
+
+def empty_drift_report(
+    repository: ManagedRepository,
+    *,
+    baseline_analysis: RepositoryAnalysis,
+    current_analysis: RepositoryAnalysis,
+    **_kwargs,
+) -> dict:
+    return {
+        "schema_version": "1.0",
+        "repository_id": str(repository.id),
+        "baseline_analysis_id": str(baseline_analysis.id),
+        "baseline_commit_sha": baseline_analysis.commit_sha,
+        "current_analysis_id": str(current_analysis.id),
+        "current_commit_sha": current_analysis.commit_sha,
+        "generated_at": "2026-06-07T00:00:00Z",
+        "no_baseline": False,
+        "entropy_delta": {"overall": 0.0, "components": {}},
+        "signal_changes": {
+            "new": [],
+            "worsened": [],
+            "resolved": [],
+            "unchanged_count": 1,
+        },
+        "hotspot_paths": [],
+        "summary": {
+            "new_count": 0,
+            "worsened_count": 0,
+            "resolved_count": 0,
+            "unchanged_count": 1,
+        },
+    }
 
 
 def analysis_result(

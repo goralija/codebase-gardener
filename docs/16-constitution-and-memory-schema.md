@@ -7,7 +7,7 @@
 
 `GARDENER.md` is the human-readable Repository Constitution. It is the preferred customer-editable source truth for Gardener.
 
-If a first scan cannot find `GARDENER.md`, Gardener should keep the repository in `no_autonomy` and may open a draft PR that adds a conservative starter constitution. That generated file is only a proposal; merging or editing it is the customer approval step that turns it into source truth.
+If hosted analysis cannot find `GARDENER.md`, Gardener should keep the repository in `no_autonomy` and may open a draft PR that adds a conservative starter constitution. That generated file is only a proposal; merging or editing it is the customer approval step that turns it into source truth.
 
 Recommended sections:
 
