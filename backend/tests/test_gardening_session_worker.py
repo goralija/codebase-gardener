@@ -19,6 +19,7 @@ from apps.github_app.models import GitHubInstallation
 from apps.maintenance_prs.executor import PlanNotExecutableError
 from apps.maintenance_prs.models import MaintenancePRPlan
 from apps.repositories.models import ManagedRepository
+from apps.sessions.lifecycle import build_gardening_session_result
 from apps.sessions.models import GardeningSession
 from apps.sessions.tasks import (
     RetryableSessionError,
@@ -845,6 +846,26 @@ def test_run_gardening_session_without_baseline_ignores_fixture_opportunities(
     assert session.result["maintenance_pr_plans"] == []
     assert session.result["opportunities_deferred"] == []
     assert_gardening_session_result_contract(session.result)
+
+
+@pytest.mark.django_db
+def test_explicit_session_report_does_not_select_seeded_fixture_work():
+    session = GardeningSession.objects.create(
+        repository=create_repository(1),
+        trigger={"type": "manual"},
+    )
+    report = copy.deepcopy(load_first_report_fixture())
+
+    result = build_gardening_session_result(
+        session,
+        started_at=timezone.now(),
+        first_report=report,
+    )
+
+    assert result["opportunities_selected"] == []
+    assert result["opportunities_deferred"] == []
+    assert result["maintenance_pr_plans"] == []
+    assert_gardening_session_result_contract(result)
 
 
 @pytest.mark.django_db

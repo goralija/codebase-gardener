@@ -569,7 +569,11 @@ def _test_gaps(health: JsonObject) -> list[JsonObject]:
         if not isinstance(metric, dict):
             continue
         path = metric.get("file_path")
-        if metric.get("has_test_file") is False and isinstance(path, str):
+        if (
+            metric.get("has_test_file") is False
+            and isinstance(path, str)
+            and _is_test_gap_target(path)
+        ):
             summary = "Repowise did not find a paired test file."
             gaps.append(
                 {
@@ -588,18 +592,39 @@ def _test_gaps(health: JsonObject) -> list[JsonObject]:
             str(finding.get(key, ""))
             for key in ("biomarker_type", "reason", "details")
         ).lower()
+        path = finding.get("file_path")
+        if isinstance(path, str) and path and not _is_test_gap_target(path):
+            continue
         if any(keyword in haystack for keyword in keywords):
             summary = finding.get("reason") or "Repowise testing signal."
             gaps.append(
                 {
                     "kind": finding.get("biomarker_type", "test_gap"),
-                    "path": finding.get("file_path"),
+                    "path": path,
                     "severity": finding.get("severity"),
                     "summary": summary,
-                    "evidence": _evidence(finding.get("file_path"), summary),
+                    "evidence": _evidence(path, summary),
                 }
             )
     return gaps
+
+
+def _is_test_gap_target(path: str) -> bool:
+    relative = Path(path)
+    if relative.suffix.lower() not in _SOURCE_EXTENSIONS:
+        return False
+
+    parts = {part.lower() for part in relative.parts}
+    if parts & {"test", "tests", "__tests__", "spec", "specs"}:
+        return False
+
+    name = relative.name.lower()
+    return not (
+        name.startswith("test_")
+        or name.endswith("_test.py")
+        or ".test." in name
+        or ".spec." in name
+    )
 
 
 _DEPENDENCY_MANIFESTS = frozenset(

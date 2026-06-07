@@ -37,9 +37,14 @@ def build_gardening_session_result(
     first_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     finished_at = finished_at or timezone.now()
+    use_fixture_work = first_report is None
     report = first_report or load_first_report_fixture()
     repository_id = _repository_id(report)
-    selected, deferred, plan_ids = _select_session_work(session, report)
+    selected, deferred, plan_ids = _select_session_work(
+        session,
+        report,
+        use_fixture_work=use_fixture_work,
+    )
     if executed_plan_ids is not None:
         plan_ids = executed_plan_ids
     phase_results = _phase_results()
@@ -145,10 +150,14 @@ def _select_fixture_work(fixture: dict[str, Any]) -> tuple[list[str], list[dict[
 def _select_session_work(
     session: GardeningSession,
     report: dict[str, Any],
+    *,
+    use_fixture_work: bool = False,
 ) -> tuple[list[str], list[dict[str, str]], list[str]]:
     selected, deferred, plan_ids = _select_database_work(session)
     if selected or deferred or plan_ids:
         return selected, deferred, plan_ids
+    if not use_fixture_work:
+        return [], [], []
     return _select_fixture_work(report)
 
 
