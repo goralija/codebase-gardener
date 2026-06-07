@@ -6,6 +6,7 @@ import {
   AutomationRequestError,
   fetchRepositoryAutomation,
   parseRepositoryAutomationResponse,
+  cancelRepositorySession,
   triggerRepositorySession,
   updateRepositoryAutomation,
 } from "./automation-api"
@@ -115,6 +116,36 @@ describe("automation API", () => {
     expect(fetcher).toHaveBeenCalledWith(
       expect.stringContaining(
         "/api/v1/organizations/org-1/repositories/repo-1/automation/trigger/"
+      ),
+      expect.objectContaining({
+        body: JSON.stringify({}),
+        method: "POST",
+      })
+    )
+  })
+
+  it("cancels a session", async () => {
+    const fetcher = fetcherReturning(
+      jsonResponse({
+        session: {
+          gardening_session_id: "session-1",
+          status: "canceled",
+        },
+      })
+    )
+
+    await expect(
+      cancelRepositorySession("org-1", "repo-1", "session-1", { fetcher })
+    ).resolves.toMatchObject({
+      session: {
+        gardening_session_id: "session-1",
+        status: "canceled",
+      },
+    })
+
+    expect(fetcher).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "/api/v1/organizations/org-1/repositories/repo-1/sessions/session-1/cancel/"
       ),
       expect.objectContaining({
         body: JSON.stringify({}),

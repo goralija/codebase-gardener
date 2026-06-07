@@ -333,6 +333,9 @@ def execute_session_pr_plans(
             errors.append(_plan_execution_error(plan, exc))
             continue
         except (PRExecutionError, AIFixError) as exc:
+            # A single plan's failure (e.g. the AI author could not produce an
+            # applicable edit) must not abort the whole session. Record it and
+            # move on to the remaining plans.
             errors.append(_plan_execution_error(plan, exc))
             continue
         executed.append(str(plan.id))

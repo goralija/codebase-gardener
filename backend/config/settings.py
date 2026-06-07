@@ -177,9 +177,18 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
 CELERY_TASK_TRACK_STARTED = True
+ORPHANED_SESSION_GRACE_SECONDS = env.float("ORPHANED_SESSION_GRACE_SECONDS", default=120)
+# A RUNNING session with no progress past this window is treated as a zombie
+# (worker died mid-task) and re-dispatched. Keep generous: real analysis runs
+# emit progress events well within this window.
+STALE_RUNNING_SESSION_SECONDS = env.float("STALE_RUNNING_SESSION_SECONDS", default=900)
 CELERY_BEAT_SCHEDULE = {
     "dispatch-scheduled-sessions": {
         "task": "apps.triggers.tasks.dispatch_scheduled_sessions",
         "schedule": env.float("SCHEDULED_SESSIONS_INTERVAL_SECONDS", default=24 * 60 * 60),
+    },
+    "requeue-orphaned-sessions": {
+        "task": "apps.triggers.tasks.requeue_orphaned_sessions",
+        "schedule": env.float("REQUEUE_ORPHANED_SESSIONS_INTERVAL_SECONDS", default=120),
     },
 }

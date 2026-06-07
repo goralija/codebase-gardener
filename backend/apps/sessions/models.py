@@ -9,6 +9,7 @@ class GardeningSession(UUIDTimestampedModel):
         RUNNING = "running", "Running"
         COMPLETED = "completed", "Completed"
         FAILED = "failed", "Failed"
+        CANCELED = "canceled", "Canceled"
 
     repository = models.ForeignKey(
         "repositories.ManagedRepository",

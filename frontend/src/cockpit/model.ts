@@ -501,10 +501,21 @@ export type SessionModel = {
   repoId: string
   status: string
   trigger: string
+  triggerMetadata: Record<string, unknown>
+  createdAt: string
   startedAt: string | null
   finishedAt: string | null
+  baselineAnalysisId: string | null
+  currentAnalysisId: string | null
   commitSha: string | null
+  hasDriftReport: boolean
   lastError: string
+  progress: {
+    event: string
+    phase: string
+    message: string
+    updatedAt: string
+  } | null
 }
 
 export function sessionsFromAutomation(
@@ -518,14 +529,27 @@ export function sessionsFromAutomation(
       (triggerRecord.source as string) ||
       "manual"
     return {
+      baselineAnalysisId: s.baseline_analysis_id,
       commitSha: s.current_commit_sha,
+      createdAt: s.created_at,
+      currentAnalysisId: s.current_analysis_id,
       finishedAt: s.finished_at,
+      hasDriftReport: s.has_drift_report,
       id: s.id,
       lastError: s.last_error,
+      progress: s.progress
+        ? {
+            event: s.progress.event,
+            message: s.progress.message,
+            phase: s.progress.phase,
+            updatedAt: s.progress.updated_at,
+          }
+        : null,
       repoId: automation.repository.id,
       startedAt: s.started_at ?? s.created_at,
       status: s.status,
       trigger,
+      triggerMetadata: triggerRecord,
     }
   })
 }

@@ -41,7 +41,9 @@ def test_planner_persists_grouped_contract_shaped_pr_plan():
     plan = plans[0]
     assert plan.repository == repository
     assert plan.title == "Plan 2 docs maintenance opportunities"
-    assert plan.branch_name == "gardener/docs-refresh-api-docs"
+    # Branch is scoped to the session so re-runs don't collide with stale branches.
+    assert plan.branch_name.startswith("gardener/docs-refresh-api-docs-")
+    assert plan.branch_name.endswith("ngrouped")
     assert not plan.blocked
     assert plan.changed_paths == ["docs/api.md", "docs/architecture.md"]
     assert sorted(plan.opportunity_links.values_list("maintenance_opportunity_id", flat=True)) == [
@@ -185,13 +187,22 @@ def test_planner_blocks_low_confidence_and_protected_work_but_allows_assisted_dr
     )
 
     assert len(plans) == 3
-    reasons = {plan.opportunity_links.first().maintenance_opportunity_id: plan.block_reason for plan in plans}
+    by_id = {
+        plan.opportunity_links.first().maintenance_opportunity_id: plan for plan in plans
+    }
+    reasons = {oid: plan.block_reason for oid, plan in by_id.items()}
     assert reasons["opp_low"] == (
         f"Confidence below {DEFAULT_CONFIDENCE_THRESHOLD:.2f} PR creation threshold."
     )
-    assert reasons["opp_protected"].startswith("Path backend/apps/billing/models.py matches protected module")
+    # Protected modules no longer hard-block: forced to advisory tier (draft + label).
+    assert reasons["opp_protected"] is None
+    assert by_id["opp_protected"].risk_tier == "tier_3_advisory"
     assert reasons["opp_assisted"] is None
-    assert {plan.blocked for plan in plans} == {False, True}
+    assert {oid: plan.blocked for oid, plan in by_id.items()} == {
+        "opp_low": True,
+        "opp_protected": False,
+        "opp_assisted": False,
+    }
 
 
 @pytest.mark.django_db
@@ -306,9 +317,8 @@ def test_planner_reports_policy_markers_as_concrete_block_reasons():
         f"Blocked: Confidence below {DEFAULT_CONFIDENCE_THRESHOLD:.2f} "
         "PR creation threshold. Required checks:"
     )
-    assert reasons["opp_protected_marker"].startswith(
-        "Path backend/apps/billing/models.py matches protected module billing"
-    )
+    # Protected modules are advisory-tier drafts now, not blocks.
+    assert reasons["opp_protected_marker"] is None
     assert reasons["opp_prerequisite"] == (
         "Opportunity is blocked by prerequisite work: opp_low_marker."
     )
@@ -357,7 +367,7 @@ def test_dependency_patch_at_default_threshold_can_plan_autonomous_pr():
 
 
 @pytest.mark.django_db
-def test_planner_persists_dead_code_confidence_threshold():
+def test_planner_dead_code_honors_default_threshold():
     repository = demo_repository()
     dead_code_constitution = constitution()
     dead_code_constitution["allowed_fixes"]["autonomous"].append("dead_code")
@@ -377,9 +387,11 @@ def test_planner_persists_dead_code_confidence_threshold():
         constitution=dead_code_constitution,
     )
 
-    assert plans[0].blocked
-    assert plans[0].confidence_threshold == 0.95
-    assert plans[0].block_reason == "Dead-code removal requires confidence >= 0.95."
+    # dead_code no longer has a special 0.95 floor; it honors the configured
+    # threshold like every other category.
+    assert not plans[0].blocked
+    assert plans[0].confidence_threshold == DEFAULT_CONFIDENCE_THRESHOLD
+    assert plans[0].block_reason is None
 
 
 @pytest.mark.django_db

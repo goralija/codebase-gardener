@@ -16,12 +16,14 @@ from apps.triggers.models import RepositoryAutomationPolicy, RepositoryCommitTra
 from apps.triggers.policy import TriggerNotPermittedError, ensure_trigger_permitted
 from apps.triggers.service import (
     SessionEnqueueError,
+    SessionNotCancelableError,
+    cancel_session,
     constitution_for_repository,
     enqueue_session_for_trigger,
     evaluate_push_triggers,
     trigger_manual_session,
 )
-from apps.triggers.tasks import dispatch_scheduled_sessions
+from apps.triggers.tasks import dispatch_scheduled_sessions, requeue_orphaned_sessions
 from apps.triggers.thresholds import (
     DEFAULT_COMMIT_THRESHOLD,
     changed_paths_hit_protected,
@@ -38,7 +40,7 @@ def _eager_celery(settings, monkeypatch):
     settings.CELERY_TASK_EAGER_PROPAGATES = True
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository, source=RepositoryAnalysis.Source.SESSION: _analysis_result(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION, progress=None: _analysis_result(
             repository,
             source=source,
         ),
@@ -448,6 +450,118 @@ def test_dispatch_scheduled_sessions_skips_disabled_policy(monkeypatch):
     assert result["dispatched"] == 0
     assert result["disabled"] == 1
     assert GardeningSession.objects.filter(repository=repository).count() == 0
+
+
+@pytest.mark.django_db
+def test_requeue_orphaned_sessions_redispatches_stuck_queued(monkeypatch):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    repository = create_repository(1)
+    stale = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": registry.SCHEDULE},
+        status=GardeningSession.Status.QUEUED,
+    )
+    GardeningSession.objects.filter(id=stale.id).update(
+        updated_at=timezone.now() - timedelta(minutes=10)
+    )
+    # A freshly queued session is within the grace period and must be left alone.
+    fresh = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": registry.SCHEDULE},
+        status=GardeningSession.Status.QUEUED,
+    )
+    # A recently-progressing RUNNING session must never be re-dispatched.
+    running = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": registry.SCHEDULE},
+        status=GardeningSession.Status.RUNNING,
+        started_at=timezone.now(),
+    )
+    # A zombie RUNNING session (worker died mid-task; no progress) IS recovered.
+    zombie = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": registry.SCHEDULE},
+        status=GardeningSession.Status.RUNNING,
+        started_at=timezone.now() - timedelta(minutes=30),
+    )
+    GardeningSession.objects.filter(id=zombie.id).update(
+        updated_at=timezone.now() - timedelta(minutes=30)
+    )
+
+    dispatched: list[str] = []
+    monkeypatch.setattr(
+        "apps.triggers.tasks.run_gardening_session.delay",
+        lambda session_id: dispatched.append(session_id),
+    )
+
+    result = requeue_orphaned_sessions()
+
+    assert result == {"requeued": 2}
+    assert sorted(dispatched) == sorted([str(stale.id), str(zombie.id)])
+    assert str(fresh.id) not in dispatched
+    assert str(running.id) not in dispatched
+
+
+@pytest.mark.django_db
+def test_cancel_session_revokes_task_and_marks_canceled(monkeypatch):
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": registry.MANUAL},
+        status=GardeningSession.Status.RUNNING,
+        task_id="task-123",
+    )
+
+    revoked: list[tuple] = []
+    monkeypatch.setattr(
+        "config.celery.app.control.revoke",
+        lambda task_id, **kwargs: revoked.append((task_id, kwargs)),
+    )
+
+    result = cancel_session(session=session, actor=None)
+
+    session.refresh_from_db()
+    assert session.status == GardeningSession.Status.CANCELED
+    assert session.finished_at is not None
+    assert result["status"] == GardeningSession.Status.CANCELED
+    assert revoked == [("task-123", {"terminate": True, "signal": "SIGTERM"})]
+    assert AuditEvent.objects.filter(
+        event_type=AuditEvent.EventType.SESSION_CANCELED
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_cancel_session_rejects_terminal_session():
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": registry.MANUAL},
+        status=GardeningSession.Status.COMPLETED,
+    )
+
+    with pytest.raises(SessionNotCancelableError):
+        cancel_session(session=session, actor=None)
+
+
+@pytest.mark.django_db
+def test_canceled_queued_session_is_not_resurrected_by_worker(monkeypatch):
+    from apps.sessions.tasks import run_gardening_session
+
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": registry.MANUAL},
+        status=GardeningSession.Status.CANCELED,
+    )
+
+    result = run_gardening_session(str(session.id))
+
+    session.refresh_from_db()
+    assert session.status == GardeningSession.Status.CANCELED
+    assert result["status"] == GardeningSession.Status.CANCELED
 
 
 @pytest.mark.django_db

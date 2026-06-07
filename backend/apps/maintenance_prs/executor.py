@@ -561,9 +561,9 @@ def _guard_executable(plan: MaintenancePRPlan) -> None:
         and plan.updated_at >= _stale_running_cutoff()
     ):
         raise PlanNotExecutableError("Plan is already running.")
-    if plan.risk_tier not in {"tier_1_autonomous", "tier_2_assisted"}:
+    if plan.risk_tier not in {"tier_1_autonomous", "tier_2_assisted", "tier_3_advisory"}:
         raise PlanNotExecutableError(
-            "Only tier_1_autonomous and tier_2_assisted plans can be executed."
+            "Only tier_1_autonomous, tier_2_assisted, and tier_3_advisory plans can be executed."
         )
     if plan.confidence < plan.confidence_threshold:
         raise PlanNotExecutableError(
@@ -609,6 +609,13 @@ def _claim_plan_for_execution(plan: MaintenancePRPlan) -> None:
                 RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS,
             ],
         )
+        | Q(
+            risk_tier="tier_3_advisory",
+            repository__automation_policy__autonomy_mode__in=[
+                RepositoryAutomationPolicy.AutonomyMode.ASSISTED,
+                RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS,
+            ],
+        )
     ).filter(
         Q(
             execution_status__in=[
@@ -632,7 +639,7 @@ def _claim_plan_for_execution(plan: MaintenancePRPlan) -> None:
 
 
 def _requires_draft_pr(plan: MaintenancePRPlan) -> bool:
-    return plan.risk_tier == "tier_2_assisted"
+    return plan.risk_tier in {"tier_2_assisted", "tier_3_advisory"}
 
 
 def _automation_execution_block_reason(plan: MaintenancePRPlan) -> str | None:

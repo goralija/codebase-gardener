@@ -10,7 +10,6 @@ from django.db import transaction
 
 from apps.maintenance_prs.models import MaintenancePRPlan, MaintenancePRPlanOpportunity
 from apps.maintenance_prs.policy import (
-    DEAD_CODE_CONFIDENCE_THRESHOLD,
     DEFAULT_CONFIDENCE_THRESHOLD,
     confidence_threshold_for_opportunity,
 )
@@ -119,7 +118,9 @@ def plan_maintenance_prs(
             automation_decision = _automation_decision(repository, group)
             if automation_decision.blocked and not decision.blocked:
                 decision = automation_decision
-            branch_name = _unique_branch_name(_base_branch_name(group), used_branch_names)
+            branch_name = _unique_branch_name(
+                _base_branch_name(group, gardening_session_id), used_branch_names
+            )
             used_branch_names.add(branch_name)
             plan = MaintenancePRPlan.objects.create(
                 repository=repository,
@@ -127,7 +128,7 @@ def plan_maintenance_prs(
                 branch_name=branch_name,
                 title=_plan_title(group),
                 category=_plan_category(group),
-                risk_tier=_risk_tier(group),
+                risk_tier=_plan_risk_tier(group, constitution),
                 confidence=min(float(item["confidence"]) for item in group),
                 confidence_threshold=_group_confidence_threshold(group, constitution, profile),
                 changed_paths=_unique_values(
@@ -177,29 +178,29 @@ def evaluate_policy(
             f"Opportunity is blocked by prerequisite work: {', '.join(prerequisite_blockers)}.",
         )
 
-    protected_reason = _protected_path_reason(opportunity.get("affected_paths", []), constitution)
-    if protected_reason:
-        return PolicyDecision(True, protected_reason)
+    never_touch_reason = _never_touch_reason(opportunity.get("affected_paths", []), constitution)
+    if never_touch_reason:
+        return PolicyDecision(True, never_touch_reason)
 
-    if category == "dead_code" and confidence < DEAD_CODE_CONFIDENCE_THRESHOLD:
-        return PolicyDecision(
-            True,
-            f"Dead-code removal requires confidence >= {DEAD_CODE_CONFIDENCE_THRESHOLD:.2f}.",
-        )
+    # Protected modules no longer hard-block. Such plans are forced to the
+    # advisory tier (draft PR + risk label) in plan creation so reviewers gate
+    # them instead of policy. never-touch paths stay a hard block above.
     if confidence < threshold:
         return PolicyDecision(True, f"Confidence below {threshold:.2f} PR creation threshold.")
 
     allowed_fixes = _canonical_allowed_fixes(constitution.get("allowed_fixes", {}))
     if category in allowed_fixes.get("advisory", []):
-        return PolicyDecision(True, "Opportunity category is advisory-only.")
-    if category in allowed_fixes.get("assisted", []):
-        if opportunity.get("risk_tier") != "tier_2_assisted":
-            return PolicyDecision(True, "Assisted category requires tier_2_assisted risk.")
-    elif category in allowed_fixes.get("autonomous", []):
-        if opportunity.get("risk_tier") != "tier_1_autonomous":
-            return PolicyDecision(True, "Risk tier requires assisted or advisory handling.")
-    else:
+        return PolicyDecision(False)
+        return PolicyDecision(False)
+    if category not in allowed_fixes.get("autonomous", []):
         return PolicyDecision(True, "Opportunity category is not allowed for PR creation.")
+
+    if opportunity.get("risk_tier") not in {
+        "tier_1_autonomous",
+        "tier_2_assisted",
+        "tier_3_advisory",
+    }:
+        return PolicyDecision(True, "Risk tier is not supported for PR creation.")
 
     # Learned profile signals are advisory and never override the constitution:
     # every constitution check above runs first, so this only adds a soft block
@@ -347,11 +348,16 @@ def _group_is_blocked(
     return _group_decision(group, constitution, profile).blocked
 
 
-def _protected_path_reason(paths: list[str], constitution: dict) -> str | None:
+def _never_touch_reason(paths: list[str], constitution: dict) -> str | None:
     for path in paths:
         for rule in constitution.get("never_touch", []):
             if fnmatch(path, rule.get("path", "")):
                 return f"Path {path} matches never-touch rule: {rule.get('reason', 'no reason given')}"
+    return None
+
+
+def _protected_module_reason(paths: list[str], constitution: dict) -> str | None:
+    for path in paths:
         for module in constitution.get("protected_modules", []):
             for pattern in module.get("paths", []):
                 if fnmatch(path, pattern):
@@ -362,10 +368,21 @@ def _protected_path_reason(paths: list[str], constitution: dict) -> str | None:
     return None
 
 
-def _base_branch_name(group: list[dict]) -> str:
+def _base_branch_name(group: list[dict], gardening_session_id: str = "") -> str:
     category = group[0].get("category", "maintenance")
     source = group[0].get("title", category)
-    return f"gardener/{_slug(category)}-{_slug(source)}"[:240].rstrip("-")
+    # Scope the branch to this session so re-runs of the same category+title get a
+    # fresh branch instead of colliding with a stale branch left by a prior run.
+    suffix = _session_branch_suffix(gardening_session_id)
+    base = f"gardener/{_slug(category)}-{_slug(source)}"
+    if suffix:
+        base = f"{base[:240 - len(suffix) - 1]}-{suffix}"
+    return base[:240].rstrip("-")
+
+
+def _session_branch_suffix(gardening_session_id: str) -> str:
+    digest = re.sub(r"[^a-z0-9]", "", str(gardening_session_id).lower())
+    return digest[-8:] if digest else ""
 
 
 def _unique_branch_name(base_branch_name: str, used_branch_names: set[str]) -> str:
@@ -389,6 +406,15 @@ def _plan_title(group: list[dict]) -> str:
 
 def _risk_tier(group: list[dict]) -> str:
     return group[0].get("risk_tier", "unknown")
+
+
+def _plan_risk_tier(group: list[dict], constitution: dict) -> str:
+    """Force protected-module groups to the advisory tier so they ship as draft
+    PRs gated by review + risk label instead of being hard-blocked."""
+    paths = [path for item in group for path in item.get("affected_paths", [])]
+    if _protected_module_reason(paths, constitution):
+        return "tier_3_advisory"
+    return _risk_tier(group)
 
 
 def _plan_category(group: list[dict]) -> str:
@@ -461,9 +487,15 @@ def _pr_body_sections(
     threshold = _group_confidence_threshold(group, constitution, profile)
     changed_paths = _unique_values(path for item in group for path in item.get("affected_paths", []))
     categories = _unique_values(item.get("category", "unknown") for item in group)
+    if decision.blocked:
+        threshold_outcome = "blocked by policy"
+    elif _risk_tier(group) in {"tier_2_assisted", "tier_3_advisory"}:
+        threshold_outcome = "eligible for review-required PR"
+    else:
+        threshold_outcome = "meets autonomous PR threshold"
     confidence_reasons = (
         f"Minimum opportunity confidence {confidence:.2f}; threshold {threshold:.2f}; "
-        f"{'blocked by policy' if decision.blocked else 'meets PR creation threshold'}."
+        f"{threshold_outcome}."
     )
     constitution_rules = (
         f"Categories checked against constitution allowed fixes: {', '.join(categories)}. "

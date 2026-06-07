@@ -30,11 +30,9 @@ def confidence_threshold_for_opportunity(
     opportunity: dict[str, Any],
     constitution: dict[str, Any],
 ) -> float:
-    category = str(opportunity.get("category") or "")
-    threshold = _constitution_confidence_threshold(constitution)
-    if category == "dead_code":
-        threshold = max(threshold, DEAD_CODE_CONFIDENCE_THRESHOLD)
-    return threshold
+    # All categories honor the configured threshold (GARDENER_CONFIDENCE_THRESHOLD
+    # / constitution risk_policies). dead_code no longer has a special floor.
+    return _constitution_confidence_threshold(constitution)
 
 
 def _constitution_confidence_threshold(constitution: dict[str, Any]) -> float:

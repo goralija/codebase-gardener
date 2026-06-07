@@ -325,7 +325,14 @@ def _apply_edit_blocks(path: str, content: str, blocks: list[tuple[str, str]]) -
             skipped += 1
             continue
 
-        matched = search if search in updated else _match_ignoring_trailing_ws(updated, search)
+        matched = (
+            search
+            if search in updated
+            else _match_ignoring_trailing_ws(updated, search)
+            or _match_ignoring_all_ws(updated, search)
+            or _match_normalized(updated, search)
+            or _match_fuzzy(updated, search)
+        )
         if matched is None:
             skipped += 1
             continue
@@ -363,6 +370,108 @@ def _match_ignoring_trailing_ws(content: str, search: str) -> str | None:
         window = content_lines[i : i + n]
         if [line.rstrip() for line in window] == search_lines:
             return "\n".join(window)
+    return None
+
+
+def _match_ignoring_all_ws(content: str, search: str) -> str | None:
+    """Last-resort match tolerating leading+trailing indentation drift.
+
+    Small models often reproduce the right lines but re-indent them. Compare
+    fully-stripped lines, requiring a unique match to avoid replacing the wrong
+    block; the returned window keeps the file's real indentation.
+    """
+
+    search_lines = [line.strip() for line in search.split("\n")]
+    if not any(search_lines):
+        return None
+    content_lines = content.split("\n")
+    n = len(search_lines)
+    matches: list[str] = []
+    for i in range(len(content_lines) - n + 1):
+        window = content_lines[i : i + n]
+        if [line.strip() for line in window] == search_lines:
+            matches.append("\n".join(window))
+            if len(matches) > 1:
+                return None
+    return matches[0] if matches else None
+
+
+def _normalize_line(line: str) -> str:
+    """Canonicalize formatting drift the model commonly introduces: indentation,
+    inner whitespace runs, quote style, and a trailing comma."""
+    text = re.sub(r"\s+", " ", line.strip()).replace('"', "'")
+    if text.endswith(","):
+        text = text[:-1]
+    return text
+
+
+def _match_normalized(content: str, search: str) -> str | None:
+    """Match ignoring formatting drift (quotes/commas/whitespace), unique only.
+
+    Recovers the common ``.ts`` case where the model returns the right code but
+    with ``"`` instead of ``'`` or a dropped trailing comma. The returned window
+    is the file's real text, so the model's REPLACE applies at the true location.
+    """
+
+    search_lines = [_normalize_line(line) for line in search.split("\n")]
+    if not any(search_lines):
+        return None
+    content_lines = content.split("\n")
+    n = len(search_lines)
+    matches: list[str] = []
+    for i in range(len(content_lines) - n + 1):
+        window = content_lines[i : i + n]
+        if [_normalize_line(line) for line in window] == search_lines:
+            matches.append("\n".join(window))
+            if len(matches) > 1:
+                return None
+    return matches[0] if matches else None
+
+
+_FUZZY_MATCH_THRESHOLD = 0.92
+_FUZZY_MATCH_MARGIN = 0.02
+
+
+def _match_fuzzy(content: str, search: str) -> str | None:
+    """Final tier: similarity match for single-line/character drift.
+
+    Slides a window the size of the SEARCH block and scores normalized text with
+    ``difflib``. Accepts the best window only if it clears the threshold AND beats
+    the runner-up by a margin, so an ambiguous block is left unmatched (skipped)
+    rather than applied to the wrong location.
+    """
+
+    search_norm = "\n".join(_normalize_line(line) for line in search.split("\n"))
+    if not search_norm.strip():
+        return None
+    content_lines = content.split("\n")
+    n = len(search.split("\n"))
+    if n <= 0 or len(content_lines) < n:
+        return None
+
+    matcher = difflib.SequenceMatcher()
+    matcher.set_seq2(search_norm)
+    best_ratio = 0.0
+    runner_up = 0.0
+    best_window: str | None = None
+    for i in range(len(content_lines) - n + 1):
+        window = content_lines[i : i + n]
+        window_norm = "\n".join(_normalize_line(line) for line in window)
+        matcher.set_seq1(window_norm)
+        ratio = matcher.ratio()
+        if ratio > best_ratio:
+            runner_up = best_ratio
+            best_ratio = ratio
+            best_window = "\n".join(window)
+        elif ratio > runner_up:
+            runner_up = ratio
+
+    if (
+        best_window is not None
+        and best_ratio >= _FUZZY_MATCH_THRESHOLD
+        and best_ratio - runner_up >= _FUZZY_MATCH_MARGIN
+    ):
+        return best_window
     return None
 
 
