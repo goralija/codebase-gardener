@@ -566,56 +566,68 @@ function TriggerControls({
 
   return (
     <div className="mt-6">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold">Session triggers</h3>
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>Commit threshold</span>
-          <input
-            aria-label="Commit threshold"
-            className="h-8 w-20 rounded-md border bg-background px-2 text-sm text-foreground disabled:opacity-50"
-            disabled={!canEdit || !draft.commit_trigger_enabled}
-            min={1}
-            max={500}
-            onChange={(event) =>
-              onDraftChange({
-                ...draft,
-                commit_threshold: clampCommitThreshold(event.target.value),
-              })
-            }
-            type="number"
-            value={draft.commit_threshold}
-          />
-        </label>
-      </div>
+      <h3 className="text-sm font-semibold">Session triggers</h3>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        {rows.map((row) => (
-          <label
-            className="flex min-h-20 items-center justify-between gap-3 rounded-md border bg-background px-3 py-3"
-            key={row.field}
-          >
-            <span className="flex min-w-0 items-center gap-3">
-              <span className="text-muted-foreground">{row.icon}</span>
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium">
-                  {row.label}
-                </span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {row.description}
+        {rows.map((row) => {
+          const checkboxId = `automation-${row.field}`
+          const isCommitThreshold = row.field === "commit_trigger_enabled"
+
+          return (
+            <div
+              className="flex min-h-20 items-center justify-between gap-3 rounded-md border bg-background px-3 py-3"
+              key={row.field}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="text-muted-foreground">{row.icon}</span>
+                <span className="min-w-0">
+                  <label
+                    className="block truncate text-sm font-medium"
+                    htmlFor={checkboxId}
+                  >
+                    {row.label}
+                  </label>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {row.description}
+                  </span>
+                  {isCommitThreshold ? (
+                    <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>Threshold</span>
+                      <input
+                        aria-label="Commit threshold"
+                        className="h-8 w-20 rounded-md border bg-background px-2 text-sm text-foreground disabled:opacity-50"
+                        disabled={!canEdit || !draft.commit_trigger_enabled}
+                        min={1}
+                        max={500}
+                        onChange={(event) =>
+                          onDraftChange({
+                            ...draft,
+                            commit_threshold: clampCommitThreshold(
+                              event.target.value
+                            ),
+                          })
+                        }
+                        type="number"
+                        value={draft.commit_threshold}
+                      />
+                    </label>
+                  ) : null}
                 </span>
               </span>
-            </span>
-            <input
-              checked={Boolean(draft[row.field])}
-              className="size-4 accent-primary"
-              disabled={!canEdit}
-              onChange={(event) =>
-                onDraftChange({ ...draft, [row.field]: event.target.checked })
-              }
-              type="checkbox"
-            />
-          </label>
-        ))}
+              <input
+                aria-label={`${row.label} trigger`}
+                checked={Boolean(draft[row.field])}
+                className="size-4 accent-primary"
+                disabled={!canEdit}
+                id={checkboxId}
+                onChange={(event) =>
+                  onDraftChange({ ...draft, [row.field]: event.target.checked })
+                }
+                type="checkbox"
+              />
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -701,7 +713,7 @@ function BaselineReportLink({
       className="text-primary underline-offset-4 hover:underline"
       href={`/report?repositoryId=${automation.repository.id}&baseline=1`}
     >
-      {shortSha(automation.baseline.commit_sha)}
+      {baselineReportLabel(automation.baseline)}
     </a>
   )
 }
@@ -978,6 +990,25 @@ function formatDate(value: string) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value))
+}
+
+function baselineReportLabel(
+  baseline: RepositoryAutomationResponse["baseline"]
+) {
+  const reportName = baseline.source
+    ? BASELINE_REPORT_NAMES[baseline.source] ?? "Baseline report"
+    : "Baseline report"
+
+  return baseline.promoted_at
+    ? `${reportName} · ${formatDate(baseline.promoted_at)}`
+    : reportName
+}
+
+const BASELINE_REPORT_NAMES: Record<string, string> = {
+  first_scan: "First scan report",
+  manual_ingest: "Manual import report",
+  post_pr_refresh: "Post-PR refresh report",
+  session: "Gardening session report",
 }
 
 function shortSha(value: string) {
