@@ -20,6 +20,7 @@ import {
   fetchOrganizationRepositories,
   fetchOrganizations,
   GithubOnboardingRequestError,
+  isGithubOnboardingAuthenticationRequired,
   updateOrganizationBilling,
   type BillingResponse,
   type ManagedRepository,
@@ -97,9 +98,9 @@ export function GithubOnboardingPage() {
   })
 
   const installUrl = installationStartQuery.data?.install_url
-  const isPreInstallForbidden =
-    organizationsQuery.error instanceof GithubOnboardingRequestError &&
-    organizationsQuery.error.status === 403
+  const isPreInstallForbidden = isGithubOnboardingAuthenticationRequired(
+    organizationsQuery.error
+  )
   const hasOrganizationError =
     organizationsQuery.isError && !isPreInstallForbidden
   const hasBlockingError =

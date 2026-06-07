@@ -139,7 +139,14 @@ describe("GithubOnboardingPage", () => {
 
   it("shows the pre-install empty state with the install CTA", async () => {
     mockOnboardingFetch({
-      organizations: new Response(null, { status: 403 }),
+      organizations: jsonResponse(
+        {
+          code: "not_authenticated",
+          message: "Authentication credentials were not provided.",
+          details: {},
+        },
+        { status: 403 }
+      ),
     })
 
     renderPage()
