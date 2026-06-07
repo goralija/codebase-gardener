@@ -619,6 +619,8 @@ def _is_test_gap_target(path: str) -> bool:
         return False
 
     name = relative.name.lower()
+    if ".config." in name or name in {"vite-env.d.ts"}:
+        return False
     return not (
         name.startswith("test_")
         or name.endswith("_test.py")
@@ -655,8 +657,22 @@ _LOCKFILES = frozenset(
         "Cargo.lock",
         "Gemfile.lock",
         "composer.lock",
+        "gradle.lockfile",
+        "packages.lock.json",
     }
 )
+_MANIFEST_LOCKFILES = {
+    "package.json": frozenset({"package-lock.json", "pnpm-lock.yaml", "yarn.lock"}),
+    "pyproject.toml": frozenset({"uv.lock", "poetry.lock"}),
+    "requirements.txt": frozenset({"requirements.txt"}),
+    "poetry.lock": frozenset({"poetry.lock"}),
+    "Pipfile": frozenset({"Pipfile.lock"}),
+    "go.mod": frozenset({"go.sum"}),
+    "Cargo.toml": frozenset({"Cargo.lock"}),
+    "build.gradle": frozenset({"gradle.lockfile"}),
+    "Gemfile": frozenset({"Gemfile.lock"}),
+    "composer.json": frozenset({"composer.lock"}),
+}
 
 
 def _dependency_risks(repo_path: Path, health: JsonObject) -> list[JsonObject]:
@@ -702,13 +718,31 @@ def _dependency_risks(repo_path: Path, health: JsonObject) -> list[JsonObject]:
 
 def _manifest_has_lockfile(manifest: str, lockfiles: set[str]) -> bool:
     manifest_path = Path(manifest)
-    parent = "" if str(manifest_path.parent) == "." else manifest_path.parent.as_posix()
+    manifest_parent = _relative_parent(manifest_path)
+    lockfile_names = _MANIFEST_LOCKFILES.get(
+        manifest_path.name,
+        (
+            frozenset({"packages.lock.json"})
+            if manifest_path.name.endswith(".csproj")
+            else frozenset()
+        ),
+    )
     for lockfile in lockfiles:
         lock_path = Path(lockfile)
-        lock_parent = "" if str(lock_path.parent) == "." else lock_path.parent.as_posix()
-        if lock_parent == parent:
+        if lock_path.name not in lockfile_names:
+            continue
+        if _is_same_or_ancestor(_relative_parent(lock_path), manifest_parent):
             return True
     return False
+
+
+def _relative_parent(path: Path) -> Path:
+    return Path("") if str(path.parent) == "." else path.parent
+
+
+def _is_same_or_ancestor(candidate: Path, path: Path) -> bool:
+    candidate_parts = candidate.parts
+    return path.parts[: len(candidate_parts)] == candidate_parts
 
 
 def _ci_failures(repo_path: Path, health: JsonObject) -> list[JsonObject]:

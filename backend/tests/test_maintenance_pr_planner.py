@@ -357,6 +357,41 @@ def test_dependency_patch_at_default_threshold_can_plan_autonomous_pr():
 
 
 @pytest.mark.django_db
+def test_tests_opportunities_stay_separate_pr_plans():
+    repository = demo_repository()
+
+    plans = plan_maintenance_prs(
+        repository=repository,
+        gardening_session_id="session_test_gap_split",
+        opportunities=[
+            opportunity(
+                "opp_tests_app",
+                "Add App coverage",
+                ["src/frontend/src/App.tsx"],
+                category="tests",
+                risk_tier="tier_2_assisted",
+                confidence=0.94,
+            ),
+            opportunity(
+                "opp_tests_auth",
+                "Add AuthLayout coverage",
+                ["src/frontend/src/features/auth/AuthLayout.tsx"],
+                category="tests",
+                risk_tier="tier_2_assisted",
+                confidence=0.94,
+            ),
+        ],
+        constitution=constitution(),
+    )
+
+    assert len(plans) == 2
+    assert [plan.changed_paths for plan in plans] == [
+        ["src/frontend/src/App.tsx"],
+        ["src/frontend/src/features/auth/AuthLayout.tsx"],
+    ]
+
+
+@pytest.mark.django_db
 def test_planner_persists_dead_code_confidence_threshold():
     repository = demo_repository()
     dead_code_constitution = constitution()

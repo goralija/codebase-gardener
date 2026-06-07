@@ -300,6 +300,8 @@ def _compatible(group: list[dict], opportunity: dict) -> bool:
     first = group[0]
     if first.get("category") != opportunity.get("category"):
         return False
+    if first.get("category") == "tests":
+        return False
     if first.get("risk_tier") != opportunity.get("risk_tier"):
         return False
 

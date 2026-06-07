@@ -81,7 +81,8 @@ def generate_maintenance_opportunities(
     allowed = constitution.get("allowed_fixes", {}) or {}
     components = (entropy.get("score", {}) or {}).get("components", {}) or {}
 
-    # Group signals by (category, module).
+    # Group signals by category scope. Test authoring is intentionally file
+    # scoped so one missing-test signal cannot create a broad multi-file PR.
     groups: dict[tuple[str, str], list[JsonObject]] = {}
     for bucket, items in signals.items():
         for signal in _as_list(items):
@@ -93,8 +94,8 @@ def generate_maintenance_opportunities(
             category = _signal_category(bucket, path)
             if category is None:
                 continue
-            module = _module_of(path) if isinstance(path, str) and path else "repository"
-            groups.setdefault((category, module), []).append(signal)
+            scope = _opportunity_scope(category, path)
+            groups.setdefault((category, scope), []).append(signal)
 
     # Build one opportunity per group.
     built: list[tuple[float, JsonObject]] = []
@@ -312,6 +313,12 @@ def _module_of(path: str) -> str:
     if len(parts) <= 1:
         return parts[0]
     return "/".join(parts[:2])
+
+
+def _opportunity_scope(category: str, path: Any) -> str:
+    if category == "tests" and isinstance(path, str) and path:
+        return path
+    return _module_of(path) if isinstance(path, str) and path else "repository"
 
 
 def _matches(path: str | None, globs: list[str]) -> bool:
