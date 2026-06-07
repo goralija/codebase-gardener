@@ -8,6 +8,8 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomerOrganization, Membership
+from apps.analysis.models import RepositoryAnalysis
+from apps.billing.models import RepositoryComplexity
 from apps.common.models import AuditEvent
 from apps.github_app.client import GitHubAPIError, GitHubAppClient
 from apps.github_app.models import GitHubInstallation
@@ -17,6 +19,7 @@ from apps.github_app.services import (
 )
 from apps.github_app.state import load_install_state
 from apps.repositories.models import ManagedRepository
+from apps.triggers.models import RepositoryAutomationPolicy
 
 
 FRONTEND_BASE_URL = "http://localhost:5173"
@@ -393,6 +396,7 @@ def test_repository_api_refreshes_github_grants_for_installation_manager(monkeyp
 
 
 @pytest.mark.django_db
+@override_settings(GITHUB_APP_ID="", GITHUB_APP_PRIVATE_KEY="")
 def test_organization_and_repository_apis_scope_to_active_membership_installation_and_repos():
     user = get_user_model().objects.create_user("member@example.com", password="secret")
     other_user = get_user_model().objects.create_user("other@example.com", password="secret")
@@ -450,6 +454,191 @@ def test_organization_and_repository_apis_scope_to_active_membership_installatio
     assert denied_response.status_code == 404
     assert denied_response.json()["code"] == "not_found"
     assert APIClient().get("/api/v1/organizations/").status_code == 403
+
+
+@pytest.mark.django_db
+@override_settings(GITHUB_APP_ID="123", GITHUB_APP_PRIVATE_KEY="key")
+def test_organizations_endpoint_drops_uninstalled_app_and_marks_installation_deleted(
+    monkeypatch,
+):
+    user = get_user_model().objects.create_user("member@example.com", password="secret")
+    organization = create_organization(1)
+    Membership.objects.create(
+        user=user, organization=organization, role=Membership.Role.VIEWER
+    )
+    installation = create_installation(organization, 1)
+    repository = create_repository(organization, installation, 1)
+
+    class UninstalledFakeClient:
+        def get_installation(self, installation_id):
+            raise GitHubAPIError("not found", status_code=404)
+
+    monkeypatch.setattr(
+        "apps.github_app.services.GitHubAppClient",
+        lambda *args, **kwargs: UninstalledFakeClient(),
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=user)
+    response = client.get("/api/v1/organizations/")
+
+    assert response.status_code == 200
+    assert response.json()["organizations"] == []
+
+    installation.refresh_from_db()
+    repository.refresh_from_db()
+    assert installation.deleted_at is not None
+    assert repository.unselected_at is not None
+
+
+@pytest.mark.django_db
+@override_settings(GITHUB_APP_ID="123", GITHUB_APP_PRIVATE_KEY="key")
+def test_organizations_endpoint_keeps_live_installation(monkeypatch):
+    user = get_user_model().objects.create_user("member@example.com", password="secret")
+    organization = create_organization(1)
+    Membership.objects.create(
+        user=user, organization=organization, role=Membership.Role.VIEWER
+    )
+    installation = create_installation(organization, 1)
+
+    class LiveFakeClient:
+        def get_installation(self, installation_id):
+            return installation_payload()
+
+    monkeypatch.setattr(
+        "apps.github_app.services.GitHubAppClient",
+        lambda *args, **kwargs: LiveFakeClient(),
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=user)
+    response = client.get("/api/v1/organizations/")
+
+    assert response.status_code == 200
+    assert [org["id"] for org in response.json()["organizations"]] == [
+        str(organization.id)
+    ]
+    installation.refresh_from_db()
+    assert installation.deleted_at is None
+
+
+@pytest.mark.django_db
+def test_repository_delete_api_hard_deletes_repository_data_and_audits_identifiers():
+    user = get_user_model().objects.create_user("admin@example.com", password="secret")
+    organization = create_organization(1)
+    Membership.objects.create(
+        user=user,
+        organization=organization,
+        role=Membership.Role.ADMIN,
+    )
+    installation = create_installation(organization, 1)
+    repository = create_repository(organization, installation, 1)
+    analysis = RepositoryAnalysis.objects.create(
+        organization=organization,
+        repository=repository,
+        commit_sha="abc123",
+    )
+    RepositoryAutomationPolicy.objects.create(
+        organization=organization,
+        repository=repository,
+    )
+    RepositoryComplexity.objects.create(
+        organization=organization,
+        repository=repository,
+        source_analysis=analysis,
+    )
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    response = client.delete(
+        f"/api/v1/organizations/{organization.id}/repositories/{repository.id}/"
+    )
+
+    assert response.status_code == 204
+    assert not ManagedRepository.objects.filter(id=repository.id).exists()
+    assert not RepositoryAnalysis.objects.filter(id=analysis.id).exists()
+    assert not RepositoryAutomationPolicy.objects.filter(repository_id=repository.id).exists()
+    assert not RepositoryComplexity.objects.filter(repository_id=repository.id).exists()
+
+    audit_event = AuditEvent.objects.get(
+        event_type=AuditEvent.EventType.MANAGED_REPOSITORY_HARD_DELETED
+    )
+    assert audit_event.actor == user
+    assert audit_event.organization == organization
+    assert audit_event.github_installation == installation
+    assert audit_event.repository is None
+    assert audit_event.source == "dashboard_repository_delete"
+    assert audit_event.metadata == {
+        "repository_id": str(repository.id),
+        "github_repository_id": repository.github_repository_id,
+        "full_name": repository.full_name,
+        "github_installation_id": installation.github_installation_id,
+        "deleted_artifact_count": 0,
+    }
+
+
+@pytest.mark.django_db
+def test_repository_delete_api_purges_repository_object_artifacts(monkeypatch):
+    user = get_user_model().objects.create_user("admin@example.com", password="secret")
+    organization = create_organization(1)
+    Membership.objects.create(
+        user=user,
+        organization=organization,
+        role=Membership.Role.ADMIN,
+    )
+    installation = create_installation(organization, 1)
+    repository = create_repository(organization, installation, 1)
+    RepositoryAnalysis.objects.create(
+        organization=organization,
+        repository=repository,
+        commit_sha="abc123",
+        snapshot_key="org_ignored/repo_ignored/abc123/snapshot.json.gz",
+    )
+    deleted_prefixes = []
+
+    def delete_prefix(prefix):
+        deleted_prefixes.append(prefix)
+        return 4
+
+    monkeypatch.setattr("apps.repositories.views.storage.delete_prefix", delete_prefix)
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    response = client.delete(
+        f"/api/v1/organizations/{organization.id}/repositories/{repository.id}/"
+    )
+
+    assert response.status_code == 204
+    assert deleted_prefixes == [f"org_{organization.id}/repo_{repository.id}/"]
+    assert AuditEvent.objects.get(
+        event_type=AuditEvent.EventType.MANAGED_REPOSITORY_HARD_DELETED
+    ).metadata["deleted_artifact_count"] == 4
+
+
+@pytest.mark.django_db
+def test_repository_delete_api_requires_repository_manager_role():
+    viewer = get_user_model().objects.create_user("viewer@example.com", password="secret")
+    organization = create_organization(1)
+    Membership.objects.create(
+        user=viewer,
+        organization=organization,
+        role=Membership.Role.VIEWER,
+    )
+    installation = create_installation(organization, 1)
+    repository = create_repository(organization, installation, 1)
+    client = APIClient()
+    client.force_authenticate(user=viewer)
+
+    response = client.delete(
+        f"/api/v1/organizations/{organization.id}/repositories/{repository.id}/"
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "permission_denied"
+    assert ManagedRepository.objects.filter(id=repository.id).exists()
+    assert not AuditEvent.objects.filter(
+        event_type=AuditEvent.EventType.MANAGED_REPOSITORY_HARD_DELETED
+    ).exists()
 
 
 class FakeGitHubClient:

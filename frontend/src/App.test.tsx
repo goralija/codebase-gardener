@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import App from "@/App.tsx"
@@ -71,12 +71,18 @@ function mockOverviewFetch({
 } = {}) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), "http://localhost")
       if (url.pathname === "/api/v1/organizations/") {
         return organizations instanceof Response
           ? organizations
           : jsonResponse(organizations)
+      }
+      const repositoryDeleteMatch = url.pathname.match(
+        /^\/api\/v1\/organizations\/org-1\/repositories\/([^/]+)\/$/
+      )
+      if (repositoryDeleteMatch && init?.method === "DELETE") {
+        return new Response(null, { status: 204 })
       }
       if (url.pathname === "/api/v1/organizations/org-1/repositories/") {
         return repositories instanceof Response
@@ -171,6 +177,32 @@ describe("App", () => {
     expect(
       await screen.findByRole("heading", { name: "No GitHub installation" })
     ).toBeInTheDocument()
+  })
+
+  it("hard deletes a repository after confirmation", async () => {
+    mockOverviewFetch()
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true)
+
+    renderApp()
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Remove acme/web" })
+    )
+
+    expect(confirm).toHaveBeenCalledWith(
+      "Permanently remove acme/web and all stored Gardener data for it? This cannot be undone."
+    )
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "/api/v1/organizations/org-1/repositories/repo-2/"
+        ),
+        expect.objectContaining({
+          credentials: "include",
+          method: "DELETE",
+        })
+      )
+    })
   })
 })
 

@@ -10,6 +10,7 @@ import { Icon } from "@/cockpit/icon"
 import { fmt } from "@/cockpit/format"
 import {
   fetchInstallationStart,
+  fetchOrganizationRepositories,
   updateOrganizationBilling,
 } from "@/features/github-onboarding/github-onboarding-api"
 import { useBilling, useCockpit } from "@/cockpit/data"
@@ -31,6 +32,18 @@ export function GithubPage() {
     mutationFn: () => fetchInstallationStart(),
     onSuccess: (data) => {
       window.location.href = data.install_url
+    },
+  })
+
+  const syncRepos = useMutation({
+    mutationFn: () =>
+      fetchOrganizationRepositories(cockpit.organization?.id ?? "", {
+        refresh: true,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["cockpit", "repositories", cockpit.organization?.id],
+      })
     },
   })
 
@@ -100,9 +113,33 @@ export function GithubPage() {
       done: installed && rows.length > 0,
       id: "select",
       node: installed ? (
-        <Badge icon="FolderGit2" lg tone="teal">
-          {rows.length} repositories selected
-        </Badge>
+        <div className="row gap10 wrap">
+          <Badge icon="FolderGit2" lg tone="teal">
+            {rows.length} repositories selected
+          </Badge>
+          <button
+            className="btn sm"
+            disabled={install.isPending}
+            onClick={() => install.mutate()}
+            type="button"
+          >
+            <Icon name="Github" size={13} />
+            Add repositories on GitHub
+          </button>
+          <button
+            className="btn sm"
+            disabled={syncRepos.isPending}
+            onClick={() => syncRepos.mutate()}
+            type="button"
+          >
+            <Icon
+              className={syncRepos.isPending ? "spin" : ""}
+              name={syncRepos.isPending ? "Loader" : "RefreshCw"}
+              size={13}
+            />
+            {syncRepos.isPending ? "Syncing…" : "Sync now"}
+          </button>
+        </div>
       ) : (
         <span className="sm faint">Install the app first.</span>
       ),
