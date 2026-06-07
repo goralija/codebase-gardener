@@ -81,6 +81,9 @@ describe("App", () => {
     expect(await screen.findByText("PR add-on on")).toBeInTheDocument()
     expect(await screen.findByText("acme/api")).toBeInTheDocument()
     expect(screen.getByText("2.10x")).toBeInTheDocument()
+    expect(
+      screen.getByRole("img", { name: "Codebase Gardener mascot" })
+    ).toBeInTheDocument()
   })
 
   it("shows the setup state before a GitHub installation is available", async () => {

@@ -3,7 +3,6 @@ import type { ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
-  Bot,
   CalendarClock,
   CheckCircle2,
   CircleDashed,
@@ -18,6 +17,7 @@ import {
   Workflow,
 } from "lucide-react"
 
+import { GardenerLogo } from "@/components/brand"
 import { Button } from "@/components/ui/button"
 import {
   fetchOrganizationBilling,
@@ -265,7 +265,7 @@ export function AutomationPage() {
         <header className="flex flex-col gap-4 border-b pb-5 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <Bot className="size-4" />
+              <GardenerLogo className="size-5" />
               Automation
             </div>
             <h1 className="mt-2 text-3xl font-semibold tracking-normal">

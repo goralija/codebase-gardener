@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from apps.accounts.models import Membership
 from apps.repositories.models import ManagedRepository
-<<<<<<< HEAD
 from apps.triggers.registry import ACTOR_REQUIRED_KINDS, MANUAL_TRIGGER_ROLES
 from apps.triggers import registry
 from apps.triggers.models import RepositoryAutomationPolicy
@@ -26,45 +25,10 @@ TRIGGER_POLICY_FIELDS = {
     registry.PR_OPENED: "pr_opened_trigger_enabled",
     registry.CI_FAILURE: "ci_failure_trigger_enabled",
 }
-=======
-from apps.triggers.registry import (
-    ACTOR_REQUIRED_KINDS,
-    FIRST_SCAN,
-    MANUAL,
-    MANUAL_TRIGGER_ROLES,
-)
->>>>>>> 6a20e42 (feat(triggers): gate sessions on user-selected triggers (frontend TODO))
 
 
 class TriggerNotPermittedError(Exception):
     code = "trigger_not_permitted"
-
-
-# Trigger kinds that are always on regardless of user selection: manual (the
-# user explicitly clicked it) and the onboarding first scan.
-ALWAYS_ENABLED_TRIGGER_KINDS = frozenset({MANUAL, FIRST_SCAN})
-
-
-def trigger_enabled_for_repository(repository: ManagedRepository, kind: str) -> bool:
-    """Whether an automated trigger kind is enabled for this repository.
-
-    The user chooses which automated triggers (push, n_commits, risky_module,
-    pr_opened, ci_failure, schedule) author code-fix PRs for each repository.
-    Manual and first-scan are always enabled.
-
-    TODO(frontend): Build the per-repository "Automation triggers" settings UI
-    where the user selects which triggers are enabled, calling a new API
-    endpoint to persist the selection
-    (e.g. GET/PUT /api/v1/repositories/<id>/triggers).
-    TODO(backend): Persist the selection (e.g. a RepositoryTriggerSetting model
-    or a field on ManagedRepository) and back this function with it. Until that
-    store exists, all triggers are treated as enabled so current behavior is
-    unchanged.
-    """
-    if kind in ALWAYS_ENABLED_TRIGGER_KINDS:
-        return True
-    # TODO(backend): replace with the user-selected enabled-triggers lookup.
-    return True
 
 
 def ensure_trigger_permitted(
