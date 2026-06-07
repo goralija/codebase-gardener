@@ -31,6 +31,13 @@ const automationRepositorySchema = v.object({
   html_url: v.string(),
 })
 
+const automationBaselineSchema = v.object({
+  analysis_id: v.nullable(v.string()),
+  commit_sha: v.nullable(v.string()),
+  source: v.nullable(v.string()),
+  promoted_at: v.nullable(v.string()),
+})
+
 const automationEffectiveSchema = v.object({
   autonomous_pr_add_on_enabled: v.boolean(),
   can_create_autonomous_prs: v.boolean(),
@@ -48,6 +55,10 @@ const recentSessionSchema = v.object({
   id: v.string(),
   status: v.string(),
   trigger: v.record(v.string(), v.unknown()),
+  baseline_analysis_id: v.nullable(v.string()),
+  current_analysis_id: v.nullable(v.string()),
+  current_commit_sha: v.nullable(v.string()),
+  has_drift_report: v.boolean(),
   created_at: v.string(),
   started_at: v.nullable(v.string()),
   finished_at: v.nullable(v.string()),
@@ -62,6 +73,8 @@ const recentPrPlanSchema = v.object({
   approval_status: v.string(),
   execution_status: v.string(),
   created_pr_url: v.nullable(v.string()),
+  terminal_outcome: v.nullable(v.string()),
+  terminal_outcome_at: v.nullable(v.string()),
   confidence: v.number(),
   confidence_threshold: v.number(),
   created_at: v.string(),
@@ -70,6 +83,7 @@ const recentPrPlanSchema = v.object({
 const repositoryAutomationResponseSchema = v.object({
   schema_version: v.literal("1.0"),
   repository: automationRepositorySchema,
+  baseline: automationBaselineSchema,
   policy: repositoryAutomationPolicySchema,
   effective: automationEffectiveSchema,
   permissions: automationPermissionsSchema,

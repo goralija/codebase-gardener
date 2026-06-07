@@ -1,5 +1,6 @@
 from .constitution import build_repository_constitution
 from .discovery import SourceTruthDiscovery, SourceTruthFile, discover_source_truth
+from .drift import build_analysis_drift_report
 from .entropy import EntropyThresholds, build_entropy_report
 from .fixtures import FixtureRepository, list_fixture_repositories, load_fixture_repository
 from .foundation import foundation_status
@@ -21,6 +22,7 @@ __all__ = [
     "SourceTruthDiscovery",
     "SourceTruthFile",
     "build_analysis_snapshot",
+    "build_analysis_drift_report",
     "build_entropy_report",
     "build_repository_constitution",
     "discover_source_truth",

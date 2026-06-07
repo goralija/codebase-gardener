@@ -1,12 +1,16 @@
 import copy
+from itertools import count
 from types import SimpleNamespace
 
 import pytest
 from django.core.exceptions import ObjectDoesNotExist
+from django.utils import timezone
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 
+from apps.analysis import storage_service
 from apps.analysis.fixtures import load_first_report_fixture
+from apps.analysis.models import RepositoryAnalysis
 from apps.analysis.runner import AnalysisRunError
 from apps.accounts.models import CustomerOrganization
 from apps.billing.models import Subscription
@@ -16,14 +20,25 @@ from apps.maintenance_prs.executor import PlanNotExecutableError
 from apps.maintenance_prs.models import MaintenancePRPlan
 from apps.repositories.models import ManagedRepository
 from apps.sessions.models import GardeningSession
-from apps.sessions.tasks import RetryableSessionError, run_gardening_session
+from apps.sessions.tasks import (
+    RetryableSessionError,
+    refresh_analysis_after_session_prs,
+    run_gardening_session,
+)
+from apps.triggers.models import RepositoryAutomationPolicy
+
+
+_ANALYSIS_COUNTER = count(1)
 
 
 @pytest.fixture(autouse=True)
 def _stub_real_analysis(monkeypatch):
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository: analysis_result(),
+        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+            repository,
+            source=source,
+        ),
     )
     monkeypatch.setattr(
         "apps.sessions.tasks.storage_service.load_first_report",
@@ -81,9 +96,15 @@ def test_run_gardening_session_marks_session_completed(settings):
         "execute",
         "learn",
     ]
-    assert session.result["opportunities_selected"] == ["opp_demo_docs"]
+    assert session.current_analysis_id is not None
+    assert session.result["baseline_analysis_id"] is None
+    assert session.result["current_analysis_id"] == str(session.current_analysis_id)
+    assert session.result["drift_report"] is None
+    assert session.current_analysis.baseline_promoted_at is not None
+    assert storage_service.get_latest_relevant_baseline(session.repository).id == session.current_analysis_id
+    assert session.result["opportunities_selected"] == []
     assert session.result["opportunities_deferred"] == []
-    assert session.result["maintenance_pr_plans"] == ["pr_plan_demo_docs"]
+    assert session.result["maintenance_pr_plans"] == []
     assert session.result["errors"] == []
     assert_gardening_session_result_contract(session.result)
     assert session.last_error == ""
@@ -106,7 +127,10 @@ def test_run_gardening_session_uses_analysis_report(settings, monkeypatch):
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository: analysis_result(),
+        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+            repository,
+            source=source,
+        ),
     )
     monkeypatch.setattr(
         "apps.sessions.tasks.storage_service.load_first_report",
@@ -119,6 +143,8 @@ def test_run_gardening_session_uses_analysis_report(settings, monkeypatch):
     assert session.status == GardeningSession.Status.COMPLETED
     assert session.result["repository_id"] == str(repository.id)
     assert session.result["opportunities_selected"] == []
+    assert session.current_analysis.source == RepositoryAnalysis.Source.FIRST_SCAN
+    assert session.current_analysis.baseline_promoted_at is not None
 
 
 @pytest.mark.django_db
@@ -147,7 +173,11 @@ def test_run_gardening_session_offers_constitution_pr_from_analysis_artifacts(
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository: SimpleNamespace(analysis=object(), artifacts=artifacts),
+        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+            repository,
+            artifacts=artifacts,
+            source=source,
+        ),
     )
     monkeypatch.setattr(
         "apps.sessions.tasks.maybe_open_constitution_pr",
@@ -156,11 +186,13 @@ def test_run_gardening_session_offers_constitution_pr_from_analysis_artifacts(
 
     run_gardening_session.delay(str(session.id)).get()
 
-    assert calls == [{"repository": repository, "artifacts": artifacts}]
+    assert len(calls) == 1
+    assert calls[0]["repository"] == repository
+    assert calls[0]["artifacts"]["constitution"] == artifacts["constitution"]
 
 
 @pytest.mark.django_db
-def test_run_gardening_session_plans_and_executes_first_report_opportunities(
+def test_first_scan_stores_baseline_without_maintenance_pr_plans(
     settings,
     monkeypatch,
 ):
@@ -200,24 +232,12 @@ def test_run_gardening_session_plans_and_executes_first_report_opportunities(
 
     session.refresh_from_db()
     plans = list(MaintenancePRPlan.objects.for_session(str(session.id)).order_by("title"))
-    assert len(plans) == 2
-
-    unblocked = [plan for plan in plans if not plan.blocked]
-    blocked = [plan for plan in plans if plan.blocked]
-    assert len(unblocked) == 1
-    assert len(blocked) == 1
-    assert unblocked[0].approval_status == MaintenancePRPlan.ApprovalStatus.APPROVED
-    assert blocked[0].approval_status == MaintenancePRPlan.ApprovalStatus.PENDING
-    assert blocked[0].block_reason == "Opportunity category requires assisted draft PR handling."
-    assert executed == [str(unblocked[0].id)]
-    assert session.result["opportunities_selected"] == ["opp_docs"]
-    assert session.result["opportunities_deferred"] == [
-        {
-            "maintenance_opportunity_id": "opp_tests",
-            "reason": "Opportunity category requires assisted draft PR handling.",
-        }
-    ]
-    assert session.result["maintenance_pr_plans"] == [str(unblocked[0].id)]
+    assert plans == []
+    assert executed == []
+    assert session.current_analysis.baseline_promoted_at is not None
+    assert session.result["opportunities_selected"] == []
+    assert session.result["opportunities_deferred"] == []
+    assert session.result["maintenance_pr_plans"] == []
     assert session.result["errors"] == []
     assert_gardening_session_result_contract(session.result)
 
@@ -230,6 +250,7 @@ def test_run_gardening_session_plans_and_executes_real_opportunities(
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = True
     repository = create_repository(1)
+    promote_baseline(repository)
     session = GardeningSession.objects.create(
         repository=repository,
         trigger={"type": "manual"},
@@ -267,7 +288,11 @@ def test_run_gardening_session_plans_and_executes_real_opportunities(
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository: SimpleNamespace(analysis=object(), artifacts=artifacts),
+        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+            repository,
+            artifacts=artifacts,
+            source=source,
+        ),
     )
     monkeypatch.setattr(
         "apps.sessions.tasks.storage_service.load_first_report",
@@ -321,6 +346,7 @@ def test_run_gardening_session_defers_safe_docs_plans_over_auto_approval_cap(
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = True
     repository = create_repository(1)
+    promote_baseline(repository)
     session = GardeningSession.objects.create(
         repository=repository,
         trigger={"type": "manual"},
@@ -344,7 +370,11 @@ def test_run_gardening_session_defers_safe_docs_plans_over_auto_approval_cap(
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository: SimpleNamespace(analysis=object(), artifacts=artifacts),
+        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+            repository,
+            artifacts=artifacts,
+            source=source,
+        ),
     )
     monkeypatch.setattr(
         "apps.sessions.tasks.storage_service.load_first_report",
@@ -390,6 +420,7 @@ def test_run_gardening_session_does_not_approve_blocked_protected_or_low_confide
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = True
     repository = create_repository(1)
+    promote_baseline(repository)
     session = GardeningSession.objects.create(
         repository=repository,
         trigger={"type": "manual"},
@@ -422,7 +453,11 @@ def test_run_gardening_session_does_not_approve_blocked_protected_or_low_confide
 
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository: SimpleNamespace(analysis=object(), artifacts=artifacts),
+        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+            repository,
+            artifacts=artifacts,
+            source=source,
+        ),
     )
     monkeypatch.setattr(
         "apps.sessions.tasks.storage_service.load_first_report",
@@ -456,15 +491,29 @@ def test_run_gardening_session_planning_is_idempotent_per_session_opportunity(
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = True
     repository = create_repository(1)
+    promote_baseline(repository)
     session = GardeningSession.objects.create(
         repository=repository,
-        trigger={"type": "first_scan"},
+        trigger={"type": "manual"},
     )
+    opportunities = [opportunity("opp_docs", "Refresh docs", ["docs/api.md"])]
     report = first_report_for_repository(
         repository,
-        opportunities=[opportunity("opp_docs", "Refresh docs", ["docs/api.md"])],
+        opportunities=opportunities,
     )
+    artifacts = {
+        "constitution": worker_constitution(repository),
+        "opportunities": opportunities,
+    }
 
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+            repository,
+            artifacts=artifacts,
+            source=source,
+        ),
+    )
     monkeypatch.setattr(
         "apps.sessions.tasks.storage_service.load_first_report",
         lambda _analysis: report,
@@ -480,6 +529,95 @@ def test_run_gardening_session_planning_is_idempotent_per_session_opportunity(
     session.refresh_from_db()
     assert MaintenancePRPlan.objects.for_session(str(session.id)).count() == 1
     assert session.result["opportunities_selected"] == ["opp_docs"]
+
+
+@pytest.mark.django_db
+def test_refresh_analysis_after_session_prs_waits_for_all_terminal_plans(settings, monkeypatch):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "manual"},
+        status=GardeningSession.Status.COMPLETED,
+    )
+    MaintenancePRPlan.objects.create(
+        repository=repository,
+        gardening_session_id=str(session.id),
+        branch_name="gardener/docs-a",
+        title="Refresh docs A",
+        risk_tier="tier_1_autonomous",
+        confidence=0.94,
+        execution_status=MaintenancePRPlan.ExecutionStatus.SUCCEEDED,
+        created_pr_number=10,
+        terminal_outcome=MaintenancePRPlan.TerminalOutcome.MERGED,
+        terminal_outcome_at=timezone.now(),
+    )
+    MaintenancePRPlan.objects.create(
+        repository=repository,
+        gardening_session_id=str(session.id),
+        branch_name="gardener/docs-b",
+        title="Refresh docs B",
+        risk_tier="tier_1_autonomous",
+        confidence=0.94,
+        execution_status=MaintenancePRPlan.ExecutionStatus.SUCCEEDED,
+        created_pr_number=11,
+    )
+
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("should not refresh yet")),
+    )
+
+    result = refresh_analysis_after_session_prs.delay(str(session.id)).get()
+
+    session.refresh_from_db()
+    assert result["status"] == "waiting_for_terminal_prs"
+    assert session.post_pr_refresh_analysis_id is None
+
+
+@pytest.mark.django_db
+def test_refresh_analysis_after_session_prs_promotes_once(settings, monkeypatch):
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True
+    repository = create_repository(1)
+    session = GardeningSession.objects.create(
+        repository=repository,
+        trigger={"type": "manual"},
+        status=GardeningSession.Status.COMPLETED,
+    )
+    MaintenancePRPlan.objects.create(
+        repository=repository,
+        gardening_session_id=str(session.id),
+        branch_name="gardener/docs-a",
+        title="Refresh docs A",
+        risk_tier="tier_1_autonomous",
+        confidence=0.94,
+        execution_status=MaintenancePRPlan.ExecutionStatus.SUCCEEDED,
+        created_pr_number=10,
+        terminal_outcome=MaintenancePRPlan.TerminalOutcome.MERGED,
+        terminal_outcome_at=timezone.now(),
+    )
+
+    monkeypatch.setattr(
+        "apps.sessions.tasks.run_repository_analysis",
+        lambda repository, source=RepositoryAnalysis.Source.SESSION: analysis_result(
+            repository,
+            source=source,
+        ),
+    )
+
+    result = refresh_analysis_after_session_prs.delay(str(session.id)).get()
+    session.refresh_from_db()
+    refresh_analysis = session.post_pr_refresh_analysis
+
+    assert result["status"] == "refreshed"
+    assert refresh_analysis.source == RepositoryAnalysis.Source.POST_PR_REFRESH
+    assert refresh_analysis.baseline_promoted_at is not None
+    assert storage_service.get_latest_relevant_baseline(repository).id == refresh_analysis.id
+
+    redelivered = refresh_analysis_after_session_prs.delay(str(session.id)).get()
+    assert redelivered["status"] == "already_refreshed"
 
 
 @pytest.mark.django_db
@@ -512,7 +650,7 @@ def test_run_gardening_session_marks_session_failed_with_partial_result(settings
 
 
 @pytest.mark.django_db
-def test_run_gardening_session_defers_fixture_opportunities_without_ready_plan(
+def test_run_gardening_session_without_baseline_ignores_fixture_opportunities(
     settings,
     monkeypatch,
 ):
@@ -546,18 +684,10 @@ def test_run_gardening_session_defers_fixture_opportunities_without_ready_plan(
     run_gardening_session.delay(str(session.id)).get()
 
     session.refresh_from_db()
-    assert session.result["opportunities_selected"] == ["opp_demo_docs"]
-    assert session.result["maintenance_pr_plans"] == ["pr_plan_demo_docs"]
-    assert session.result["opportunities_deferred"] == [
-        {
-            "maintenance_opportunity_id": "opp_blocked",
-            "reason": "Blocked by another opportunity.",
-        },
-        {
-            "maintenance_opportunity_id": "opp_missing_plan",
-            "reason": "No matching fixture PR plan.",
-        },
-    ]
+    assert session.current_analysis.baseline_promoted_at is not None
+    assert session.result["opportunities_selected"] == []
+    assert session.result["maintenance_pr_plans"] == []
+    assert session.result["opportunities_deferred"] == []
     assert_gardening_session_result_contract(session.result)
 
 
@@ -597,8 +727,10 @@ def test_run_gardening_session_marks_failed_after_retry_exhaustion(settings):
 def test_run_gardening_session_retries_github_execute_errors(settings, monkeypatch):
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = False
+    repository = create_repository(1)
+    promote_baseline(repository)
     session = GardeningSession.objects.create(
-        repository=create_repository(1),
+        repository=repository,
         trigger={"type": "manual"},
     )
 
@@ -628,8 +760,10 @@ def test_run_gardening_session_retries_github_execute_errors(settings, monkeypat
 def test_run_gardening_session_marks_non_retryable_github_error_failed(settings, monkeypatch):
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = False
+    repository = create_repository(1)
+    promote_baseline(repository)
     session = GardeningSession.objects.create(
-        repository=create_repository(1),
+        repository=repository,
         trigger={"type": "manual"},
     )
 
@@ -655,6 +789,7 @@ def test_run_gardening_session_reports_pr_policy_failure_and_continues(settings,
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = False
     repository = create_repository(1)
+    promote_baseline(repository)
     session = GardeningSession.objects.create(
         repository=repository,
         trigger={"type": "manual"},
@@ -711,6 +846,7 @@ def test_run_gardening_session_reports_permanent_github_plan_failure_and_continu
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = False
     repository = create_repository(1)
+    promote_baseline(repository)
     session = GardeningSession.objects.create(
         repository=repository,
         trigger={"type": "manual"},
@@ -762,6 +898,7 @@ def test_run_gardening_session_retries_retryable_github_plan_failure(settings, m
     settings.CELERY_TASK_ALWAYS_EAGER = True
     settings.CELERY_TASK_EAGER_PROPAGATES = False
     repository = create_repository(1)
+    promote_baseline(repository)
     session = GardeningSession.objects.create(
         repository=repository,
         trigger={"type": "manual"},
@@ -804,7 +941,7 @@ def test_run_gardening_session_persists_failed_result_for_analysis_errors(
     )
     monkeypatch.setattr(
         "apps.sessions.tasks.run_repository_analysis",
-        lambda repository: (_ for _ in ()).throw(
+        lambda repository, source=RepositoryAnalysis.Source.SESSION: (_ for _ in ()).throw(
             AnalysisRunError("diagnose", "Repowise failed")
         ),
     )
@@ -871,8 +1008,99 @@ def repo_root():
     return Path(__file__).resolve().parents[2]
 
 
-def analysis_result():
-    return SimpleNamespace(analysis=object(), artifacts={"constitution": {"open_questions": []}})
+def analysis_result(
+    repository: ManagedRepository,
+    *,
+    artifacts: dict | None = None,
+    source: str = RepositoryAnalysis.Source.SESSION,
+):
+    artifacts = analysis_artifacts(repository, artifacts=artifacts)
+    analysis, _created = RepositoryAnalysis.objects.update_or_create(
+        repository=repository,
+        commit_sha=artifacts["snapshot"]["commit_sha"],
+        defaults={
+            "organization": repository.organization,
+            "source": source,
+            "constitution": artifacts["constitution"],
+            "entropy": artifacts["entropy"],
+            "opportunities": artifacts["opportunities"],
+        },
+    )
+    return SimpleNamespace(analysis=analysis, artifacts=artifacts)
+
+
+def analysis_artifacts(repository: ManagedRepository, *, artifacts: dict | None = None) -> dict:
+    artifacts = copy.deepcopy(artifacts or {})
+    opportunities = artifacts.get("opportunities") or []
+    snapshot = artifacts.get("snapshot") or snapshot_for_opportunities(repository, opportunities)
+    entropy = artifacts.get("entropy") or {
+        "schema_version": "1.0",
+        "entropy_report_id": f"entropy_{next(_ANALYSIS_COUNTER)}",
+        "repository_id": str(repository.id),
+        "analysis_snapshot_id": snapshot["analysis_snapshot_id"],
+        "commit_sha": snapshot["commit_sha"],
+        "score": {
+            "overall": 10.0,
+            "classification": "healthy",
+            "components": {"maintainability": 10.0},
+        },
+        "scopes": [],
+        "top_contributors": [],
+        "forecast": {
+            "horizon_days": 90,
+            "predicted_overall": 10.0,
+            "confidence": 0.5,
+            "summary": "Fixture analysis.",
+        },
+    }
+    return {
+        "constitution": artifacts.get("constitution") or {"open_questions": []},
+        "entropy": entropy,
+        "opportunities": opportunities,
+        "snapshot": snapshot,
+    }
+
+
+def snapshot_for_opportunities(repository: ManagedRepository, opportunities: list[dict]) -> dict:
+    marker = next(_ANALYSIS_COUNTER)
+    return {
+        "schema_version": "1.0",
+        "analysis_snapshot_id": f"snap_{marker}",
+        "repository_id": str(repository.id),
+        "commit_sha": f"commit-{marker}",
+        "created_at": "2026-06-07T00:00:00Z",
+        "logical_systems": [],
+        "signals": {
+            "dependency_cycles": [],
+            "hotspots": [
+                {
+                    "path": opportunity.get("affected_paths", [""])[0],
+                    "summary": opportunity.get("summary") or opportunity.get("title") or "Hotspot.",
+                    "score": abs(float(opportunity.get("expected_entropy_delta", -1.0))) or 1.0,
+                }
+                for opportunity in opportunities
+                if opportunity.get("affected_paths")
+            ],
+            "dead_code_candidates": [],
+            "ownership_risks": [],
+            "test_gaps": [],
+            "dependency_risks": [],
+            "ci_failures": [],
+        },
+        "constitution_id": f"constitution_{repository.id}",
+    }
+
+
+def promote_baseline(repository: ManagedRepository):
+    baseline = RepositoryAnalysis.objects.create(
+        organization=repository.organization,
+        repository=repository,
+        commit_sha=f"baseline-{next(_ANALYSIS_COUNTER)}",
+        source=RepositoryAnalysis.Source.FIRST_SCAN,
+        constitution=worker_constitution(repository),
+        entropy={"score": {"overall": 0.0, "components": {}}},
+    )
+    return storage_service.promote_relevant_baseline(baseline)
 
 
 def first_report_for_repository(repository: ManagedRepository, *, opportunities: list[dict]):
@@ -1007,7 +1235,7 @@ def create_repository(identifier: int) -> ManagedRepository:
         permissions={"metadata": "read", "contents": "read"},
         events=["installation", "repository"],
     )
-    return ManagedRepository.objects.create(
+    repository = ManagedRepository.objects.create(
         organization=organization,
         github_installation=installation,
         github_repository_id=3000 + identifier,
@@ -1018,3 +1246,9 @@ def create_repository(identifier: int) -> ManagedRepository:
         default_branch="main",
         html_url=f"https://github.com/org-{identifier}/repo-{identifier}",
     )
+    RepositoryAutomationPolicy.objects.create(
+        organization=organization,
+        repository=repository,
+        autonomy_mode=RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS,
+    )
+    return repository

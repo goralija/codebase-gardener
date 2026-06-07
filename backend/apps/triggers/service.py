@@ -16,6 +16,7 @@ from typing import Any
 from django.db.models import F
 from django.utils import timezone
 
+from apps.analysis import storage_service
 from apps.common.models import AuditEvent
 from apps.repositories.models import ManagedRepository
 from apps.sessions.models import GardeningSession
@@ -226,12 +227,15 @@ def changed_paths_from_push(payload: dict[str, Any]) -> list[str]:
 def constitution_for_repository(repository: ManagedRepository) -> dict[str, Any]:
     """Return the Repository Constitution for trigger thresholds.
 
-    No constitution is persisted per repository yet (Lane B output is wired in
-    E05). Returns an empty dict so thresholds fall back to safe defaults; this
-    is the seam where real constitution data will be loaded.
+    Trigger rules should use the last promoted repository baseline, not the
+    newest unpromoted analysis, because promotion means the default branch state
+    has been observed and accepted as the current reference point.
     """
 
-    return {}
+    baseline = storage_service.get_latest_relevant_baseline(repository)
+    if baseline is None:
+        return {}
+    return baseline.constitution or {}
 
 
 def _accumulate_commits(repository: ManagedRepository, commit_count: int) -> int:
@@ -246,6 +250,10 @@ def _accumulate_commits(repository: ManagedRepository, commit_count: int) -> int
 
 def _reset_commits(repository: ManagedRepository) -> None:
     RepositoryCommitTracker.objects.filter(repository=repository).update(commits_since_session=0)
+
+
+def reset_commit_tracker(repository: ManagedRepository) -> None:
+    _reset_commits(repository)
 
 
 def _record_trigger_audit(

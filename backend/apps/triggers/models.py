@@ -25,14 +25,14 @@ class RepositoryAutomationPolicy(UUIDTimestampedModel):
     autonomy_mode = models.CharField(
         max_length=32,
         choices=AutonomyMode.choices,
-        default=AutonomyMode.AUTONOMOUS,
+        default=AutonomyMode.CONSERVATIVE,
     )
     manual_trigger_enabled = models.BooleanField(default=True)
-    scheduled_trigger_enabled = models.BooleanField(default=True)
-    commit_trigger_enabled = models.BooleanField(default=True)
-    risky_module_trigger_enabled = models.BooleanField(default=True)
-    pr_opened_trigger_enabled = models.BooleanField(default=True)
-    ci_failure_trigger_enabled = models.BooleanField(default=True)
+    scheduled_trigger_enabled = models.BooleanField(default=False)
+    commit_trigger_enabled = models.BooleanField(default=False)
+    risky_module_trigger_enabled = models.BooleanField(default=False)
+    pr_opened_trigger_enabled = models.BooleanField(default=False)
+    ci_failure_trigger_enabled = models.BooleanField(default=False)
     commit_threshold = models.PositiveSmallIntegerField(
         default=DEFAULT_COMMIT_THRESHOLD,
         validators=[MinValueValidator(1), MaxValueValidator(500)],

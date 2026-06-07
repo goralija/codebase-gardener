@@ -123,9 +123,12 @@ def test_record_outcome_is_idempotent_on_redelivery():
     first = record_pr_outcome(plan=plan, outcome=Outcome.MERGED)
     second = record_pr_outcome(plan=plan, outcome=Outcome.MERGED)
 
+    plan.refresh_from_db()
     profile = GardenerProfile.objects.get(repository=repository)
     assert first.recorded is True
     assert second.recorded is False
+    assert plan.terminal_outcome == Outcome.MERGED
+    assert len(plan.outcome_history) == 1
     assert profile.accepted_categories == ["docs"]
     assert len(profile.updated_from_pr_outcomes) == 1
 
@@ -138,7 +141,13 @@ def test_distinct_outcomes_for_same_plan_are_each_recorded():
     record_pr_outcome(plan=plan, outcome=Outcome.MERGED)
     record_pr_outcome(plan=plan, outcome=Outcome.REVERTED)
 
+    plan.refresh_from_db()
     profile = GardenerProfile.objects.get(repository=repository)
+    assert plan.terminal_outcome == Outcome.REVERTED
+    assert [entry["outcome"] for entry in plan.outcome_history] == [
+        Outcome.MERGED,
+        Outcome.REVERTED,
+    ]
     assert profile.accepted_categories == ["docs"]
     assert profile.reverted_categories == ["docs"]
     assert {entry["outcome"] for entry in profile.updated_from_pr_outcomes} == {
@@ -209,14 +218,46 @@ def test_profile_change_enqueues_profile_sync(monkeypatch):
     plan = make_plan(repository, category="docs")
 
     enqueued = []
+    refresh_enqueued = []
     monkeypatch.setattr(
         "apps.profiles.tasks.sync_profile_pr.delay",
         lambda repository_id: enqueued.append(repository_id),
+    )
+    monkeypatch.setattr(
+        "apps.sessions.tasks.refresh_analysis_after_session_prs.delay",
+        lambda session_id: refresh_enqueued.append(session_id),
     )
 
     record_pr_outcome(plan=plan, outcome=Outcome.MERGED)
 
     assert enqueued == [str(repository.id)]
+    assert refresh_enqueued == [plan.gardening_session_id]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_terminal_outcome_updates_plan_and_enqueues_refresh(monkeypatch):
+    repository = demo_repository()
+    plan = make_plan(repository, category="docs")
+
+    refresh_enqueued = []
+    monkeypatch.setattr("apps.profiles.tasks.sync_profile_pr.delay", lambda _repo_id: None)
+    monkeypatch.setattr(
+        "apps.sessions.tasks.refresh_analysis_after_session_prs.delay",
+        lambda session_id: refresh_enqueued.append(session_id),
+    )
+
+    record_pr_outcome(
+        plan=plan,
+        outcome=Outcome.MERGED,
+        source_metadata={"merge_commit_sha": "abc123"},
+    )
+
+    plan.refresh_from_db()
+    assert plan.terminal_outcome == Outcome.MERGED
+    assert plan.terminal_outcome_at is not None
+    assert plan.merge_commit_sha == "abc123"
+    assert plan.outcome_history[0]["outcome"] == Outcome.MERGED
+    assert refresh_enqueued == [plan.gardening_session_id]
 
 
 @pytest.mark.django_db(transaction=True)

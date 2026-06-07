@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0",
+  "repository_id": "repo_demo",
+  "baseline_analysis_id": "analysis_baseline",
+  "baseline_commit_sha": "abc123baseline",
+  "current_analysis_id": "analysis_current",
+  "current_commit_sha": "def456current",
+  "generated_at": "2026-06-07T00:00:00Z",
+  "no_baseline": false,
+  "entropy_delta": {
+    "overall": 6.5,
+    "components": {
+      "architecture": 2.0,
+      "maintainability": 3.0,
+      "testing": 1.5
+    }
+  },
+  "signal_changes": {
+    "new": [
+      {
+        "bucket": "test_gaps",
+        "path": "backend/apps/sessions/tasks.py",
+        "kind": "test_gap",
+        "summary": "Session baseline promotion lacks regression coverage.",
+        "impact": 3.0
+      }
+    ],
+    "worsened": [
+      {
+        "bucket": "hotspots",
+        "path": "backend/apps/sessions/tasks.py",
+        "kind": "hotspot",
+        "summary": "Session worker changed frequently and owns more lifecycle logic.",
+        "impact": 12.0,
+        "baseline_impact": 5.0,
+        "current_impact": 12.0,
+        "impact_delta": 7.0
+      }
+    ],
+    "resolved": [
+      {
+        "bucket": "dependency_risks",
+        "path": "frontend/package.json",
+        "kind": "dependency_risk",
+        "summary": "Outdated fixture dependency was patched.",
+        "impact": 2.0
+      }
+    ],
+    "unchanged_count": 4
+  },
+  "hotspot_paths": [
+    {
+      "path": "backend/apps/sessions/tasks.py",
+      "change_count": 2,
+      "impact_delta": 10.0,
+      "reasons": [
+        "Session worker changed frequently and owns more lifecycle logic.",
+        "Session baseline promotion lacks regression coverage."
+      ]
+    }
+  ],
+  "summary": {
+    "new_count": 1,
+    "worsened_count": 1,
+    "resolved_count": 1,
+    "unchanged_count": 4
+  }
+}

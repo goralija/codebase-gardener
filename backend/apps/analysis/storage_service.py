@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from django.db import transaction
+from django.utils import timezone
 
 from apps.analysis.models import RepositoryAnalysis
 from apps.common import storage
@@ -35,6 +36,7 @@ def store_analysis(
     repository,
     commit_sha: str,
     artifacts: JsonObject,
+    source: str = RepositoryAnalysis.Source.SESSION,
     actor=None,
 ) -> RepositoryAnalysis:
     """Store one analysis run.
@@ -61,6 +63,7 @@ def store_analysis(
         commit_sha=commit_sha,
         defaults={
             "organization": organization,
+            "source": source,
             "constitution": artifacts.get("constitution") or {},
             "entropy": artifacts.get("entropy") or {},
             "opportunities": artifacts.get("opportunities") or [],
@@ -91,6 +94,20 @@ def get_latest(repository) -> RepositoryAnalysis | None:
     return repository.analyses.order_by("-created_at").first()
 
 
+def get_latest_relevant_baseline(repository) -> RepositoryAnalysis | None:
+    return (
+        repository.analyses.filter(baseline_promoted_at__isnull=False)
+        .order_by("-baseline_promoted_at", "-created_at")
+        .first()
+    )
+
+
+def promote_relevant_baseline(analysis: RepositoryAnalysis) -> RepositoryAnalysis:
+    analysis.baseline_promoted_at = timezone.now()
+    analysis.save(update_fields=["baseline_promoted_at", "updated_at"])
+    return analysis
+
+
 def list_history(repository) -> list[RepositoryAnalysis]:
     return list(repository.analyses.order_by("-created_at"))
 
@@ -112,6 +129,10 @@ def load_first_report(analysis: RepositoryAnalysis) -> JsonObject:
         "maintenance_opportunities": analysis.opportunities or [],
         "maintenance_pr_plans": maintenance_pr_plans,
     }
+
+
+def load_snapshot(analysis: RepositoryAnalysis) -> JsonObject:
+    return storage.get_json(analysis.snapshot_key) if analysis.snapshot_key else {}
 
 
 def _latest_session_outputs(repository) -> tuple[JsonObject | None, list[JsonObject]]:

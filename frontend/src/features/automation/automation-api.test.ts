@@ -32,11 +32,11 @@ describe("automation API", () => {
       fetchRepositoryAutomation("org-1", "repo-1", { fetcher })
     ).resolves.toMatchObject({
       policy: {
-        autonomy_mode: "autonomous",
+        autonomy_mode: "conservative",
         commit_threshold: 10,
       },
       effective: {
-        can_create_autonomous_prs: true,
+        can_create_autonomous_prs: false,
       },
     })
 
@@ -56,7 +56,7 @@ describe("automation API", () => {
     expect(parseRepositoryAutomationResponse(automationSettingsFixture)).toMatchObject({
       schema_version: "1.0",
       policy: {
-        autonomy_mode: "autonomous",
+        autonomy_mode: "conservative",
       },
     })
   })
@@ -152,23 +152,30 @@ export function automationPayload() {
       default_branch: "main",
       html_url: "https://github.com/acme/api",
     },
+    baseline: {
+      analysis_id: "analysis-1",
+      commit_sha: "abc123baseline",
+      source: "first_scan",
+      promoted_at: "2026-06-06T08:00:00Z",
+    },
     policy: {
       id: "policy-1",
-      autonomy_mode: "autonomous",
+      autonomy_mode: "conservative",
       manual_trigger_enabled: true,
-      scheduled_trigger_enabled: true,
-      commit_trigger_enabled: true,
-      risky_module_trigger_enabled: true,
-      pr_opened_trigger_enabled: true,
-      ci_failure_trigger_enabled: true,
+      scheduled_trigger_enabled: false,
+      commit_trigger_enabled: false,
+      risky_module_trigger_enabled: false,
+      pr_opened_trigger_enabled: false,
+      ci_failure_trigger_enabled: false,
       commit_threshold: 10,
       created_at: "2026-06-06T08:00:00Z",
       updated_at: "2026-06-06T08:00:00Z",
     },
     effective: {
       autonomous_pr_add_on_enabled: true,
-      can_create_autonomous_prs: true,
-      pr_creation_status: "Autonomous PR creation is enabled.",
+      can_create_autonomous_prs: false,
+      pr_creation_status:
+        "Repository autonomy mode is Conservative; sessions report recommendations without PR creation.",
       default_commit_threshold: 10,
       confidence_threshold: 0.9,
     },
@@ -181,6 +188,10 @@ export function automationPayload() {
         id: "session-1",
         status: "completed",
         trigger: { type: "schedule" },
+        baseline_analysis_id: "analysis-1",
+        current_analysis_id: "analysis-2",
+        current_commit_sha: "def456current",
+        has_drift_report: true,
         created_at: "2026-06-06T08:00:00Z",
         started_at: "2026-06-06T08:01:00Z",
         finished_at: "2026-06-06T08:02:00Z",
@@ -196,6 +207,8 @@ export function automationPayload() {
         approval_status: "approved",
         execution_status: "succeeded",
         created_pr_url: "https://github.com/acme/api/pull/1",
+        terminal_outcome: "merged",
+        terminal_outcome_at: "2026-06-06T09:00:00Z",
         confidence: 0.94,
         confidence_threshold: 0.9,
         created_at: "2026-06-06T08:02:00Z",

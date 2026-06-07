@@ -130,6 +130,36 @@ def test_store_analysis_uploads_blobs_inlines_contracts():
 
 @pytest.mark.django_db
 @mock_aws
+def test_store_analysis_source_and_baseline_promotion():
+    org = _org()
+    repo = _repo(org)
+    first = storage_service.store_analysis(
+        organization=org,
+        repository=repo,
+        commit_sha="c1",
+        artifacts=_artifacts("c1"),
+        source=RepositoryAnalysis.Source.FIRST_SCAN,
+    )
+    second = storage_service.store_analysis(
+        organization=org,
+        repository=repo,
+        commit_sha="c2",
+        artifacts=_artifacts("c2"),
+        source=RepositoryAnalysis.Source.SESSION,
+    )
+
+    assert first.source == RepositoryAnalysis.Source.FIRST_SCAN
+    assert storage_service.get_latest_relevant_baseline(repo) is None
+
+    storage_service.promote_relevant_baseline(first)
+    assert storage_service.get_latest_relevant_baseline(repo).id == first.id
+
+    storage_service.promote_relevant_baseline(second)
+    assert storage_service.get_latest_relevant_baseline(repo).id == second.id
+
+
+@pytest.mark.django_db
+@mock_aws
 def test_history_and_get_latest():
 
     org = _org()

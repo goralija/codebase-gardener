@@ -15,6 +15,7 @@ from apps.github_app.services import (
 )
 from apps.repositories.models import ManagedRepository
 from apps.sessions.models import GardeningSession
+from apps.triggers.models import RepositoryAutomationPolicy
 
 
 WEBHOOK_URL = "/api/v1/github-app/webhooks/"
@@ -735,7 +736,7 @@ def create_repository(
     installation: GitHubInstallation | None = None,
 ) -> ManagedRepository:
     installation = installation or create_installation()
-    return ManagedRepository.objects.create(
+    repository = ManagedRepository.objects.create(
         organization=installation.organization,
         github_installation=installation,
         github_repository_id=identifier,
@@ -746,6 +747,17 @@ def create_repository(
         default_branch="main",
         html_url=f"https://github.com/acme/{name}",
     )
+    RepositoryAutomationPolicy.objects.create(
+        organization=installation.organization,
+        repository=repository,
+        autonomy_mode=RepositoryAutomationPolicy.AutonomyMode.AUTONOMOUS,
+        scheduled_trigger_enabled=True,
+        commit_trigger_enabled=True,
+        risky_module_trigger_enabled=True,
+        pr_opened_trigger_enabled=True,
+        ci_failure_trigger_enabled=True,
+    )
+    return repository
 
 
 def installation_payload() -> dict:

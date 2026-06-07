@@ -32,6 +32,7 @@ The chosen stack must support:
 - scheduled jobs through Celery Beat or an equivalent scheduler
 - secure token storage
 - persistent analysis snapshots
+- promoted repository analysis baselines
 - repository checkout or API-based file access
 - hosted dashboard/API
 - logs, metrics, and error tracking
@@ -107,6 +108,10 @@ Repowise source files under `RepoWise/` are tracked in the Codebase Gardener rep
 - Clean up temporary repository checkouts.
 - Avoid cross-customer cache leakage.
 - Persist failures with enough detail to debug without leaking code or secrets.
+- Promote baselines only after the intended lifecycle checkpoint: first scan,
+  completed non-first-scan session, or post-PR refresh.
+- Run post-PR refresh idempotently after all Gardener-authored PRs for a
+  session are merged, closed, or later reverted.
 
 ## Monitoring
 
@@ -120,6 +125,7 @@ Track:
 - GitHub API rate limit pressure
 - customer-facing latency
 - entropy report generation time
+- baseline promotion and post-PR refresh failures
 
 ## Implementation stack
 

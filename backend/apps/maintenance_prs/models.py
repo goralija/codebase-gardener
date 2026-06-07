@@ -59,6 +59,11 @@ class MaintenancePRPlan(UUIDTimestampedModel):
         SUCCEEDED = "succeeded", "Succeeded"
         FAILED = "failed", "Failed"
 
+    class TerminalOutcome(models.TextChoices):
+        MERGED = "merged", "Merged"
+        CLOSED = "closed", "Closed"
+        REVERTED = "reverted", "Reverted"
+
     repository = models.ForeignKey(
         "repositories.ManagedRepository",
         on_delete=models.CASCADE,
@@ -95,6 +100,14 @@ class MaintenancePRPlan(UUIDTimestampedModel):
     created_pr_url = models.URLField(blank=True)
     created_branch_ref = models.CharField(max_length=255, blank=True)
     merge_commit_sha = models.CharField(max_length=64, blank=True, db_index=True)
+    terminal_outcome = models.CharField(
+        max_length=32,
+        choices=TerminalOutcome.choices,
+        blank=True,
+        db_index=True,
+    )
+    terminal_outcome_at = models.DateTimeField(null=True, blank=True)
+    outcome_history = models.JSONField(default=list, blank=True)
     execution_error = models.TextField(blank=True)
 
     objects = MaintenancePRPlanQuerySet.as_manager()
@@ -125,6 +138,8 @@ class MaintenancePRPlan(UUIDTimestampedModel):
             errors["required_checks"] = "Required checks must be a list."
         if not isinstance(self.pr_body_sections, dict):
             errors["pr_body_sections"] = "PR body sections must be an object."
+        if not isinstance(self.outcome_history, list):
+            errors["outcome_history"] = "Outcome history must be a list."
         if errors:
             raise ValidationError(errors)
 
@@ -154,6 +169,10 @@ class MaintenancePRPlan(UUIDTimestampedModel):
             "required_checks": self.required_checks,
             "blocked": self.blocked,
             "block_reason": self.block_reason,
+            "terminal_outcome": self.terminal_outcome or None,
+            "terminal_outcome_at": self.terminal_outcome_at.isoformat().replace("+00:00", "Z")
+            if self.terminal_outcome_at
+            else None,
         }
 
     def to_execution_status(self) -> dict:
@@ -164,6 +183,10 @@ class MaintenancePRPlan(UUIDTimestampedModel):
             "created_pr_number": self.created_pr_number,
             "created_pr_url": self.created_pr_url or None,
             "created_branch_ref": self.created_branch_ref or None,
+            "terminal_outcome": self.terminal_outcome or None,
+            "terminal_outcome_at": self.terminal_outcome_at.isoformat().replace("+00:00", "Z")
+            if self.terminal_outcome_at
+            else None,
             "execution_error": self.execution_error or None,
         }
 

@@ -317,14 +317,14 @@ Hosted Celery workers run gardening sessions, plan safe PRs, and learn from outc
 
 #### E04-T06 Implement PR outcome learning
 
-- Status: Open
+- Status: Done
 - Phase: MVP
 - Lane: Lane C
 - Complexity: L
 - Intent: Capture accepted, rejected, edited, merged, reverted, failed, and closed outcomes and update `GardenerProfile`.
 - Dependencies: E04-T05, E02-T04
-- Acceptance criteria: Outcomes update ranking signals and propose `.gardener/profile.yaml` changes.
-- Verification: Tests cover outcome ingestion and memory update rules.
+- Acceptance criteria: Outcomes update ranking signals, propose `.gardener/profile.yaml` changes, record terminal PR plan state, and enqueue baseline refresh after terminal session PR outcomes.
+- Verification: Tests cover outcome ingestion, memory update rules, webhook idempotency, terminal outcome history, and post-PR refresh enqueue.
 
 #### E04-T07 Implement ROI estimates
 
@@ -375,6 +375,17 @@ The three lanes move from fixture contracts to real end-to-end behavior.
 - Dependencies: E05-T01, E05-T02, E04-T05
 - Acceptance criteria: Test repository receives a Gardener PR with evidence, confidence, entropy impact, and verification sections.
 - Verification: End-to-end GitHub integration test or staged manual test.
+
+#### E05-T04 Implement baseline-aware analysis lifecycle and drift planning
+
+- Status: Done
+- Phase: MVP
+- Lane: Shared
+- Complexity: XL
+- Intent: Make first scan baseline-only, compare later sessions against the latest promoted analysis, plan from drift, and refresh baseline after Gardener PR outcomes.
+- Dependencies: E05-T01, E05-T02, E04-T06
+- Acceptance criteria: `RepositoryAnalysis` supports source and baseline promotion; `GardeningSession` links baseline/current/post-PR analyses; `AnalysisDriftReport` contract exists; new repositories default to quiet automation; terminal Gardener PRs trigger idempotent post-PR refresh.
+- Verification: Backend tests cover first-scan baseline-only, quiet defaults, drift-aware session planning, trigger constitution lookup, terminal outcome history, and post-PR refresh; analysis tests cover drift comparison; fixture and docs validation cover shared contracts.
 
 ## E06 Pricing, Billing, and ROI
 
