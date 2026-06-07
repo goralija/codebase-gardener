@@ -386,6 +386,16 @@ Produced by Lane A backend. Displayed and edited by Lane A dashboard.
     "source": null,
     "promoted_at": null
   },
+  "stats": {
+    "report_count": 0,
+    "session_count": 0,
+    "completed_session_count": 0,
+    "pr_plan_count": 0,
+    "created_pr_count": 0,
+    "merged_pr_count": 0,
+    "blocked_pr_count": 0,
+    "latest_report_at": null
+  },
   "policy": {
     "id": "policy_123",
     "autonomy_mode": "conservative",
@@ -421,6 +431,9 @@ may update repository automation policy and trigger manual sessions. Viewer and
 reviewer roles may view settings but may not update them.
 New repositories use the quiet defaults shown above until the user explicitly
 enables automated triggers or a higher autonomy mode.
+`stats` counts are repository-scoped all-time totals from stored report,
+session, and MaintenancePRPlan rows. `latest_report_at` is null until the first
+repository analysis/report has been stored.
 
 ## FirstReportFixture
 

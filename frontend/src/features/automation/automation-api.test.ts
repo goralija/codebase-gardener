@@ -53,7 +53,9 @@ describe("automation API", () => {
   })
 
   it("parses the shared repository automation settings fixture", () => {
-    expect(parseRepositoryAutomationResponse(automationSettingsFixture)).toMatchObject({
+    expect(
+      parseRepositoryAutomationResponse(automationSettingsFixture)
+    ).toMatchObject({
       schema_version: "1.0",
       policy: {
         autonomy_mode: "conservative",
@@ -157,6 +159,16 @@ export function automationPayload() {
       commit_sha: "abc123baseline",
       source: "first_scan",
       promoted_at: "2026-06-06T08:00:00Z",
+    },
+    stats: {
+      report_count: 2,
+      session_count: 1,
+      completed_session_count: 1,
+      pr_plan_count: 1,
+      created_pr_count: 1,
+      merged_pr_count: 1,
+      blocked_pr_count: 0,
+      latest_report_at: "2026-06-06T08:02:00Z",
     },
     policy: {
       id: "policy-1",

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQueries, useQuery } from "@tanstack/react-query"
 import {
   AlertTriangle,
   CheckCircle2,
@@ -7,14 +7,17 @@ import {
   CircleOff,
   FileText,
   GitBranch,
+  GitPullRequest,
   Gauge,
   Settings,
-  Zap,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
-  fetchOrganizationBilling,
+  fetchRepositoryAutomation,
+  type RepositoryAutomationResponse,
+} from "@/features/automation/automation-api"
+import {
   fetchOrganizationRepositories,
   fetchOrganizations,
   isGithubOnboardingAuthenticationRequired,
@@ -22,6 +25,13 @@ import {
 } from "@/features/github-onboarding/github-onboarding-api"
 
 const EMPTY_REPOSITORIES: ManagedRepository[] = []
+
+type RepositoryStatsView = {
+  hasBaseline: boolean
+  repositoryId: string
+  stats?: RepositoryAutomationResponse["stats"]
+  status: "error" | "loading" | "ready"
+}
 
 export function App() {
   const organizationsQuery = useQuery({
@@ -33,19 +43,45 @@ export function App() {
   const selectedOrganization = organizationsQuery.data?.organizations[0] ?? null
   const repositoriesQuery = useQuery({
     queryKey: ["overview", "repositories", selectedOrganization?.id],
-    queryFn: () => fetchOrganizationRepositories(selectedOrganization?.id ?? ""),
-    enabled: Boolean(selectedOrganization?.id),
-    retry: false,
-  })
-  const billingQuery = useQuery({
-    queryKey: ["overview", "billing", selectedOrganization?.id],
-    queryFn: () => fetchOrganizationBilling(selectedOrganization?.id ?? ""),
+    queryFn: () =>
+      fetchOrganizationRepositories(selectedOrganization?.id ?? ""),
     enabled: Boolean(selectedOrganization?.id),
     retry: false,
   })
 
-  const repositories = repositoriesQuery.data?.repositories ?? EMPTY_REPOSITORIES
-  const topRepositories = repositories.slice(0, 4)
+  const repositories =
+    repositoriesQuery.data?.repositories ?? EMPTY_REPOSITORIES
+  const repositoryAutomationQueries = useQueries({
+    queries: repositories.map((repository) => ({
+      queryKey: [
+        "overview",
+        "repository-automation",
+        selectedOrganization?.id,
+        repository.id,
+      ],
+      queryFn: () =>
+        fetchRepositoryAutomation(
+          selectedOrganization?.id ?? "",
+          repository.id
+        ),
+      enabled: Boolean(selectedOrganization?.id),
+      retry: false,
+    })),
+  })
+  const repositoryStats = repositories.map((repository, index) =>
+    buildRepositoryStats(repository, repositoryAutomationQueries[index])
+  )
+  const repositoryStatsById = new Map(
+    repositoryStats.map((stats) => [stats.repositoryId, stats])
+  )
+  const aggregateStats = aggregateRepositoryStats(repositoryStats)
+  const statsAreLoading =
+    repositoriesQuery.isLoading ||
+    repositoryStats.some((stats) => stats.status === "loading")
+  const statsUnavailable =
+    repositories.length > 0 &&
+    !statsAreLoading &&
+    repositoryStats.every((stats) => stats.status === "error")
   const isAuthenticationRequired = isGithubOnboardingAuthenticationRequired(
     organizationsQuery.error
   )
@@ -124,7 +160,7 @@ export function App() {
           <OverviewLink
             href="/onboarding/github"
             icon={<GitBranch className="size-4" />}
-            label="GitHub setup"
+            label="Managed repositories"
             value={
               repositoriesQuery.isLoading
                 ? "Loading"
@@ -132,24 +168,28 @@ export function App() {
             }
           />
           <OverviewLink
-            href="/automation"
-            icon={<Zap className="size-4" />}
-            label="Automation"
-            value={
-              billingQuery.data?.subscription.autonomous_pr_add_on_enabled
-                ? "PR add-on on"
-                : "PR add-on off"
-            }
+            href={firstReportHref(repositories[0], repositoryStats[0])}
+            icon={<FileText className="size-4" />}
+            label="Reports generated"
+            value={formatAggregateCount(
+              aggregateStats.reportCount,
+              "report",
+              "reports",
+              statsAreLoading,
+              statsUnavailable
+            )}
           />
           <OverviewLink
-            href={
-              repositories[0]
-                ? `/report?repositoryId=${repositories[0].id}&baseline=1`
-                : "/report"
-            }
-            icon={<FileText className="size-4" />}
-            label="First report"
-            value="Open report"
+            href="/automation"
+            icon={<GitPullRequest className="size-4" />}
+            label="Focused PRs created"
+            value={formatAggregateCount(
+              aggregateStats.createdPrCount,
+              "PR",
+              "PRs",
+              statsAreLoading,
+              statsUnavailable
+            )}
           />
         </section>
 
@@ -163,7 +203,7 @@ export function App() {
               <p className="mt-2 text-sm text-muted-foreground">
                 {repositoriesQuery.isLoading
                   ? "Loading repositories"
-                  : `${repositories.length} active`}
+                  : `${repositories.length} active repositories`}
               </p>
             </div>
             <Button asChild variant="outline">
@@ -176,7 +216,8 @@ export function App() {
 
           <RepositoryList
             isLoading={repositoriesQuery.isLoading}
-            repositories={topRepositories}
+            repositories={repositories}
+            statsByRepositoryId={repositoryStatsById}
           />
         </section>
       </div>
@@ -214,9 +255,11 @@ function OverviewLink({
 function RepositoryList({
   isLoading,
   repositories,
+  statsByRepositoryId,
 }: {
   isLoading: boolean
   repositories: ManagedRepository[]
+  statsByRepositoryId: Map<string, RepositoryStatsView>
 }) {
   if (isLoading) {
     return (
@@ -239,22 +282,262 @@ function RepositoryList({
     <div className="mt-5 divide-y rounded-md border">
       {repositories.map((repository) => (
         <div
-          className="grid gap-2 px-3 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_8rem_8rem]"
+          className="grid gap-4 px-3 py-4 text-sm sm:grid-cols-2 lg:grid-cols-[minmax(0,1.35fr)_8rem_8rem_8rem_minmax(0,1fr)]"
           key={repository.id}
         >
-          <div className="min-w-0 truncate font-medium">
-            {repository.full_name}
+          <div className="min-w-0">
+            <a
+              className="block truncate font-medium underline-offset-4 hover:underline"
+              href={repositoryReportHref(
+                repository.id,
+                statsByRepositoryId.get(repository.id)?.hasBaseline ?? false
+              )}
+            >
+              {repository.full_name}
+            </a>
+            <p className="mt-1 truncate text-xs text-muted-foreground">
+              {repository.default_branch || "unknown"} branch
+            </p>
           </div>
-          <div className="text-muted-foreground">
-            {repository.default_branch || "unknown"}
-          </div>
-          <div className="text-muted-foreground">
-            {repository.complexity.multiplier.toFixed(2)}x
-          </div>
+          <RepositoryStat
+            detail={latestReportLabel(statsByRepositoryId.get(repository.id))}
+            label="Reports"
+            value={repositoryCountLabel(
+              statsByRepositoryId.get(repository.id),
+              "report_count",
+              "report",
+              "reports"
+            )}
+          />
+          <RepositoryStat
+            detail={prOutcomeLabel(statsByRepositoryId.get(repository.id))}
+            label="PRs"
+            value={repositoryCountLabel(
+              statsByRepositoryId.get(repository.id),
+              "created_pr_count",
+              "PR",
+              "PRs"
+            )}
+          />
+          <RepositoryStat
+            detail={completedSessionLabel(
+              statsByRepositoryId.get(repository.id)
+            )}
+            label="Sessions"
+            value={repositoryCountLabel(
+              statsByRepositoryId.get(repository.id),
+              "session_count",
+              "session",
+              "sessions"
+            )}
+          />
+          <RepositoryStat
+            detail={prPlanLabel(statsByRepositoryId.get(repository.id))}
+            label="Status"
+            value={baselineLabel(statsByRepositoryId.get(repository.id))}
+          />
         </div>
       ))}
     </div>
   )
+}
+
+function RepositoryStat({
+  detail,
+  label,
+  value,
+}: {
+  detail: string
+  label: string
+  value: string
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <div className="mt-1 truncate font-semibold">{value}</div>
+      <div className="mt-1 truncate text-xs text-muted-foreground">
+        {detail}
+      </div>
+    </div>
+  )
+}
+
+function buildRepositoryStats(
+  repository: ManagedRepository,
+  query:
+    | {
+        data?: RepositoryAutomationResponse
+        isError: boolean
+        isLoading: boolean
+      }
+    | undefined
+): RepositoryStatsView {
+  if (!query || query.isLoading) {
+    return {
+      hasBaseline: false,
+      repositoryId: repository.id,
+      status: "loading",
+    }
+  }
+
+  if (query.isError || !query.data) {
+    return {
+      hasBaseline: false,
+      repositoryId: repository.id,
+      status: "error",
+    }
+  }
+
+  return {
+    hasBaseline: Boolean(query.data.baseline.commit_sha),
+    repositoryId: repository.id,
+    stats: query.data.stats,
+    status: "ready",
+  }
+}
+
+function aggregateRepositoryStats(repositoryStats: RepositoryStatsView[]) {
+  return repositoryStats.reduce(
+    (totals, repositoryStat) => {
+      if (repositoryStat.status !== "ready" || !repositoryStat.stats) {
+        return totals
+      }
+
+      return {
+        createdPrCount:
+          totals.createdPrCount + repositoryStat.stats.created_pr_count,
+        reportCount: totals.reportCount + repositoryStat.stats.report_count,
+      }
+    },
+    { createdPrCount: 0, reportCount: 0 }
+  )
+}
+
+function repositoryCountLabel(
+  stats: RepositoryStatsView | undefined,
+  field: keyof RepositoryAutomationResponse["stats"],
+  singular: string,
+  plural: string
+) {
+  if (!stats || stats.status === "loading") {
+    return "Loading"
+  }
+  if (stats.status === "error" || !stats.stats) {
+    return "Unavailable"
+  }
+
+  return countLabel(Number(stats.stats[field]), singular, plural)
+}
+
+function formatAggregateCount(
+  count: number,
+  singular: string,
+  plural: string,
+  isLoading: boolean,
+  isUnavailable: boolean
+) {
+  if (isLoading) {
+    return "Loading"
+  }
+  if (isUnavailable) {
+    return "Unavailable"
+  }
+
+  return countLabel(count, singular, plural)
+}
+
+function countLabel(count: number, singular: string, plural: string) {
+  return count === 1 ? `1 ${singular}` : `${count} ${plural}`
+}
+
+function latestReportLabel(stats: RepositoryStatsView | undefined) {
+  if (!stats || stats.status === "loading") {
+    return "Checking reports"
+  }
+  if (stats.status === "error" || !stats.stats) {
+    return "Report stats unavailable"
+  }
+
+  return stats.stats.latest_report_at
+    ? `Latest ${formatDate(stats.stats.latest_report_at)}`
+    : "No reports yet"
+}
+
+function prOutcomeLabel(stats: RepositoryStatsView | undefined) {
+  if (!stats || stats.status === "loading") {
+    return "Checking PRs"
+  }
+  if (stats.status === "error" || !stats.stats) {
+    return "PR stats unavailable"
+  }
+
+  return `${stats.stats.merged_pr_count} merged, ${stats.stats.blocked_pr_count} blocked`
+}
+
+function completedSessionLabel(stats: RepositoryStatsView | undefined) {
+  if (!stats || stats.status === "loading") {
+    return "Checking sessions"
+  }
+  if (stats.status === "error" || !stats.stats) {
+    return "Session stats unavailable"
+  }
+
+  return countLabel(
+    stats.stats.completed_session_count,
+    "completed",
+    "completed"
+  )
+}
+
+function prPlanLabel(stats: RepositoryStatsView | undefined) {
+  if (!stats || stats.status === "loading") {
+    return "Checking status"
+  }
+  if (stats.status === "error" || !stats.stats) {
+    return "Status unavailable"
+  }
+
+  return countLabel(stats.stats.pr_plan_count, "PR plan", "PR plans")
+}
+
+function baselineLabel(stats: RepositoryStatsView | undefined) {
+  if (!stats || stats.status === "loading") {
+    return "Loading"
+  }
+  if (stats.status === "error") {
+    return "Unavailable"
+  }
+
+  return stats.hasBaseline ? "Baseline ready" : "No baseline"
+}
+
+function firstReportHref(
+  repository: ManagedRepository | undefined,
+  stats: RepositoryStatsView | undefined
+) {
+  if (!repository) {
+    return "/report"
+  }
+
+  return repositoryReportHref(repository.id, stats?.hasBaseline ?? false)
+}
+
+function repositoryReportHref(repositoryId: string, hasBaseline: boolean) {
+  return hasBaseline
+    ? `/report?repositoryId=${repositoryId}&baseline=1`
+    : `/report?repositoryId=${repositoryId}`
+}
+
+function formatDate(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return "unknown date"
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+  }).format(date)
 }
 
 function OverviewState({

@@ -38,6 +38,17 @@ const automationBaselineSchema = v.object({
   promoted_at: v.nullable(v.string()),
 })
 
+const automationStatsSchema = v.object({
+  report_count: v.number(),
+  session_count: v.number(),
+  completed_session_count: v.number(),
+  pr_plan_count: v.number(),
+  created_pr_count: v.number(),
+  merged_pr_count: v.number(),
+  blocked_pr_count: v.number(),
+  latest_report_at: v.nullable(v.string()),
+})
+
 const automationEffectiveSchema = v.object({
   autonomous_pr_add_on_enabled: v.boolean(),
   can_create_autonomous_prs: v.boolean(),
@@ -84,6 +95,7 @@ const repositoryAutomationResponseSchema = v.object({
   schema_version: v.literal("1.0"),
   repository: automationRepositorySchema,
   baseline: automationBaselineSchema,
+  stats: automationStatsSchema,
   policy: repositoryAutomationPolicySchema,
   effective: automationEffectiveSchema,
   permissions: automationPermissionsSchema,
@@ -199,12 +211,15 @@ async function requestJson<T>(
     method?: "GET" | "PATCH" | "POST"
   } = {}
 ): Promise<T> {
-  const response = await fetcher(buildGithubOnboardingApiUrl(path, apiBaseUrl), {
-    body: body == null ? undefined : JSON.stringify(body),
-    credentials: "include",
-    headers: requestHeaders(body),
-    method,
-  })
+  const response = await fetcher(
+    buildGithubOnboardingApiUrl(path, apiBaseUrl),
+    {
+      body: body == null ? undefined : JSON.stringify(body),
+      credentials: "include",
+      headers: requestHeaders(body),
+      method,
+    }
+  )
 
   if (!response.ok) {
     throw new AutomationRequestError(response.status, response.statusText)
