@@ -64,6 +64,47 @@ const EMPTY_ORGANIZATIONS: Organization[] = []
 const EMPTY_REPOSITORIES: ManagedRepository[] = []
 const REPOSITORY_SELECTION_STORAGE_KEY =
   "codebase-gardener:automation:repository-selection"
+const ACTIVE_AUTOMATION_REFETCH_INTERVAL_MS = 3_000
+const IDLE_AUTOMATION_REFETCH_INTERVAL_MS = 15_000
+const PENDING_STATUS_VALUES = new Set([
+  "queued",
+  "pending",
+  "scheduled",
+  "waiting",
+])
+const RUNNING_STATUS_VALUES = new Set([
+  "running",
+  "in_progress",
+  "processing",
+  "executing",
+  "retrying",
+  "observe",
+  "observing",
+  "diagnose",
+  "diagnosing",
+  "forecast",
+  "forecasting",
+  "plan",
+  "planning",
+  "execute",
+  "learn",
+  "learning",
+])
+const SUCCESS_STATUS_VALUES = new Set([
+  "completed",
+  "succeeded",
+  "success",
+  "done",
+])
+const DANGER_STATUS_VALUES = new Set([
+  "failed",
+  "blocked",
+  "error",
+  "canceled",
+  "cancelled",
+  "timeout",
+  "timed_out",
+])
 
 const MODE_OPTIONS: Array<{
   label: string
@@ -151,6 +192,8 @@ export function AutomationPage() {
         selectedRepositoryId ?? ""
       ),
     enabled: Boolean(selectedOrganizationId && selectedRepositoryId),
+    refetchInterval: (query) =>
+      automationRefetchInterval(query.state.data),
     retry: false,
   })
 
@@ -351,6 +394,7 @@ export function AutomationPage() {
             }
             draft={currentDraft}
             isDirty={dirty}
+            isRefreshing={automationQuery.isFetching && !automationQuery.isLoading}
             isLoading={automationQuery.isLoading}
             isSaving={saveMutation.isPending}
             isTriggering={triggerMutation.isPending}
@@ -387,6 +431,7 @@ function AutomationWorkspace({
   billingCanEditAddOn,
   draft,
   isDirty,
+  isRefreshing,
   isLoading,
   isSaving,
   isTriggering,
@@ -402,6 +447,7 @@ function AutomationWorkspace({
   billingCanEditAddOn: boolean
   draft: AutomationDraft | null
   isDirty: boolean
+  isRefreshing: boolean
   isLoading: boolean
   isSaving: boolean
   isTriggering: boolean
@@ -516,7 +562,10 @@ function AutomationWorkspace({
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
-        <RecentSessions sessions={automation.recent_sessions} />
+        <RecentSessions
+          isRefreshing={isRefreshing}
+          sessions={automation.recent_sessions}
+        />
         <RecentPrPlans plans={automation.recent_pr_plans} />
       </section>
     </>
@@ -731,30 +780,52 @@ function BaselineReportLink({
 }
 
 function RecentSessions({
+  isRefreshing,
   sessions,
 }: {
+  isRefreshing: boolean
   sessions: RepositoryAutomationResponse["recent_sessions"]
 }) {
   return (
     <section className="rounded-md border bg-card p-5 text-card-foreground">
-      <h2 className="text-sm font-semibold">Recent sessions</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold">Recent sessions</h2>
+        {isRefreshing ? (
+          <span className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-xs font-medium text-muted-foreground">
+            <RefreshCw className="size-3 animate-spin" />
+            Syncing
+          </span>
+        ) : null}
+      </div>
       {sessions.length === 0 ? (
         <p className="mt-4 text-sm text-muted-foreground">No sessions yet</p>
       ) : (
-        <div className="mt-4 divide-y rounded-md border">
+        <div aria-live="polite" className="mt-4 divide-y rounded-md border">
           {sessions.map((session) => (
-            <div className="flex items-center justify-between gap-3 p-3" key={session.id}>
+            <div
+              className="flex items-start justify-between gap-3 p-3 transition-colors"
+              key={session.id}
+            >
               <div className="min-w-0">
-                <div className="truncate text-sm font-medium">
-                  {triggerName(session.trigger)}
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-sm font-medium">
+                    {triggerName(session.trigger)}
+                  </span>
+                  {session.has_drift_report ? (
+                    <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                      Drift
+                    </span>
+                  ) : null}
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {session.current_commit_sha
-                    ? `${shortSha(session.current_commit_sha)}${
-                        session.has_drift_report ? " · drift" : ""
-                      }`
-                    : formatDate(session.created_at)}
+                <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  <span>{sessionContext(session)}</span>
+                  <span>{sessionTimeLabel(session)}</span>
                 </div>
+                {session.last_error ? (
+                  <p className="mt-2 break-words text-xs leading-5 text-destructive">
+                    {session.last_error}
+                  </p>
+                ) : null}
               </div>
               <StatusPill value={session.status} />
             </div>
@@ -908,15 +979,13 @@ function MetricLine({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function StatusPill({ value }: { value: string }) {
-  const tone =
-    value === "completed" || value === "succeeded"
-      ? "bg-primary/10 text-primary"
-      : value === "blocked" || value === "failed"
-        ? "bg-destructive/10 text-destructive"
-        : "bg-muted text-muted-foreground"
+  const status = statusPresentation(value)
   return (
-    <span className={`shrink-0 rounded-md px-2 py-1 text-xs font-medium ${tone}`}>
-      {formatStatus(value)}
+    <span
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-semibold ${status.tone}`}
+    >
+      {status.icon}
+      {status.label}
     </span>
   )
 }
@@ -1050,12 +1119,22 @@ function formatPercent(value: number) {
 }
 
 function formatStatus(value: string) {
-  return value.replaceAll("_", " ")
+  const words = value
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .split(" ")
+    .filter(Boolean)
+  if (words.length === 0) {
+    return "Unknown"
+  }
+  return words
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ")
 }
 
 function triggerName(trigger: Record<string, unknown>) {
   const type = trigger.type
-  return typeof type === "string" ? formatStatus(type) : "session"
+  return typeof type === "string" ? formatStatus(type) : "Session"
 }
 
 function formatDate(value: string) {
@@ -1086,4 +1165,91 @@ const BASELINE_REPORT_NAMES: Record<string, string> = {
 
 function shortSha(value: string) {
   return value.slice(0, 12)
+}
+
+function automationRefetchInterval(
+  automation: RepositoryAutomationResponse | undefined
+) {
+  if (!automation) {
+    return false
+  }
+  return automation.recent_sessions.some((session) =>
+    isActiveSessionStatus(session.status)
+  )
+    ? ACTIVE_AUTOMATION_REFETCH_INTERVAL_MS
+    : IDLE_AUTOMATION_REFETCH_INTERVAL_MS
+}
+
+function isActiveSessionStatus(value: string) {
+  const normalized = normalizeStatus(value)
+  return (
+    PENDING_STATUS_VALUES.has(normalized) ||
+    RUNNING_STATUS_VALUES.has(normalized)
+  )
+}
+
+function statusPresentation(value: string) {
+  const normalized = normalizeStatus(value)
+  const label = formatStatus(value)
+  if (SUCCESS_STATUS_VALUES.has(normalized)) {
+    return {
+      icon: <CheckCircle2 className="size-3.5" />,
+      label,
+      tone: "border-primary/30 bg-primary/10 text-primary",
+    }
+  }
+  if (DANGER_STATUS_VALUES.has(normalized)) {
+    return {
+      icon: <AlertTriangle className="size-3.5" />,
+      label,
+      tone: "border-destructive/30 bg-destructive/10 text-destructive",
+    }
+  }
+  if (RUNNING_STATUS_VALUES.has(normalized)) {
+    return {
+      icon: <CircleDashed className="size-3.5 animate-spin" />,
+      label,
+      tone: "border-primary/30 bg-primary/10 text-primary",
+    }
+  }
+  if (PENDING_STATUS_VALUES.has(normalized)) {
+    return {
+      icon: <CalendarClock className="size-3.5" />,
+      label,
+      tone: "border-border bg-muted text-muted-foreground",
+    }
+  }
+  return {
+    icon: <CircleDashed className="size-3.5" />,
+    label,
+    tone: "border-border bg-muted text-muted-foreground",
+  }
+}
+
+function normalizeStatus(value: string) {
+  return value.trim().toLowerCase().replaceAll("-", "_").replaceAll(" ", "_")
+}
+
+function sessionContext(
+  session: RepositoryAutomationResponse["recent_sessions"][number]
+) {
+  if (session.current_commit_sha) {
+    return shortSha(session.current_commit_sha)
+  }
+  if (isActiveSessionStatus(session.status)) {
+    return "Awaiting analysis"
+  }
+  return "No current analysis"
+}
+
+function sessionTimeLabel(
+  session: RepositoryAutomationResponse["recent_sessions"][number]
+) {
+  if (session.finished_at) {
+    return `Finished ${formatDate(session.finished_at)}`
+  }
+  if (session.started_at) {
+    return `Started ${formatDate(session.started_at)}`
+  }
+  return `Queued ${formatDate(session.created_at)}`
 }
