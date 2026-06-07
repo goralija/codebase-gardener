@@ -36,8 +36,8 @@ services-check:
 
 runtime-check: services backend-migrate backend-check
 
-dev: services
-	$(MAKE) -j3 backend-dev frontend-dev cloudflare-tunnel-dev
+dev: services backend-migrate
+	$(MAKE) -j4 backend-dev worker-dev frontend-dev cloudflare-tunnel-dev
 
 backend-dev:
 	cd backend && uv run python manage.py runserver 0.0.0.0:8000

@@ -62,3 +62,30 @@ def repository_report(_request, repository_id):
     serializer = FirstReportFixtureSerializer(data=payload)
     serializer.is_valid(raise_exception=True)
     return Response(serializer.validated_data)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def repository_baseline_report(_request, repository_id):
+    """Latest promoted baseline analysis for one repository as a FirstReport.
+
+    NOTE: AllowAny for local testing; production must scope by membership.
+    """
+    repository = ManagedRepository.objects.filter(id=repository_id).first()
+    if repository is None:
+        return api_error_response(
+            "not_found", "Repository not found.", status_code=status.HTTP_404_NOT_FOUND
+        )
+
+    baseline = storage_service.get_latest_relevant_baseline(repository)
+    if baseline is None:
+        return api_error_response(
+            "no_baseline_analysis",
+            "No baseline analysis has been promoted for this repository yet.",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+    payload = storage_service.load_first_report(baseline)
+    serializer = FirstReportFixtureSerializer(data=payload)
+    serializer.is_valid(raise_exception=True)
+    return Response(serializer.validated_data)

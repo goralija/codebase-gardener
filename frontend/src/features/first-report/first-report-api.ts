@@ -5,6 +5,8 @@ const DEFAULT_API_BASE_URL = "/api/v1"
 type FetchFirstReportOptions = {
   apiBaseUrl?: string
   fetcher?: typeof fetch
+  repositoryId?: string | null
+  baseline?: boolean
 }
 
 export class FirstReportNotReadyError extends Error {
@@ -47,9 +49,17 @@ export function buildApiUrl(
 
 export async function fetchFirstReport({
   apiBaseUrl,
+  baseline = false,
   fetcher = fetch,
+  repositoryId,
 }: FetchFirstReportOptions = {}): Promise<FirstReport> {
-  const response = await fetcher(buildApiUrl("/reports/first/", apiBaseUrl), {
+  const reportPath =
+    repositoryId && baseline
+      ? `/reports/repository/${repositoryId}/baseline/`
+      : repositoryId
+        ? `/reports/repository/${repositoryId}/`
+        : "/reports/first/"
+  const response = await fetcher(buildApiUrl(reportPath, apiBaseUrl), {
     headers: {
       Accept: "application/json",
     },

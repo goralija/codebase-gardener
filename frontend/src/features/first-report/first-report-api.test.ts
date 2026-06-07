@@ -48,6 +48,26 @@ describe("first report API", () => {
     })
   })
 
+  it("fetches the promoted repository baseline report when requested", async () => {
+    const fetcher = fetcherReturning(jsonResponse(firstReportFixture))
+
+    await fetchFirstReport({
+      apiBaseUrl: "/api/v1",
+      baseline: true,
+      fetcher,
+      repositoryId: "repo-1",
+    })
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/v1/reports/repository/repo-1/baseline/",
+      expect.objectContaining({
+        headers: {
+          Accept: "application/json",
+        },
+      })
+    )
+  })
+
   it("treats 404 as first report not ready", async () => {
     await expect(
       fetchFirstReport({
