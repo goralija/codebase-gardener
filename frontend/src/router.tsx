@@ -4,45 +4,103 @@ import {
   createRouter,
 } from "@tanstack/react-router"
 
-import App from "@/App.tsx"
-import { AppShell } from "@/components/app-shell"
-import { AutomationPage } from "@/features/automation"
-import { FirstReportPage } from "@/features/first-report"
-import { GithubOnboardingPage } from "@/features/github-onboarding"
+import { CockpitShell } from "@/cockpit/shell"
+import { AutomationPage } from "@/cockpit/pages/automation"
+import {
+  OpportunitiesPage,
+  PullsPage,
+  SessionsPage,
+} from "@/cockpit/pages/cross-org"
+import { ConstitutionPage, EntropyPage } from "@/cockpit/pages/entropy"
+import { GithubPage } from "@/cockpit/pages/github"
+import { OverviewPage } from "@/cockpit/pages/overview"
+import { RepoDetailPage } from "@/cockpit/pages/repo-detail"
+import { RepositoriesPage } from "@/cockpit/pages/repositories"
 
 const rootRoute = createRootRoute({
-  component: AppShell,
+  component: CockpitShell,
 })
 
 const indexRoute = createRoute({
+  component: OverviewPage,
   getParentRoute: () => rootRoute,
   path: "/",
-  component: App,
 })
 
-const githubOnboardingRoute = createRoute({
+const repositoriesRoute = createRoute({
+  component: RepositoriesPage,
   getParentRoute: () => rootRoute,
-  path: "/onboarding/github",
-  component: GithubOnboardingPage,
+  path: "/repos",
+})
+
+type RepoSearch = { tab?: string }
+
+const repoDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/repo/$repoId",
+  validateSearch: (search: Record<string, unknown>): RepoSearch => ({
+    tab: typeof search.tab === "string" ? search.tab : undefined,
+  }),
+  component: function RepoDetailRouteComponent() {
+    const { repoId } = repoDetailRoute.useParams()
+    const { tab } = repoDetailRoute.useSearch()
+    return <RepoDetailPage repoId={repoId} tab={tab} />
+  },
+})
+
+const entropyRoute = createRoute({
+  component: EntropyPage,
+  getParentRoute: () => rootRoute,
+  path: "/entropy",
+})
+
+const constitutionRoute = createRoute({
+  component: ConstitutionPage,
+  getParentRoute: () => rootRoute,
+  path: "/constitution",
+})
+
+const opportunitiesRoute = createRoute({
+  component: OpportunitiesPage,
+  getParentRoute: () => rootRoute,
+  path: "/opportunities",
+})
+
+const sessionsRoute = createRoute({
+  component: SessionsPage,
+  getParentRoute: () => rootRoute,
+  path: "/sessions",
+})
+
+const pullsRoute = createRoute({
+  component: PullsPage,
+  getParentRoute: () => rootRoute,
+  path: "/pulls",
 })
 
 const automationRoute = createRoute({
+  component: AutomationPage,
   getParentRoute: () => rootRoute,
   path: "/automation",
-  component: AutomationPage,
 })
 
-const reportRoute = createRoute({
+const githubOnboardingRoute = createRoute({
+  component: GithubPage,
   getParentRoute: () => rootRoute,
-  path: "/report",
-  component: FirstReportPage,
+  path: "/onboarding/github",
 })
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  repositoriesRoute,
+  repoDetailRoute,
+  entropyRoute,
+  constitutionRoute,
+  opportunitiesRoute,
+  sessionsRoute,
+  pullsRoute,
   automationRoute,
   githubOnboardingRoute,
-  reportRoute,
 ])
 
 export const router = createRouter({ routeTree })
