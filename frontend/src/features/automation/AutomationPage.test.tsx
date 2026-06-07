@@ -123,6 +123,42 @@ function mockAutomationFetch(repositories = [repositoryPayload()]) {
   )
 }
 
+function mockAutomationFetchSequence(automationStates: unknown[]) {
+  let automationReadCount = 0
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost")
+      if (url.pathname === "/api/v1/organizations/") {
+        return jsonResponse(organizationsPayload())
+      }
+      if (url.pathname === "/api/v1/organizations/org-1/repositories/") {
+        return jsonResponse(repositoriesPayload())
+      }
+      if (url.pathname === "/api/v1/organizations/org-1/billing/") {
+        return jsonResponse(billingPayload())
+      }
+      if (
+        url.pathname ===
+        "/api/v1/organizations/org-1/repositories/repo-1/automation/"
+      ) {
+        const automationState =
+          automationStates[
+            Math.min(automationReadCount, automationStates.length - 1)
+          ]
+        automationReadCount += 1
+        return jsonResponse(automationState)
+      }
+      return new Response(null, { status: 404 })
+    })
+  )
+
+  return {
+    automationReadCount: () => automationReadCount,
+  }
+}
+
 describe("AutomationPage", () => {
   beforeEach(() => {
     installLocalStorage()
@@ -271,6 +307,35 @@ describe("AutomationPage", () => {
         })
       )
     })
+  })
+
+  it("refreshes active recent session statuses without a page reload", async () => {
+    const fetchSequence = mockAutomationFetchSequence([
+      automationWithSession({
+        current_analysis_id: null,
+        current_commit_sha: null,
+        finished_at: null,
+        has_drift_report: false,
+        started_at: null,
+        status: "queued",
+      }),
+      automationWithSession({
+        finished_at: "2026-06-06T08:02:00Z",
+        status: "completed",
+      }),
+    ])
+
+    renderPage()
+
+    expect(await screen.findByText("Queued")).toBeInTheDocument()
+    expect(screen.getByText("Awaiting analysis")).toBeInTheDocument()
+
+    expect(
+      await screen.findByText("Completed", {}, { timeout: 4_500 })
+    ).toBeInTheDocument()
+    expect(screen.getByText("def456curren")).toBeInTheDocument()
+    expect(screen.getByText("Drift")).toBeInTheDocument()
+    expect(fetchSequence.automationReadCount()).toBeGreaterThanOrEqual(2)
   })
 })
 
@@ -442,6 +507,21 @@ function automationPayload(repository = repositoryPayload()) {
         confidence: 0.94,
         confidence_threshold: 0.9,
         created_at: "2026-06-06T08:02:00Z",
+      },
+    ],
+  }
+}
+
+function automationWithSession(
+  session: Partial<ReturnType<typeof automationPayload>["recent_sessions"][number]>
+) {
+  const payload = automationPayload()
+  return {
+    ...payload,
+    recent_sessions: [
+      {
+        ...payload.recent_sessions[0],
+        ...session,
       },
     ],
   }
